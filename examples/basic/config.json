@@ -1,0 +1,10 @@
+{
+  "policy_providers": [
+    {
+      "type": "file",
+      "id": "local-policies",
+      "path": "../../testdata/policies.json",
+      "poll_interval_secs": 30
+    }
+  ]
+}
