@@ -10,8 +10,7 @@ matching and designed for hot-reload support.
   evaluation
 - **Hot Reload**: File-based policy providers support automatic reloading on
   change
-- **Thread-Safe**: Immutable snapshots with reference counting for concurrent
-  evaluation
+- **Thread-Safe**: Immutable snapshots for concurrent evaluation
 - **Extensible**: Provider interface for custom policy sources (file, HTTP,
   gRPC)
 - **Statistics**: Per-policy hit/drop/sample counters with atomic operations
@@ -99,7 +98,6 @@ func main() {
 
     // Get a snapshot for evaluation
     snapshot := registry.Snapshot()
-    defer snapshot.Release()
 
     // Create an engine
     engine := policy.NewPolicyEngine()
@@ -130,9 +128,8 @@ registry := policy.NewPolicyRegistry()
 handle, _ := registry.Register(fileProvider)
 handle, _ := registry.Register(httpProvider)
 
-// Get snapshot for evaluation (thread-safe)
+// Get snapshot for evaluation (thread-safe, immutable)
 snapshot := registry.Snapshot()
-defer snapshot.Release()
 
 // Collect stats
 stats := registry.CollectStats()
@@ -140,18 +137,17 @@ stats := registry.CollectStats()
 
 ### PolicySnapshot
 
-Snapshots are immutable, reference-counted views of compiled policies. They're
-safe for concurrent use across goroutines. Always call `Release()` when done.
+Snapshots are immutable, read-only views of compiled policies. They're safe for
+concurrent use across goroutines. The registry manages snapshot lifecycle
+automatically.
 
 ```go
 snapshot := registry.Snapshot()
-defer snapshot.Release()
 
 // Safe to use from multiple goroutines
 go func() {
-    snapshot.Retain() // Increment ref count
-    defer snapshot.Release()
-    // ... use snapshot
+    // snapshot is immutable and safe to share
+    result := engine.Evaluate(snapshot, record)
 }()
 ```
 
@@ -348,26 +344,6 @@ for _, s := range stats {
         s.PolicyID, s.Hits, s.Drops, s.Samples)
 }
 ```
-
-## Benchmarks
-
-Run benchmarks with:
-
-```bash
-task bench
-```
-
-Typical results on an M1 MacBook Pro:
-
-| Benchmark         | Time        | Allocations |
-| ----------------- | ----------- | ----------- |
-| EvaluateNoMatch   | ~700 ns/op  | 16 allocs   |
-| EvaluateMatchBody | ~1200 ns/op | 25 allocs   |
-| EvaluateParallel  | ~300 ns/op  | 25 allocs   |
-| Compile           | ~2ms/op     | 342 allocs  |
-| LoadPolicies      | ~50μs/op    | 200 allocs  |
-
-The library scales well with parallel evaluation due to immutable snapshots.
 
 ## TODO
 

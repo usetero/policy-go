@@ -6,6 +6,18 @@ import (
 	"github.com/usetero/policy-go/internal/engine"
 )
 
+// evalState holds reusable slices for policy evaluation to avoid allocations.
+type evalState struct {
+	matchCounts  []int
+	disqualified []bool
+}
+
+var evalStatePool = sync.Pool{
+	New: func() any {
+		return &evalState{}
+	},
+}
+
 // EvaluateResult represents the result of policy evaluation.
 type EvaluateResult int
 
@@ -44,9 +56,7 @@ func (r EvaluateResult) String() string {
 }
 
 // PolicyEngine evaluates telemetry against compiled policies.
-type PolicyEngine struct {
-	scratchPool sync.Pool
-}
+type PolicyEngine struct{}
 
 // NewPolicyEngine creates a new PolicyEngine.
 func NewPolicyEngine() *PolicyEngine {
@@ -54,30 +64,53 @@ func NewPolicyEngine() *PolicyEngine {
 }
 
 // Evaluate checks a log record against the snapshot and returns the result.
-// This method is designed for zero allocations in the hot path.
+// This method uses index-based arrays instead of maps for better performance.
 func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) EvaluateResult {
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
 	}
 
 	matchers := snapshot.matchers
+	policyCount := matchers.PolicyCount()
+	if policyCount == 0 {
+		return ResultNoMatch
+	}
 
-	// Track which policies have all matchers satisfied
-	// Using a map here, but could optimize with a bitset for zero-alloc
-	matchCounts := make(map[string]int)
-	disqualified := make(map[string]bool)
+	// Get evaluation state from pool
+	state := evalStatePool.Get().(*evalState)
+	defer evalStatePool.Put(state)
+
+	// Ensure slices are sized correctly and cleared
+	if cap(state.matchCounts) < policyCount {
+		state.matchCounts = make([]int, policyCount)
+		state.disqualified = make([]bool, policyCount)
+	} else {
+		state.matchCounts = state.matchCounts[:policyCount]
+		state.disqualified = state.disqualified[:policyCount]
+		for i := range state.matchCounts {
+			state.matchCounts[i] = 0
+			state.disqualified[i] = false
+		}
+	}
+
+	matchCounts := state.matchCounts
+	disqualified := state.disqualified
 
 	// Process existence checks first
 	for _, check := range matchers.ExistenceChecks() {
+		if disqualified[check.PolicyIndex] {
+			continue
+		}
+
 		value := record.GetField(check.Selector)
 		exists := value != nil || len(value) > 0
 
 		if check.MustExist && !exists {
-			disqualified[check.PolicyID] = true
+			disqualified[check.PolicyIndex] = true
 		} else if !check.MustExist && exists {
-			disqualified[check.PolicyID] = true
+			disqualified[check.PolicyIndex] = true
 		} else {
-			matchCounts[check.PolicyID]++
+			matchCounts[check.PolicyIndex]++
 		}
 	}
 
@@ -90,7 +123,7 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) Eval
 			if !key.Negated {
 				// Mark all policies using this database as disqualified
 				for _, ref := range db.PatternIndex() {
-					disqualified[ref.PolicyID] = true
+					disqualified[ref.PolicyIndex] = true
 				}
 			}
 			continue
@@ -104,42 +137,42 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) Eval
 
 		// Update match counts based on results
 		for patternID, ref := range db.PatternIndex() {
-			if disqualified[ref.PolicyID] {
+			if disqualified[ref.PolicyIndex] {
 				continue
 			}
 
 			if key.Negated {
 				// Negated match - pattern should NOT match
 				if matched[patternID] {
-					disqualified[ref.PolicyID] = true
+					disqualified[ref.PolicyIndex] = true
 				} else {
-					matchCounts[ref.PolicyID]++
+					matchCounts[ref.PolicyIndex]++
 				}
 			} else {
 				// Normal match - pattern should match
 				if matched[patternID] {
-					matchCounts[ref.PolicyID]++
+					matchCounts[ref.PolicyIndex]++
 				}
 			}
 		}
+
+		// Return matched slice to pool
+		db.ReleaseMatched(matched)
 	}
 
 	// Find the most restrictive matching policy
 	var bestPolicy *engine.CompiledPolicy
 	bestRestrictiveness := -1
 
-	for policyID, count := range matchCounts {
-		if disqualified[policyID] {
+	for i := 0; i < policyCount; i++ {
+		if disqualified[i] {
 			continue
 		}
 
-		policy, ok := matchers.GetPolicy(policyID)
-		if !ok {
-			continue
-		}
+		policy := matchers.PolicyByIndex(i)
 
 		// Check if all matchers are satisfied
-		if count < policy.MatcherCount {
+		if matchCounts[i] < policy.MatcherCount {
 			continue
 		}
 

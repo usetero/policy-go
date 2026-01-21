@@ -321,7 +321,6 @@ func TestConfigLoaderLoad(t *testing.T) {
 	// Verify policies were loaded
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	_, ok := snapshot.GetPolicy("test-policy")
 	assert.True(t, ok, "expected to find test-policy in snapshot")
@@ -441,7 +440,6 @@ func TestConfigLoaderLoadMultipleProviders(t *testing.T) {
 	// Verify both policies were loaded
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	_, ok := snapshot.GetPolicy("policy-1")
 	assert.True(t, ok, "expected to find policy-1 in snapshot")
@@ -500,7 +498,7 @@ func TestConfigLoaderLoadPartialFailure(t *testing.T) {
 	// so the registry should have no policies
 	snapshot := registry.Snapshot()
 	if snapshot != nil {
-		defer snapshot.Release()
+
 		// Check that the policy from provider-1 was rolled back
 		_, ok := snapshot.GetPolicy("policy-1")
 		assert.False(t, ok, "expected policy-1 to be rolled back")

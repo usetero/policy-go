@@ -470,27 +470,27 @@ func TestCompiledDatabaseScan(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected map[int]bool
+		expected []bool
 	}{
 		{
 			name:     "Matches error",
 			input:    "this is an error message",
-			expected: map[int]bool{0: true},
+			expected: []bool{true, false},
 		},
 		{
 			name:     "Matches warning",
 			input:    "this is a warning message",
-			expected: map[int]bool{1: true},
+			expected: []bool{false, true},
 		},
 		{
 			name:     "Matches both",
 			input:    "error and warning together",
-			expected: map[int]bool{0: true, 1: true},
+			expected: []bool{true, true},
 		},
 		{
 			name:     "Matches neither",
 			input:    "just a normal message",
-			expected: map[int]bool{},
+			expected: []bool{false, false},
 		},
 	}
 
@@ -498,15 +498,7 @@ func TestCompiledDatabaseScan(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			matched, err := db.Scan([]byte(tt.input))
 			require.NoError(t, err)
-
-			for id, expected := range tt.expected {
-				assert.Equal(t, expected, matched[id], "pattern %d", id)
-			}
-
-			// Check no unexpected matches
-			for id := range matched {
-				assert.True(t, tt.expected[id], "unexpected match for pattern %d", id)
-			}
+			assert.Equal(t, tt.expected, matched)
 		})
 	}
 }
@@ -550,7 +542,7 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 			for j := 0; j < 100; j++ {
 				matched, err := db.Scan([]byte("this is a test message"))
 				assert.NoError(t, err)
-				assert.True(t, matched[0], "expected pattern to match")
+				assert.True(t, len(matched) > 0 && matched[0], "expected pattern to match")
 			}
 			done <- true
 		}()
@@ -699,6 +691,64 @@ func TestPatternIndexMapping(t *testing.T) {
 		if didMatch {
 			ref := patternIndex[patternID]
 			assert.Equal(t, "policy-a", ref.PolicyID)
+		}
+	}
+}
+
+func TestPolicyIndex(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"policy-0": {},
+		"policy-1": {},
+		"policy-2": {},
+	}
+
+	policies := []*Policy{
+		{
+			ID:   "policy-0",
+			Name: "Policy 0",
+			Log: &LogPolicy{
+				Matchers: []Matcher{{Field: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody}, Pattern: "a"}},
+				Keep:     Keep{Action: KeepNone},
+			},
+		},
+		{
+			ID:   "policy-1",
+			Name: "Policy 1",
+			Log: &LogPolicy{
+				Matchers: []Matcher{{Field: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody}, Pattern: "b"}},
+				Keep:     Keep{Action: KeepAll},
+			},
+		},
+		{
+			ID:   "policy-2",
+			Name: "Policy 2",
+			Log: &LogPolicy{
+				Matchers: []Matcher{{Field: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody}, Pattern: "c"}},
+				Keep:     Keep{Action: KeepNone},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	// Verify PolicyCount
+	assert.Equal(t, 3, compiled.PolicyCount())
+
+	// Verify PolicyByIndex returns correct policies
+	for i := 0; i < 3; i++ {
+		policy := compiled.PolicyByIndex(i)
+		assert.Equal(t, i, policy.Index)
+	}
+
+	// Verify pattern refs have correct policy index
+	for _, db := range compiled.Databases() {
+		for _, ref := range db.PatternIndex() {
+			policy, ok := compiled.GetPolicy(ref.PolicyID)
+			require.True(t, ok)
+			assert.Equal(t, policy.Index, ref.PolicyIndex)
 		}
 	}
 }

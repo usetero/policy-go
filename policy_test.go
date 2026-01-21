@@ -51,7 +51,6 @@ func TestRegistryAndSnapshot(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	// Check that we can iterate over policies
 	count := 0
@@ -73,7 +72,6 @@ func TestEngineEvaluateDropDebugLogs(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -97,7 +95,6 @@ func TestEngineEvaluateDropBySeverity(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -120,7 +117,6 @@ func TestEngineEvaluateNoMatch(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -147,7 +143,6 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -173,7 +168,6 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -199,7 +193,6 @@ func TestEngineEvaluateAllNegatedMatchersPass(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -226,7 +219,6 @@ func TestEngineEvaluateAllNegatedMatchersFailOne(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -253,7 +245,6 @@ func TestEngineEvaluateAllNegatedMatchersFailBoth(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
@@ -279,7 +270,6 @@ func TestStatsCollection(t *testing.T) {
 
 	snapshot := registry.Snapshot()
 	require.NotNil(t, snapshot)
-	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 

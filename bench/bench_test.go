@@ -58,7 +58,6 @@ func setupBenchmark(b *testing.B) (*policy.PolicyRegistry, *policy.PolicySnapsho
 // BenchmarkEvaluateNoMatch benchmarks evaluation when no policy matches.
 func BenchmarkEvaluateNoMatch(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	record := &BenchLogRecord{
 		Body:         []byte("normal application log message"),
@@ -76,7 +75,6 @@ func BenchmarkEvaluateNoMatch(b *testing.B) {
 // BenchmarkEvaluateMatchBody benchmarks evaluation matching on body field.
 func BenchmarkEvaluateMatchBody(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Matches "drop-debug-logs" policy (body contains "debug" AND "trace")
 	record := &BenchLogRecord{
@@ -95,7 +93,6 @@ func BenchmarkEvaluateMatchBody(b *testing.B) {
 // BenchmarkEvaluateMatchSeverity benchmarks evaluation matching on severity_text.
 func BenchmarkEvaluateMatchSeverity(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Matches "drop-debug-level" policy (severity_text = DEBUG)
 	record := &BenchLogRecord{
@@ -114,7 +111,6 @@ func BenchmarkEvaluateMatchSeverity(b *testing.B) {
 // BenchmarkEvaluateMatchLogAttribute benchmarks evaluation matching on log attribute.
 func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Matches "drop-echo-logs" policy (ddsource = nginx)
 	record := &BenchLogRecord{
@@ -136,7 +132,6 @@ func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
 // BenchmarkEvaluateMatchResourceAttribute benchmarks evaluation matching on resource attribute.
 func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Matches "drop-edge-logs" policy (service.name ends with "edge")
 	record := &BenchLogRecord{
@@ -158,7 +153,6 @@ func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
 // BenchmarkEvaluateParallel benchmarks parallel evaluation.
 func BenchmarkEvaluateParallel(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	record := &BenchLogRecord{
 		Body:         []byte("this is a debug trace message"),
@@ -193,10 +187,7 @@ func BenchmarkCompile(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Failed to register provider: %v", err)
 		}
-		snapshot := registry.Snapshot()
-		if snapshot != nil {
-			snapshot.Release()
-		}
+		_ = registry.Snapshot()
 	}
 
 	_ = policies // silence unused warning
@@ -218,7 +209,6 @@ func BenchmarkLoadPolicies(b *testing.B) {
 // BenchmarkEvaluateMixedWorkload benchmarks a mixed workload of different log types.
 func BenchmarkEvaluateMixedWorkload(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	records := []*BenchLogRecord{
 		// No match
@@ -246,7 +236,6 @@ func BenchmarkEvaluateMixedWorkload(b *testing.B) {
 // BenchmarkSnapshotGetPolicy benchmarks snapshot policy lookup.
 func BenchmarkSnapshotGetPolicy(b *testing.B) {
 	_, snapshot, _ := setupBenchmark(b)
-	defer snapshot.Release()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -259,7 +248,6 @@ func BenchmarkSnapshotGetPolicy(b *testing.B) {
 // BenchmarkStatsCollection benchmarks stats collection.
 func BenchmarkStatsCollection(b *testing.B) {
 	registry, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Generate some hits first
 	record := &BenchLogRecord{
@@ -281,7 +269,6 @@ func BenchmarkStatsCollection(b *testing.B) {
 // BenchmarkEvaluateLongBody benchmarks evaluation with a long body.
 func BenchmarkEvaluateLongBody(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Create a long body with the pattern at the end
 	longBody := make([]byte, 10000)
@@ -306,7 +293,6 @@ func BenchmarkEvaluateLongBody(b *testing.B) {
 // BenchmarkEvaluateWithManyAttributes benchmarks evaluation with many attributes.
 func BenchmarkEvaluateWithManyAttributes(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
-	defer snapshot.Release()
 
 	// Create a record with many attributes
 	logAttrs := make(map[string][]byte)

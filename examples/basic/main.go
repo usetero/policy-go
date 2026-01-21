@@ -64,7 +64,6 @@ func main() {
 
 	// Get a snapshot for evaluation
 	snapshot := registry.Snapshot()
-	defer snapshot.Release()
 
 	// Create an engine for evaluation
 	engine := policy.NewPolicyEngine()

@@ -80,15 +80,12 @@ func (r *PolicyRegistry) Unregister(handle ProviderHandle) {
 }
 
 // Snapshot returns the current read-only snapshot of compiled policies.
-// The snapshot is safe for concurrent use.
-// Callers should call Release() when done with the snapshot.
+// The snapshot is safe for concurrent use and remains valid even after
+// new policies are loaded (the registry maintains the old snapshot until
+// all references are released via garbage collection).
 func (r *PolicyRegistry) Snapshot() *PolicySnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
-	if r.snapshot != nil {
-		r.snapshot.Retain()
-	}
 	return r.snapshot
 }
 
@@ -146,12 +143,9 @@ func (r *PolicyRegistry) recompileLocked() {
 		return
 	}
 
-	// Release old snapshot
-	if r.snapshot != nil {
-		r.snapshot.Release()
-	}
-
 	// Create new snapshot
+	// Note: Old snapshots remain valid - Hyperscan resources are cleaned up
+	// by Go's garbage collector via finalizers set by the gohs library.
 	r.snapshot = newPolicySnapshot(compiled, r.stats)
 
 	if r.onRecompile != nil {
