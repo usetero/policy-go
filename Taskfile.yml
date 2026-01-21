@@ -138,3 +138,22 @@ tasks:
       - task: lint
       - task: test
       - task: build
+
+  # Proto
+  proto:export:
+    desc: Export proto files from buf registry
+    cmds:
+      - mkdir -p proto
+      - buf export buf.build/opentelemetry/opentelemetry -o proto
+      - buf export buf.build/tero/policy -o proto
+
+  proto:generate:
+    desc: Generate Go code from proto files
+    deps: [proto:export]
+    cmds:
+      - buf generate proto
+
+  proto:clean:
+    desc: Clean generated proto files
+    cmds:
+      - rm -rf proto internal/proto

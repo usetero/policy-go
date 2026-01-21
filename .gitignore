@@ -28,3 +28,6 @@ Thumbs.db
 
 # Build output
 dist/
+
+# Proto exports (regenerated from buf registry)
+proto/
