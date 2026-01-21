@@ -1,0 +1,140 @@
+version: "3"
+
+vars:
+  PROJECT_NAME: policy-go
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # Build tasks
+  build:
+    desc: Build the library
+    cmds:
+      - go build ./...
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - go clean ./...
+      - rm -rf coverage/
+
+  # Code quality
+  format:
+    desc: Format code
+    cmds:
+      - gofmt -w .
+
+  format:check:
+    desc: Check code formatting
+    cmds:
+      - test -z "$(gofmt -l .)"
+
+  lint:
+    desc: Run linter
+    cmds:
+      - go vet ./...
+
+  # Testing
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  test:verbose:
+    desc: Run tests with verbose output
+    cmds:
+      - go test -v ./...
+
+  test:coverage:
+    desc: Run tests with coverage
+    cmds:
+      - mkdir -p coverage
+      - go test -coverprofile=coverage/coverage.out ./...
+      - go tool cover -html=coverage/coverage.out -o coverage/coverage.html
+
+  # Dependencies
+  deps:
+    desc: Download dependencies
+    cmds:
+      - go mod download
+
+  deps:tidy:
+    desc: Tidy dependencies
+    cmds:
+      - go mod tidy
+
+  deps:update:
+    desc: Update dependencies
+    cmds:
+      - go get -u ./...
+      - go mod tidy
+
+  # Documentation
+  docs:
+    desc: Generate documentation
+    cmds:
+      - go doc -all ./...
+
+  # Development workflows
+  do:
+    desc: Format, lint, and test
+    aliases: [d]
+    cmds:
+      - task: format
+      - task: lint
+      - task: test
+      - echo "All checks passed"
+
+  release:
+    desc: Run all checks and build release
+    aliases: [r]
+    cmds:
+      - task: do
+      - task: build
+      - echo "Release build complete"
+
+  signoff:
+    desc: Run checks and sign off
+    aliases: [sign, s]
+    deps: [do]
+    cmds:
+      - gh signoff
+
+  # Information
+  info:
+    desc: Display project information
+    cmds:
+      - echo "Project - {{.PROJECT_NAME}}"
+      - go version
+      - go env GOVERSION GOOS GOARCH
+
+  # CI
+  ci:setup:
+    desc: Install CI dependencies (idempotent)
+    cmds:
+      - |
+        if ! command -v golangci-lint &> /dev/null; then
+          echo "Installing golangci-lint..."
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            brew install golangci-lint
+          elif command -v apt-get &> /dev/null; then
+            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+          elif command -v yum &> /dev/null; then
+            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+          else
+            echo "Warning: Could not find a supported package manager to install golangci-lint"
+          fi
+        else
+          echo "golangci-lint is already installed"
+        fi
+
+  ci:
+    desc: Run CI pipeline
+    cmds:
+      - task: format:check
+      - task: lint
+      - task: test
+      - task: build
