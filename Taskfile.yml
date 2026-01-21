@@ -55,6 +55,35 @@ tasks:
       - go test -coverprofile=coverage/coverage.out ./...
       - go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
+  # Benchmarks
+  bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -bench=. -benchmem ./bench/...
+
+  bench:cpu:
+    desc: Run benchmarks with CPU profiling
+    cmds:
+      - mkdir -p profiles
+      - go test -bench=. -benchmem -cpuprofile=profiles/cpu.prof ./bench/...
+      - echo "CPU profile saved to profiles/cpu.prof"
+      - echo "View with 'go tool pprof profiles/cpu.prof'"
+
+  bench:mem:
+    desc: Run benchmarks with memory profiling
+    cmds:
+      - mkdir -p profiles
+      - go test -bench=. -benchmem -memprofile=profiles/mem.prof ./bench/...
+      - echo "Memory profile saved to profiles/mem.prof"
+      - echo "View with 'go tool pprof profiles/mem.prof'"
+
+  bench:compare:
+    desc: Run benchmarks and save for comparison
+    cmds:
+      - go test -bench=. -benchmem -count=10 ./bench/... | tee bench.txt
+      - echo "Results saved to bench.txt"
+      - echo "Compare with 'benchstat old.txt new.txt'"
+
   # Dependencies
   deps:
     desc: Download dependencies

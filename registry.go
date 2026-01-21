@@ -123,6 +123,8 @@ func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*Policy) {
 	r.recompileLocked()
 }
 
+// recompileLocked recompiles the policies and updates the snapshot.
+// INVARIANT: A lock MUST be acquired.
 func (r *PolicyRegistry) recompileLocked() {
 	// Collect all policies from all providers
 	var allPolicies []*Policy

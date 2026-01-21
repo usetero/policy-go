@@ -60,6 +60,17 @@
       }
     },
     {
+      "id": "keep-non-debug-non-trace",
+      "name": "Keep logs that are NOT debug AND NOT trace",
+      "log": {
+        "match": [
+          { "log_field": "body", "regex": "debug", "negated": true },
+          { "log_field": "severity_text", "regex": "TRACE", "negated": true }
+        ],
+        "keep": "all"
+      }
+    },
+    {
       "id": "drop-system-load-metric",
       "name": "drop-system-load-metric",
       "metric": {

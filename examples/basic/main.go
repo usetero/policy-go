@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"path/filepath"
 
 	"github.com/usetero/policy-go"
 )
@@ -34,17 +33,34 @@ func (r *ExampleLogRecord) GetField(selector policy.FieldSelector) []byte {
 }
 
 func main() {
-	fmt.Printf("policy-go version: %s\n\n", policy.Version())
+	// Load configuration from JSON file
+	config, err := policy.LoadConfig("config.json")
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
 
 	// Create a registry to manage policies
 	registry := policy.NewPolicyRegistry()
 
-	// Load policies from a JSON file
-	provider := policy.NewFileProvider(filepath.Join("..", "..", "testdata", "policies.json"))
-	_, err := registry.Register(provider)
+	// Create a config loader with error handling
+	loader := policy.NewConfigLoader(registry).
+		WithOnError(func(err error) {
+			log.Printf("Provider error: %v", err)
+		})
+
+	// Load and register all providers from config
+	providers, err := loader.Load(config)
 	if err != nil {
-		log.Fatalf("Failed to register provider: %v", err)
+		log.Fatalf("Failed to load providers: %v", err)
 	}
+	defer policy.StopAll(providers)
+	defer policy.UnregisterAll(providers)
+
+	fmt.Printf("Loaded %d provider(s):\n", len(providers))
+	for _, p := range providers {
+		fmt.Printf("  - %s\n", p.ID)
+	}
+	fmt.Println()
 
 	// Get a snapshot for evaluation
 	snapshot := registry.Snapshot()

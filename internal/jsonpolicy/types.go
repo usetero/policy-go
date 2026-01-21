@@ -34,6 +34,9 @@ type LogMatcher struct {
 	Regex  string `json:"regex,omitempty"`
 	Exact  string `json:"exact,omitempty"`
 	Exists *bool  `json:"exists,omitempty"`
+
+	// Negated inverts the match condition
+	Negated bool `json:"negated,omitempty"`
 }
 
 // KeepValue handles the polymorphic "keep" field which can be:

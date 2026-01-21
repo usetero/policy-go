@@ -124,6 +124,7 @@ func (p *Parser) convertLogMatcher(m LogMatcher) (engine.Matcher, error) {
 	return engine.Matcher{
 		Field:   selector,
 		Pattern: pattern,
+		Negated: m.Negated,
 		Exists:  exists,
 	}, nil
 }

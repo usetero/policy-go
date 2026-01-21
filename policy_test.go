@@ -1,28 +1,22 @@
 package policy
 
 import (
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
-)
+	"time"
 
-func TestVersion(t *testing.T) {
-	v := Version()
-	if v == "" {
-		t.Error("Version() returned empty string")
-	}
-	if v != "0.1.0" {
-		t.Errorf("Version() = %q, want %q", v, "0.1.0")
-	}
-}
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestFileProviderLoad(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 	policies, err := provider.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	// We have 6 log policies in the test file
+	// We have 7 log policies in the test file
 	logPolicies := 0
 	for _, p := range policies {
 		if p.IsLogPolicy() {
@@ -30,33 +24,21 @@ func TestFileProviderLoad(t *testing.T) {
 		}
 	}
 
-	if logPolicies != 6 {
-		t.Errorf("got %d log policies, want 6", logPolicies)
-	}
+	assert.Equal(t, 7, logPolicies, "expected 7 log policies")
 
 	// Check first policy
-	found := false
+	var found *Policy
 	for _, p := range policies {
 		if p.ID == "drop-echo-logs" {
-			found = true
-			if p.Name != "drop-echo-logs" {
-				t.Errorf("policy name = %q, want %q", p.Name, "drop-echo-logs")
-			}
-			if !p.IsLogPolicy() {
-				t.Error("expected log policy")
-			}
-			if p.Log.Keep.Action != KeepNone {
-				t.Errorf("keep action = %v, want KeepNone", p.Log.Keep.Action)
-			}
-			if len(p.Log.Matchers) != 1 {
-				t.Errorf("got %d matchers, want 1", len(p.Log.Matchers))
-			}
+			found = p
 			break
 		}
 	}
-	if !found {
-		t.Error("policy 'drop-echo-logs' not found")
-	}
+	require.NotNil(t, found, "policy 'drop-echo-logs' not found")
+	assert.Equal(t, "drop-echo-logs", found.Name)
+	assert.True(t, found.IsLogPolicy())
+	assert.Equal(t, KeepNone, found.Log.Keep.Action)
+	assert.Len(t, found.Log.Matchers, 1)
 }
 
 func TestRegistryAndSnapshot(t *testing.T) {
@@ -64,32 +46,22 @@ func TestRegistryAndSnapshot(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	handle, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer handle.Unregister()
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	// Check that we can iterate over policies
 	count := 0
 	for id, p := range snapshot.Iter() {
-		if id == "" {
-			t.Error("policy ID is empty")
-		}
-		if p == nil {
-			t.Error("policy is nil")
-		}
+		assert.NotEmpty(t, id, "policy ID should not be empty")
+		assert.NotNil(t, p, "policy should not be nil")
 		count++
 	}
 
-	if count == 0 {
-		t.Error("no policies in snapshot")
-	}
+	assert.Greater(t, count, 0, "should have at least one policy")
 }
 
 func TestEngineEvaluateDropDebugLogs(t *testing.T) {
@@ -97,14 +69,10 @@ func TestEngineEvaluateDropDebugLogs(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
@@ -117,9 +85,7 @@ func TestEngineEvaluateDropDebugLogs(t *testing.T) {
 	}
 
 	result := engine.Evaluate(snapshot, debugTraceLog)
-	if result != ResultDrop {
-		t.Errorf("Evaluate() = %v, want ResultDrop", result)
-	}
+	assert.Equal(t, ResultDrop, result)
 }
 
 func TestEngineEvaluateDropBySeverity(t *testing.T) {
@@ -127,14 +93,10 @@ func TestEngineEvaluateDropBySeverity(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
@@ -146,9 +108,7 @@ func TestEngineEvaluateDropBySeverity(t *testing.T) {
 	}
 
 	result := engine.Evaluate(snapshot, debugLog)
-	if result != ResultDrop {
-		t.Errorf("Evaluate() = %v, want ResultDrop", result)
-	}
+	assert.Equal(t, ResultDrop, result)
 }
 
 func TestEngineEvaluateNoMatch(t *testing.T) {
@@ -156,28 +116,26 @@ func TestEngineEvaluateNoMatch(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
 
-	// Test log that doesn't match any policy
-	normalLog := &SimpleLogRecord{
-		BodyValue:         []byte("normal application log"),
+	// Test log that doesn't match any policy:
+	// - Contains "debug" so it fails the "keep-non-debug-non-trace" negated policy
+	// - Doesn't contain "trace" so it fails the "drop-debug-logs" AND policy (needs both)
+	// - Severity is INFO so it doesn't match "drop-debug-level"
+	// - No log attributes or resource attributes to match other policies
+	debugOnlyLog := &SimpleLogRecord{
+		BodyValue:         []byte("debug only message"),
 		SeverityTextValue: []byte("INFO"),
 	}
 
-	result := engine.Evaluate(snapshot, normalLog)
-	if result != ResultNoMatch {
-		t.Errorf("Evaluate() = %v, want ResultNoMatch", result)
-	}
+	result := engine.Evaluate(snapshot, debugOnlyLog)
+	assert.Equal(t, ResultNoMatch, result)
 }
 
 func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
@@ -185,14 +143,10 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
@@ -207,9 +161,7 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 	}
 
 	result := engine.Evaluate(snapshot, nginxLog)
-	if result != ResultDrop {
-		t.Errorf("Evaluate() = %v, want ResultDrop", result)
-	}
+	assert.Equal(t, ResultDrop, result)
 }
 
 func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
@@ -217,14 +169,10 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
@@ -239,9 +187,87 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 	}
 
 	result := engine.Evaluate(snapshot, edgeLog)
-	if result != ResultDrop {
-		t.Errorf("Evaluate() = %v, want ResultDrop", result)
+	assert.Equal(t, ResultDrop, result)
+}
+
+func TestEngineEvaluateAllNegatedMatchersPass(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	require.NotNil(t, snapshot)
+	defer snapshot.Release()
+
+	engine := NewPolicyEngine()
+
+	// Test log that should match "keep-non-debug-non-trace" policy
+	// which has ALL negated matchers:
+	// - body NOT contains "debug" (negated)
+	// - severity_text NOT contains "TRACE" (negated)
+	// This log has neither, so all negated conditions are satisfied
+	normalLog := &SimpleLogRecord{
+		BodyValue:         []byte("normal application message"),
+		SeverityTextValue: []byte("INFO"),
 	}
+
+	result := engine.Evaluate(snapshot, normalLog)
+	assert.Equal(t, ResultKeep, result, "all negated matchers should pass")
+}
+
+func TestEngineEvaluateAllNegatedMatchersFailOne(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	require.NotNil(t, snapshot)
+	defer snapshot.Release()
+
+	engine := NewPolicyEngine()
+
+	// Test log that should NOT match "keep-non-debug-non-trace" policy
+	// because body contains "debug" (fails the negated matcher)
+	debugLog := &SimpleLogRecord{
+		BodyValue:         []byte("this is a debug message"),
+		SeverityTextValue: []byte("INFO"),
+	}
+
+	result := engine.Evaluate(snapshot, debugLog)
+	// Should either be no match or match a different policy (like drop-debug-logs if it has trace too)
+	// Since this log only has "debug" but not "trace", it won't match drop-debug-logs either
+	// So it should be no match (the negated policy fails, no other policy matches)
+	assert.NotEqual(t, ResultKeep, result, "negated body matcher should fail")
+}
+
+func TestEngineEvaluateAllNegatedMatchersFailBoth(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	require.NotNil(t, snapshot)
+	defer snapshot.Release()
+
+	engine := NewPolicyEngine()
+
+	// Test log that fails BOTH negated matchers:
+	// - body contains "debug" (fails negated)
+	// - severity_text is "TRACE" (fails negated)
+	traceDebugLog := &SimpleLogRecord{
+		BodyValue:         []byte("debug information here"),
+		SeverityTextValue: []byte("TRACE"),
+	}
+
+	result := engine.Evaluate(snapshot, traceDebugLog)
+	// Should NOT match the all-negated policy
+	assert.NotEqual(t, ResultKeep, result, "both negated matchers should fail")
 }
 
 func TestStatsCollection(t *testing.T) {
@@ -249,14 +275,10 @@ func TestStatsCollection(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		t.Fatal("Snapshot() returned nil")
-	}
+	require.NotNil(t, snapshot)
 	defer snapshot.Release()
 
 	engine := NewPolicyEngine()
@@ -271,25 +293,192 @@ func TestStatsCollection(t *testing.T) {
 
 	// Collect stats
 	stats := registry.CollectStats()
-	if len(stats) == 0 {
-		t.Fatal("CollectStats() returned empty")
-	}
+	require.NotEmpty(t, stats)
 
 	// Find stats for drop-debug-level
-	found := false
+	var found *PolicyStatsSnapshot
 	for _, s := range stats {
 		if s.PolicyID == "drop-debug-level" {
-			found = true
-			if s.Hits == 0 {
-				t.Error("expected hits > 0 for drop-debug-level")
-			}
-			if s.Drops == 0 {
-				t.Error("expected drops > 0 for drop-debug-level")
-			}
+			found = &s
 			break
 		}
 	}
-	if !found {
-		t.Error("stats for 'drop-debug-level' not found")
+	require.NotNil(t, found, "stats for 'drop-debug-level' not found")
+	assert.Greater(t, found.Hits, uint64(0), "expected hits > 0")
+	assert.Greater(t, found.Drops, uint64(0), "expected drops > 0")
+}
+
+func TestFileProviderWithPollInterval(t *testing.T) {
+	// Create a temp file with initial policy
+	tmpFile := filepath.Join(t.TempDir(), "policies.json")
+	initialContent := `{
+		"policies": [{
+			"id": "test-policy",
+			"name": "Test Policy",
+			"log": {
+				"match": [{"log_field": "body", "regex": "error"}],
+				"keep": "none"
+			}
+		}]
+	}`
+	err := os.WriteFile(tmpFile, []byte(initialContent), 0644)
+	require.NoError(t, err)
+
+	// Track reload count
+	var reloadCount int
+	var mu sync.Mutex
+
+	provider := NewFileProvider(tmpFile,
+		WithPollInterval(50*time.Millisecond),
+		WithOnReload(func() {
+			mu.Lock()
+			reloadCount++
+			mu.Unlock()
+		}),
+	)
+	defer provider.Stop()
+
+	// Track policy updates
+	var lastPolicies []*Policy
+	err = provider.Subscribe(func(policies []*Policy) {
+		mu.Lock()
+		lastPolicies = policies
+		mu.Unlock()
+	})
+	require.NoError(t, err)
+
+	// Verify initial load
+	mu.Lock()
+	assert.Len(t, lastPolicies, 1, "expected 1 policy after initial load")
+	assert.Equal(t, "test-policy", lastPolicies[0].ID)
+	mu.Unlock()
+
+	// Wait a bit, then update the file
+	time.Sleep(100 * time.Millisecond)
+
+	updatedContent := `{
+		"policies": [
+			{
+				"id": "test-policy",
+				"name": "Test Policy",
+				"log": {
+					"match": [{"log_field": "body", "regex": "error"}],
+					"keep": "none"
+				}
+			},
+			{
+				"id": "new-policy",
+				"name": "New Policy",
+				"log": {
+					"match": [{"log_field": "body", "regex": "warning"}],
+					"keep": "all"
+				}
+			}
+		]
+	}`
+	err = os.WriteFile(tmpFile, []byte(updatedContent), 0644)
+	require.NoError(t, err)
+
+	// Wait for reload to happen
+	time.Sleep(150 * time.Millisecond)
+
+	// Verify reload happened
+	mu.Lock()
+	assert.Greater(t, reloadCount, 0, "expected at least one reload")
+	assert.Len(t, lastPolicies, 2, "expected 2 policies after reload")
+	mu.Unlock()
+
+	// Stop the provider
+	provider.Stop()
+}
+
+func TestFileProviderPollIntervalOnError(t *testing.T) {
+	// Create a temp file
+	tmpFile := filepath.Join(t.TempDir(), "policies.json")
+	initialContent := `{
+		"policies": [{
+			"id": "test-policy",
+			"name": "Test Policy",
+			"log": {
+				"match": [{"log_field": "body", "regex": "error"}],
+				"keep": "none"
+			}
+		}]
+	}`
+	err := os.WriteFile(tmpFile, []byte(initialContent), 0644)
+	require.NoError(t, err)
+
+	// Track errors
+	var lastError error
+	var mu sync.Mutex
+
+	provider := NewFileProvider(tmpFile,
+		WithPollInterval(50*time.Millisecond),
+		WithOnError(func(err error) {
+			mu.Lock()
+			lastError = err
+			mu.Unlock()
+		}),
+	)
+	defer provider.Stop()
+
+	err = provider.Subscribe(func(policies []*Policy) {})
+	require.NoError(t, err)
+
+	// Wait a bit, then write invalid JSON
+	time.Sleep(100 * time.Millisecond)
+
+	err = os.WriteFile(tmpFile, []byte(`{invalid json`), 0644)
+	require.NoError(t, err)
+
+	// Wait for error to be detected
+	time.Sleep(150 * time.Millisecond)
+
+	mu.Lock()
+	assert.NotNil(t, lastError, "expected an error from invalid JSON")
+	mu.Unlock()
+
+	provider.Stop()
+}
+
+func TestFileProviderStop(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "policies.json")
+	content := `{"policies": []}`
+	err := os.WriteFile(tmpFile, []byte(content), 0644)
+	require.NoError(t, err)
+
+	provider := NewFileProvider(tmpFile, WithPollInterval(10*time.Millisecond))
+
+	err = provider.Subscribe(func(policies []*Policy) {})
+	require.NoError(t, err)
+
+	// Stop should not block
+	done := make(chan struct{})
+	go func() {
+		provider.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// OK
+	case <-time.After(1 * time.Second):
+		t.Error("Stop() blocked for too long")
 	}
+}
+
+func TestFileProviderWithoutPolling(t *testing.T) {
+	// Without poll interval, provider should work as before (one-shot load)
+	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
+
+	var called int
+	err := provider.Subscribe(func(policies []*Policy) {
+		called++
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, called, "callback should be called once")
+
+	// Stop should be safe to call even without polling
+	provider.Stop()
 }

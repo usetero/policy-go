@@ -4,11 +4,6 @@ package policy
 
 import "github.com/usetero/policy-go/internal/engine"
 
-// Version returns the current version of the policy library.
-func Version() string {
-	return "0.1.0"
-}
-
 // Re-export types from internal/engine.
 type (
 	Matcher   = engine.Matcher
