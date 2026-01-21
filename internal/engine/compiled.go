@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/flier/gohs/hyperscan"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
 
 // PatternRef links a compiled pattern back to its source policy and matcher.
@@ -94,7 +95,7 @@ func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
 
 // ExistenceCheck represents a field existence check that can't be compiled to Hyperscan.
 type ExistenceCheck struct {
-	Selector    FieldSelector
+	Selector    LogFieldSelector
 	MustExist   bool
 	PolicyID    string
 	PolicyIndex int // Dense index for array-based tracking
@@ -176,64 +177,85 @@ func NewCompiler() *Compiler {
 	return &Compiler{}
 }
 
-// Compile compiles a set of policies into CompiledMatchers.
-func (c *Compiler) Compile(policies []*Policy, stats map[string]*PolicyStats) (*CompiledMatchers, error) {
+// Compile compiles a set of proto policies into CompiledMatchers.
+func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompiledMatchers, error) {
 	result := NewCompiledMatchers()
 
 	// Group patterns by MatchKey
 	groups := make(map[MatchKey][]patternEntry)
 
-	// First pass: assign dense indices to policies
+	// First pass: assign dense indices to log policies
 	policyIndex := make(map[string]int)
 	for _, p := range policies {
-		if !p.IsLogPolicy() {
+		if p.GetLog() == nil {
 			continue
 		}
-		policyIndex[p.ID] = len(result.policyList)
+		policyIndex[p.GetId()] = len(result.policyList)
 		result.policyList = append(result.policyList, nil) // placeholder
 	}
 
 	for _, p := range policies {
-		if !p.IsLogPolicy() {
+		log := p.GetLog()
+		if log == nil {
 			continue
 		}
 
-		log := p.Log
-		idx := policyIndex[p.ID]
+		id := p.GetId()
+		idx := policyIndex[id]
+
+		// Parse keep string
+		keep, err := ParseKeep(log.GetKeep())
+		if err != nil {
+			return nil, fmt.Errorf("policy %s: %w", id, err)
+		}
 
 		// Create compiled policy
 		compiled := &CompiledPolicy{
-			ID:           p.ID,
+			ID:           id,
 			Index:        idx,
-			Keep:         log.Keep,
-			MatcherCount: len(log.Matchers),
-			Stats:        stats[p.ID],
+			Keep:         keep,
+			MatcherCount: len(log.GetMatch()),
+			Stats:        stats[id],
 		}
-		result.policies[p.ID] = compiled
+		result.policies[id] = compiled
 		result.policyList[idx] = compiled
 
 		// Process matchers
-		for i, m := range log.Matchers {
-			if m.Exists != nil {
-				// Existence check - can't use Hyperscan
+		for i, m := range log.GetMatch() {
+			selector := LogFieldSelectorFromMatcher(m)
+
+			// Check if this is an existence check
+			if _, ok := m.GetMatch().(*policyv1.LogMatcher_Exists); ok {
 				result.existenceChecks = append(result.existenceChecks, ExistenceCheck{
-					Selector:    m.Field,
-					MustExist:   *m.Exists,
-					PolicyID:    p.ID,
+					Selector:    selector,
+					MustExist:   m.GetExists(),
+					PolicyID:    id,
 					PolicyIndex: idx,
 					MatchIndex:  i,
 				})
 				continue
 			}
 
+			// Get the pattern (regex or exact)
+			var pattern string
+			switch match := m.GetMatch().(type) {
+			case *policyv1.LogMatcher_Regex:
+				pattern = match.Regex
+			case *policyv1.LogMatcher_Exact:
+				// Escape for literal match
+				pattern = regexp.QuoteMeta(match.Exact)
+			default:
+				continue
+			}
+
 			key := MatchKey{
-				Selector: m.Field,
-				Negated:  m.Negated,
+				Selector: selector,
+				Negated:  m.GetNegate(),
 			}
 
 			groups[key] = append(groups[key], patternEntry{
-				pattern:      m.Pattern,
-				policyID:     p.ID,
+				pattern:      pattern,
+				policyID:     id,
 				policyIndex:  idx,
 				matcherIndex: i,
 			})

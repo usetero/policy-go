@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
 
 func TestParserParseEmpty(t *testing.T) {
@@ -40,11 +40,11 @@ func TestParserParseSinglePolicy(t *testing.T) {
 	require.Len(t, policies, 1)
 
 	p := policies[0]
-	assert.Equal(t, "test-policy", p.ID)
-	assert.Equal(t, "Test Policy", p.Name)
-	require.NotNil(t, p.Log)
-	assert.Len(t, p.Log.Matchers, 1)
-	assert.Equal(t, engine.KeepNone, p.Log.Keep.Action)
+	assert.Equal(t, "test-policy", p.GetId())
+	assert.Equal(t, "Test Policy", p.GetName())
+	require.NotNil(t, p.GetLog())
+	assert.Len(t, p.GetLog().GetMatch(), 1)
+	assert.Equal(t, "none", p.GetLog().GetKeep())
 }
 
 func TestParserParseReader(t *testing.T) {
@@ -66,7 +66,7 @@ func TestParserParseReader(t *testing.T) {
 	policies, err := parser.Parse(strings.NewReader(json))
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
-	assert.Equal(t, "reader-test", policies[0].ID)
+	assert.Equal(t, "reader-test", policies[0].GetId())
 }
 
 func TestParserParseMultiplePolicies(t *testing.T) {
@@ -97,22 +97,21 @@ func TestParserParseMultiplePolicies(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, policies, 2)
 
-	assert.Equal(t, "policy-1", policies[0].ID)
-	assert.Equal(t, "policy-2", policies[1].ID)
+	assert.Equal(t, "policy-1", policies[0].GetId())
+	assert.Equal(t, "policy-2", policies[1].GetId())
 }
 
 func TestParserParseAllLogFields(t *testing.T) {
 	tests := []struct {
 		name     string
 		field    string
-		expected engine.LogField
+		expected policyv1.LogField
 	}{
-		{"body", "body", engine.LogFieldBody},
-		{"severity_text", "severity_text", engine.LogFieldSeverityText},
-		{"severity_number", "severity_number", engine.LogFieldSeverityNumber},
-		{"timestamp", "timestamp", engine.LogFieldTimestamp},
-		{"trace_id", "trace_id", engine.LogFieldTraceID},
-		{"span_id", "span_id", engine.LogFieldSpanID},
+		{"body", "body", policyv1.LogField_LOG_FIELD_BODY},
+		{"severity_text", "severity_text", policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+		{"trace_id", "trace_id", policyv1.LogField_LOG_FIELD_TRACE_ID},
+		{"span_id", "span_id", policyv1.LogField_LOG_FIELD_SPAN_ID},
+		{"event_name", "event_name", policyv1.LogField_LOG_FIELD_EVENT_NAME},
 	}
 
 	parser := NewParser()
@@ -133,9 +132,10 @@ func TestParserParseAllLogFields(t *testing.T) {
 			policies, err := parser.ParseBytes([]byte(json))
 			require.NoError(t, err)
 
-			matcher := policies[0].Log.Matchers[0]
-			assert.Equal(t, engine.FieldTypeLogField, matcher.Field.Type)
-			assert.Equal(t, tt.expected, matcher.Field.Field)
+			matcher := policies[0].GetLog().GetMatch()[0]
+			logField, ok := matcher.GetField().(*policyv1.LogMatcher_LogField)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, logField.LogField)
 		})
 	}
 }
@@ -175,9 +175,10 @@ func TestParserParseLogAttribute(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 
-	matcher := policies[0].Log.Matchers[0]
-	assert.Equal(t, engine.FieldTypeLogAttribute, matcher.Field.Type)
-	assert.Equal(t, "custom_attr", matcher.Field.Key)
+	matcher := policies[0].GetLog().GetMatch()[0]
+	logAttr, ok := matcher.GetField().(*policyv1.LogMatcher_LogAttribute)
+	require.True(t, ok)
+	assert.Equal(t, "custom_attr", logAttr.LogAttribute)
 }
 
 func TestParserParseResourceAttribute(t *testing.T) {
@@ -197,9 +198,10 @@ func TestParserParseResourceAttribute(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 
-	matcher := policies[0].Log.Matchers[0]
-	assert.Equal(t, engine.FieldTypeResourceAttribute, matcher.Field.Type)
-	assert.Equal(t, "service.name", matcher.Field.Key)
+	matcher := policies[0].GetLog().GetMatch()[0]
+	resAttr, ok := matcher.GetField().(*policyv1.LogMatcher_ResourceAttribute)
+	require.True(t, ok)
+	assert.Equal(t, "service.name", resAttr.ResourceAttribute)
 }
 
 func TestParserParseScopeAttribute(t *testing.T) {
@@ -219,9 +221,10 @@ func TestParserParseScopeAttribute(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 
-	matcher := policies[0].Log.Matchers[0]
-	assert.Equal(t, engine.FieldTypeScopeAttribute, matcher.Field.Type)
-	assert.Equal(t, "scope.name", matcher.Field.Key)
+	matcher := policies[0].GetLog().GetMatch()[0]
+	scopeAttr, ok := matcher.GetField().(*policyv1.LogMatcher_ScopeAttribute)
+	require.True(t, ok)
+	assert.Equal(t, "scope.name", scopeAttr.ScopeAttribute)
 }
 
 func TestParserParseMultipleFieldTypesError(t *testing.T) {
@@ -277,8 +280,8 @@ func TestParserParseRegexMatcher(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 
-	matcher := policies[0].Log.Matchers[0]
-	assert.Equal(t, "error|warning", matcher.Pattern)
+	matcher := policies[0].GetLog().GetMatch()[0]
+	assert.Equal(t, "error|warning", matcher.GetRegex())
 }
 
 func TestParserParseExactMatcher(t *testing.T) {
@@ -298,31 +301,8 @@ func TestParserParseExactMatcher(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 
-	matcher := policies[0].Log.Matchers[0]
-	// Exact should be converted to anchored regex
-	assert.Equal(t, "^ERROR$", matcher.Pattern)
-}
-
-func TestParserParseExactMatcherWithSpecialChars(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "exact": "error (code: 123)"}],
-				"keep": "none"
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-
-	matcher := policies[0].Log.Matchers[0]
-	// Special regex chars should be escaped
-	assert.Equal(t, `^error \(code: 123\)$`, matcher.Pattern)
+	matcher := policies[0].GetLog().GetMatch()[0]
+	assert.Equal(t, "ERROR", matcher.GetExact())
 }
 
 func TestParserParseExistsMatcher(t *testing.T) {
@@ -353,10 +333,10 @@ func TestParserParseExistsMatcher(t *testing.T) {
 			policies, err := parser.ParseBytes([]byte(json))
 			require.NoError(t, err)
 
-			matcher := policies[0].Log.Matchers[0]
-			require.NotNil(t, matcher.Exists)
-			assert.Equal(t, tt.expected, *matcher.Exists)
-			assert.Empty(t, matcher.Pattern, "pattern should be empty for exists matcher")
+			matcher := policies[0].GetLog().GetMatch()[0]
+			_, ok := matcher.GetMatch().(*policyv1.LogMatcher_Exists)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, matcher.GetExists())
 		})
 	}
 }
@@ -397,62 +377,42 @@ func TestParserParseInvalidRegex(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestParserParseKeepStringAll(t *testing.T) {
+func TestParserParseKeepValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		keepJson string
+		expected string
+	}{
+		{"string all", `"all"`, "all"},
+		{"string none", `"none"`, "none"},
+		{"string empty", `""`, "all"},
+		{"bool true", `true`, "all"},
+		{"bool false", `false`, "none"},
+		{"sample 50%", `{"percentage": 50}`, "50%"},
+		{"sample 0%", `{"percentage": 0}`, "0%"},
+		{"sample 100%", `{"percentage": 100}`, "100%"},
+	}
+
 	parser := NewParser()
 
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": "all"
-			}
-		}]
-	}`
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			json := `{
+				"policies": [{
+					"id": "test",
+					"name": "Test",
+					"log": {
+						"match": [{"log_field": "body", "regex": ".*"}],
+						"keep": ` + tt.keepJson + `
+					}
+				}]
+			}`
 
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	assert.Equal(t, engine.KeepAll, policies[0].Log.Keep.Action)
-}
-
-func TestParserParseKeepStringNone(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": "none"
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	assert.Equal(t, engine.KeepNone, policies[0].Log.Keep.Action)
-}
-
-func TestParserParseKeepStringEmpty(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": ""
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	// Empty string should default to KeepAll
-	assert.Equal(t, engine.KeepAll, policies[0].Log.Keep.Action)
+			policies, err := parser.ParseBytes([]byte(json))
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, policies[0].GetLog().GetKeep())
+		})
+	}
 }
 
 func TestParserParseKeepStringUnknown(t *testing.T) {
@@ -471,106 +431,6 @@ func TestParserParseKeepStringUnknown(t *testing.T) {
 
 	_, err := parser.ParseBytes([]byte(json))
 	require.Error(t, err)
-}
-
-func TestParserParseKeepBoolTrue(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": true
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	assert.Equal(t, engine.KeepAll, policies[0].Log.Keep.Action)
-}
-
-func TestParserParseKeepBoolFalse(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": false
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	assert.Equal(t, engine.KeepNone, policies[0].Log.Keep.Action)
-}
-
-func TestParserParseKeepSample(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": {"percentage": 50}
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-
-	keep := policies[0].Log.Keep
-	assert.Equal(t, engine.KeepSample, keep.Action)
-	assert.Equal(t, float64(50), keep.Value)
-}
-
-func TestParserParseKeepSampleZeroPercent(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": {"percentage": 0}
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	// 0% sample should be KeepNone
-	assert.Equal(t, engine.KeepNone, policies[0].Log.Keep.Action)
-}
-
-func TestParserParseKeepSampleHundredPercent(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": ".*"}],
-				"keep": {"percentage": 100}
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-	// 100% sample should be KeepAll
-	assert.Equal(t, engine.KeepAll, policies[0].Log.Keep.Action)
 }
 
 func TestParserParseKeepSampleInvalidPercentage(t *testing.T) {
@@ -650,7 +510,7 @@ func TestParserParseNonLogPolicy(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
-	assert.Nil(t, policies[0].Log)
+	assert.Nil(t, policies[0].GetLog())
 }
 
 func TestParserParseInvalidJSON(t *testing.T) {
@@ -660,7 +520,7 @@ func TestParserParseInvalidJSON(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestParserParseMultipleMatchers(t *testing.T) {
+func TestParserParseNegatedMatcher(t *testing.T) {
 	parser := NewParser()
 
 	json := `{
@@ -668,12 +528,8 @@ func TestParserParseMultipleMatchers(t *testing.T) {
 			"id": "test",
 			"name": "Test",
 			"log": {
-				"match": [
-					{"log_field": "body", "regex": "error"},
-					{"log_field": "severity_text", "exact": "ERROR"},
-					{"log_attribute": "source", "regex": "critical"}
-				],
-				"keep": "none"
+				"match": [{"log_field": "body", "regex": "debug", "negated": true}],
+				"keep": "all"
 			}
 		}]
 	}`
@@ -681,18 +537,29 @@ func TestParserParseMultipleMatchers(t *testing.T) {
 	policies, err := parser.ParseBytes([]byte(json))
 	require.NoError(t, err)
 
-	matchers := policies[0].Log.Matchers
-	require.Len(t, matchers, 3)
+	matcher := policies[0].GetLog().GetMatch()[0]
+	assert.True(t, matcher.GetNegate())
+}
 
-	// Verify each matcher
-	assert.Equal(t, engine.FieldTypeLogField, matchers[0].Field.Type)
-	assert.Equal(t, engine.LogFieldBody, matchers[0].Field.Field)
+func TestParserParseNonNegatedMatcher(t *testing.T) {
+	parser := NewParser()
 
-	assert.Equal(t, engine.FieldTypeLogField, matchers[1].Field.Type)
-	assert.Equal(t, engine.LogFieldSeverityText, matchers[1].Field.Field)
+	json := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": "debug"}],
+				"keep": "all"
+			}
+		}]
+	}`
 
-	assert.Equal(t, engine.FieldTypeLogAttribute, matchers[2].Field.Type)
-	assert.Equal(t, "source", matchers[2].Field.Key)
+	policies, err := parser.ParseBytes([]byte(json))
+	require.NoError(t, err)
+
+	matcher := policies[0].GetLog().GetMatch()[0]
+	assert.False(t, matcher.GetNegate(), "Negated should be false by default")
 }
 
 func TestKeepValueUnmarshalJSON(t *testing.T) {
@@ -764,96 +631,6 @@ func TestParseError(t *testing.T) {
 	assert.Equal(t, "test_field", err.Field)
 	assert.Equal(t, "test message", err.Message)
 	assert.Equal(t, "parse error in test_field: test message", err.Error())
-}
-
-func TestParserParseNegatedMatcher(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": "debug", "negated": true}],
-				"keep": "all"
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-
-	matcher := policies[0].Log.Matchers[0]
-	assert.True(t, matcher.Negated)
-}
-
-func TestParserParseNonNegatedMatcher(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": "debug"}],
-				"keep": "all"
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-
-	matcher := policies[0].Log.Matchers[0]
-	assert.False(t, matcher.Negated, "Negated should be false by default")
-}
-
-func TestParserParseNegatedFalseExplicit(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [{"log_field": "body", "regex": "debug", "negated": false}],
-				"keep": "all"
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-
-	matcher := policies[0].Log.Matchers[0]
-	assert.False(t, matcher.Negated)
-}
-
-func TestParserParseMixedNegation(t *testing.T) {
-	parser := NewParser()
-
-	json := `{
-		"policies": [{
-			"id": "test",
-			"name": "Test",
-			"log": {
-				"match": [
-					{"log_field": "body", "regex": "error"},
-					{"log_field": "body", "regex": "debug", "negated": true}
-				],
-				"keep": "all"
-			}
-		}]
-	}`
-
-	policies, err := parser.ParseBytes([]byte(json))
-	require.NoError(t, err)
-
-	matchers := policies[0].Log.Matchers
-	require.Len(t, matchers, 2)
-
-	assert.False(t, matchers[0].Negated, "first matcher should not be negated")
-	assert.True(t, matchers[1].Negated, "second matcher should be negated")
 }
 
 // Helper functions

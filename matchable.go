@@ -1,5 +1,10 @@
 package policy
 
+import (
+	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+)
+
 // Matchable is the interface for telemetry records that can be matched against policies.
 // Implementations should return field values without allocating new memory where possible.
 type Matchable interface {
@@ -7,111 +12,62 @@ type Matchable interface {
 	// Returns nil if the field doesn't exist or isn't applicable.
 	// The returned slice should be a view into existing data when possible
 	// to avoid allocations in the hot path.
-	GetField(selector FieldSelector) []byte
+	GetField(selector engine.LogFieldSelector) []byte
 }
 
-// LogMatchable is the interface for log records that can be matched against log policies.
-type LogMatchable interface {
-	Matchable
-
-	// Body returns the log body/message.
-	Body() []byte
-
-	// SeverityText returns the severity text (e.g., "DEBUG", "ERROR").
-	SeverityText() []byte
-
-	// SeverityNumber returns the severity number as a string.
-	SeverityNumber() []byte
-
-	// GetLogAttribute returns a log attribute value by key.
-	GetLogAttribute(key string) []byte
-
-	// GetResourceAttribute returns a resource attribute value by key.
-	GetResourceAttribute(key string) []byte
-
-	// GetScopeAttribute returns a scope attribute value by key.
-	GetScopeAttribute(key string) []byte
-}
-
-// SimpleLogRecord is a simple implementation of LogMatchable for testing.
+// SimpleLogRecord is a simple implementation of Matchable for testing.
 type SimpleLogRecord struct {
-	BodyValue           []byte
-	SeverityTextValue   []byte
-	SeverityNumberValue []byte
-	LogAttributes       map[string][]byte
-	ResourceAttributes  map[string][]byte
-	ScopeAttributes     map[string][]byte
+	BodyValue          []byte
+	SeverityTextValue  []byte
+	TraceIDValue       []byte
+	SpanIDValue        []byte
+	EventNameValue     []byte
+	LogAttributes      map[string][]byte
+	ResourceAttributes map[string][]byte
+	ScopeAttributes    map[string][]byte
 }
 
 // GetField implements Matchable.
-func (r *SimpleLogRecord) GetField(selector FieldSelector) []byte {
-	switch selector.Type {
-	case FieldTypeLogField:
-		switch selector.Field {
-		case LogFieldBody:
+func (r *SimpleLogRecord) GetField(selector engine.LogFieldSelector) []byte {
+	// Check simple log fields first
+	if selector.LogField != policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+		switch selector.LogField {
+		case policyv1.LogField_LOG_FIELD_BODY:
 			return r.BodyValue
-		case LogFieldSeverityText:
+		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
 			return r.SeverityTextValue
-		case LogFieldSeverityNumber:
-			return r.SeverityNumberValue
+		case policyv1.LogField_LOG_FIELD_TRACE_ID:
+			return r.TraceIDValue
+		case policyv1.LogField_LOG_FIELD_SPAN_ID:
+			return r.SpanIDValue
+		case policyv1.LogField_LOG_FIELD_EVENT_NAME:
+			return r.EventNameValue
 		default:
 			return nil
 		}
-	case FieldTypeLogAttribute:
+	}
+
+	// Check attribute selectors
+	if selector.LogAttribute != "" {
 		if r.LogAttributes == nil {
 			return nil
 		}
-		return r.LogAttributes[selector.Key]
-	case FieldTypeResourceAttribute:
+		return r.LogAttributes[selector.LogAttribute]
+	}
+
+	if selector.ResourceAttribute != "" {
 		if r.ResourceAttributes == nil {
 			return nil
 		}
-		return r.ResourceAttributes[selector.Key]
-	case FieldTypeScopeAttribute:
+		return r.ResourceAttributes[selector.ResourceAttribute]
+	}
+
+	if selector.ScopeAttribute != "" {
 		if r.ScopeAttributes == nil {
 			return nil
 		}
-		return r.ScopeAttributes[selector.Key]
-	default:
-		return nil
+		return r.ScopeAttributes[selector.ScopeAttribute]
 	}
-}
 
-// Body implements LogMatchable.
-func (r *SimpleLogRecord) Body() []byte {
-	return r.BodyValue
-}
-
-// SeverityText implements LogMatchable.
-func (r *SimpleLogRecord) SeverityText() []byte {
-	return r.SeverityTextValue
-}
-
-// SeverityNumber implements LogMatchable.
-func (r *SimpleLogRecord) SeverityNumber() []byte {
-	return r.SeverityNumberValue
-}
-
-// GetLogAttribute implements LogMatchable.
-func (r *SimpleLogRecord) GetLogAttribute(key string) []byte {
-	if r.LogAttributes == nil {
-		return nil
-	}
-	return r.LogAttributes[key]
-}
-
-// GetResourceAttribute implements LogMatchable.
-func (r *SimpleLogRecord) GetResourceAttribute(key string) []byte {
-	if r.ResourceAttributes == nil {
-		return nil
-	}
-	return r.ResourceAttributes[key]
-}
-
-// GetScopeAttribute implements LogMatchable.
-func (r *SimpleLogRecord) GetScopeAttribute(key string) []byte {
-	if r.ScopeAttributes == nil {
-		return nil
-	}
-	return r.ScopeAttributes[key]
+	return nil
 }

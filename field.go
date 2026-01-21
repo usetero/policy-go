@@ -1,68 +1,49 @@
 package policy
 
-import "github.com/usetero/policy-go/internal/engine"
+import (
+	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+)
 
-// Re-export types from internal/engine.
+// Re-export proto types for convenience.
 type (
-	LogField      = engine.LogField
-	FieldType     = engine.FieldType
-	FieldSelector = engine.FieldSelector
+	// Policy is the proto policy type.
+	Policy = policyv1.Policy
+	// LogTarget is the proto log target type.
+	LogTarget = policyv1.LogTarget
+	// LogMatcher is the proto log matcher type.
+	LogMatcher = policyv1.LogMatcher
+	// LogField is the proto log field enum.
+	LogField = policyv1.LogField
 )
 
 // LogField constants.
 const (
-	LogFieldBody           = engine.LogFieldBody
-	LogFieldSeverityText   = engine.LogFieldSeverityText
-	LogFieldSeverityNumber = engine.LogFieldSeverityNumber
-	LogFieldTimestamp      = engine.LogFieldTimestamp
-	LogFieldTraceID        = engine.LogFieldTraceID
-	LogFieldSpanID         = engine.LogFieldSpanID
+	LogFieldUnspecified       = policyv1.LogField_LOG_FIELD_UNSPECIFIED
+	LogFieldBody              = policyv1.LogField_LOG_FIELD_BODY
+	LogFieldSeverityText      = policyv1.LogField_LOG_FIELD_SEVERITY_TEXT
+	LogFieldTraceID           = policyv1.LogField_LOG_FIELD_TRACE_ID
+	LogFieldSpanID            = policyv1.LogField_LOG_FIELD_SPAN_ID
+	LogFieldEventName         = policyv1.LogField_LOG_FIELD_EVENT_NAME
+	LogFieldResourceSchemaURL = policyv1.LogField_LOG_FIELD_RESOURCE_SCHEMA_URL
+	LogFieldScopeSchemaURL    = policyv1.LogField_LOG_FIELD_SCOPE_SCHEMA_URL
 )
 
-// FieldType constants.
+// Re-export engine types.
+type (
+	LogFieldSelector = engine.LogFieldSelector
+	KeepAction       = engine.KeepAction
+	Keep             = engine.Keep
+)
+
+// KeepAction constants.
 const (
-	FieldTypeLogField          = engine.FieldTypeLogField
-	FieldTypeLogAttribute      = engine.FieldTypeLogAttribute
-	FieldTypeResourceAttribute = engine.FieldTypeResourceAttribute
-	FieldTypeScopeAttribute    = engine.FieldTypeScopeAttribute
+	KeepAll           = engine.KeepAll
+	KeepNone          = engine.KeepNone
+	KeepSample        = engine.KeepSample
+	KeepRatePerSecond = engine.KeepRatePerSecond
+	KeepRatePerMinute = engine.KeepRatePerMinute
 )
 
-// ParseLogField parses a string into a LogField.
-func ParseLogField(s string) (LogField, bool) {
-	switch s {
-	case "body":
-		return LogFieldBody, true
-	case "severity_text":
-		return LogFieldSeverityText, true
-	case "severity_number":
-		return LogFieldSeverityNumber, true
-	case "timestamp":
-		return LogFieldTimestamp, true
-	case "trace_id":
-		return LogFieldTraceID, true
-	case "span_id":
-		return LogFieldSpanID, true
-	default:
-		return 0, false
-	}
-}
-
-// NewLogFieldSelector creates a selector for a log field.
-func NewLogFieldSelector(field LogField) FieldSelector {
-	return FieldSelector{Type: FieldTypeLogField, Field: field}
-}
-
-// NewLogAttributeSelector creates a selector for a log attribute.
-func NewLogAttributeSelector(key string) FieldSelector {
-	return FieldSelector{Type: FieldTypeLogAttribute, Key: key}
-}
-
-// NewResourceAttributeSelector creates a selector for a resource attribute.
-func NewResourceAttributeSelector(key string) FieldSelector {
-	return FieldSelector{Type: FieldTypeResourceAttribute, Key: key}
-}
-
-// NewScopeAttributeSelector creates a selector for a scope attribute.
-func NewScopeAttributeSelector(key string) FieldSelector {
-	return FieldSelector{Type: FieldTypeScopeAttribute, Key: key}
-}
+// ParseKeep parses a keep string into a Keep struct.
+var ParseKeep = engine.ParseKeep

@@ -5,6 +5,8 @@ import (
 	"log"
 
 	"github.com/usetero/policy-go"
+	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
 
 // ExampleLogRecord implements policy.Matchable for demonstration.
@@ -15,19 +17,24 @@ type ExampleLogRecord struct {
 	ResourceAttributes map[string][]byte
 }
 
-func (r *ExampleLogRecord) GetField(selector policy.FieldSelector) []byte {
-	switch selector.Type {
-	case policy.FieldTypeLogField:
-		switch selector.Field {
-		case policy.LogFieldBody:
+func (r *ExampleLogRecord) GetField(selector engine.LogFieldSelector) []byte {
+	// Check simple log fields first
+	if selector.LogField != policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+		switch selector.LogField {
+		case policyv1.LogField_LOG_FIELD_BODY:
 			return r.Body
-		case policy.LogFieldSeverityText:
+		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
 			return r.SeverityText
 		}
-	case policy.FieldTypeLogAttribute:
-		return r.LogAttributes[selector.Key]
-	case policy.FieldTypeResourceAttribute:
-		return r.ResourceAttributes[selector.Key]
+		return nil
+	}
+
+	// Check attribute selectors
+	if selector.LogAttribute != "" {
+		return r.LogAttributes[selector.LogAttribute]
+	}
+	if selector.ResourceAttribute != "" {
+		return r.ResourceAttributes[selector.ResourceAttribute]
 	}
 	return nil
 }
@@ -66,7 +73,7 @@ func main() {
 	snapshot := registry.Snapshot()
 
 	// Create an engine for evaluation
-	engine := policy.NewPolicyEngine()
+	eng := policy.NewPolicyEngine()
 
 	// Example log records to evaluate
 	examples := []struct {
@@ -127,7 +134,7 @@ func main() {
 	fmt.Println("Evaluating log records:")
 	fmt.Println("========================")
 	for _, ex := range examples {
-		result := engine.Evaluate(snapshot, ex.record)
+		result := eng.Evaluate(snapshot, ex.record)
 		fmt.Printf("%-45s -> %s\n", ex.name, result)
 	}
 

@@ -16,19 +16,21 @@ type BenchLogRecord struct {
 	ResourceAttributes map[string][]byte
 }
 
-func (r *BenchLogRecord) GetField(selector policy.FieldSelector) []byte {
-	switch selector.Type {
-	case policy.FieldTypeLogField:
-		switch selector.Field {
+func (r *BenchLogRecord) GetField(selector policy.LogFieldSelector) []byte {
+	if selector.LogField != policy.LogFieldUnspecified {
+		switch selector.LogField {
 		case policy.LogFieldBody:
 			return r.Body
 		case policy.LogFieldSeverityText:
 			return r.SeverityText
 		}
-	case policy.FieldTypeLogAttribute:
-		return r.LogAttributes[selector.Key]
-	case policy.FieldTypeResourceAttribute:
-		return r.ResourceAttributes[selector.Key]
+		return nil
+	}
+	if selector.LogAttribute != "" {
+		return r.LogAttributes[selector.LogAttribute]
+	}
+	if selector.ResourceAttribute != "" {
+		return r.ResourceAttributes[selector.ResourceAttribute]
 	}
 	return nil
 }

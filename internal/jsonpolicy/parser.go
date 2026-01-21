@@ -6,10 +6,10 @@ import (
 	"io"
 	"regexp"
 
-	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
 
-// Parser converts JSON policy files to Policy objects.
+// Parser converts JSON policy files to proto Policy objects.
 type Parser struct{}
 
 // NewParser creates a new Parser.
@@ -18,13 +18,13 @@ func NewParser() *Parser {
 }
 
 // Parse reads and parses policies from a reader.
-func (p *Parser) Parse(r io.Reader) ([]*engine.Policy, error) {
+func (p *Parser) Parse(r io.Reader) ([]*policyv1.Policy, error) {
 	var file File
 	if err := json.NewDecoder(r).Decode(&file); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
 
-	policies := make([]*engine.Policy, 0, len(file.Policies))
+	policies := make([]*policyv1.Policy, 0, len(file.Policies))
 	for i, jp := range file.Policies {
 		pol, err := p.convertPolicy(jp)
 		if err != nil {
@@ -37,13 +37,13 @@ func (p *Parser) Parse(r io.Reader) ([]*engine.Policy, error) {
 }
 
 // ParseBytes parses policies from a byte slice.
-func (p *Parser) ParseBytes(data []byte) ([]*engine.Policy, error) {
+func (p *Parser) ParseBytes(data []byte) ([]*policyv1.Policy, error) {
 	var file File
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
 
-	policies := make([]*engine.Policy, 0, len(file.Policies))
+	policies := make([]*policyv1.Policy, 0, len(file.Policies))
 	for i, jp := range file.Policies {
 		pol, err := p.convertPolicy(jp)
 		if err != nil {
@@ -55,7 +55,7 @@ func (p *Parser) ParseBytes(data []byte) ([]*engine.Policy, error) {
 	return policies, nil
 }
 
-func (p *Parser) convertPolicy(jp Policy) (*engine.Policy, error) {
+func (p *Parser) convertPolicy(jp Policy) (*policyv1.Policy, error) {
 	if jp.ID == "" {
 		return nil, NewParseError("id", "required")
 	}
@@ -63,20 +63,25 @@ func (p *Parser) convertPolicy(jp Policy) (*engine.Policy, error) {
 		return nil, NewParseError("name", "required")
 	}
 
-	var logPolicy *engine.LogPolicy
+	pol := &policyv1.Policy{
+		Id:      jp.ID,
+		Name:    jp.Name,
+		Enabled: true,
+	}
+
 	if jp.Log != nil {
-		lp, err := p.convertLogPolicy(jp.Log)
+		logTarget, err := p.convertLogTarget(jp.Log)
 		if err != nil {
 			return nil, err
 		}
-		logPolicy = lp
+		pol.Target = &policyv1.Policy_Log{Log: logTarget}
 	}
 
-	return &engine.Policy{ID: jp.ID, Name: jp.Name, Log: logPolicy}, nil
+	return pol, nil
 }
 
-func (p *Parser) convertLogPolicy(log *Log) (*engine.LogPolicy, error) {
-	matchers := make([]engine.Matcher, 0, len(log.Match))
+func (p *Parser) convertLogTarget(log *Log) (*policyv1.LogTarget, error) {
+	matchers := make([]*policyv1.LogMatcher, 0, len(log.Match))
 	for i, m := range log.Match {
 		matcher, err := p.convertLogMatcher(m)
 		if err != nil {
@@ -90,46 +95,41 @@ func (p *Parser) convertLogPolicy(log *Log) (*engine.LogPolicy, error) {
 		return nil, err
 	}
 
-	return &engine.LogPolicy{
-		Matchers: matchers,
-		Keep:     keep,
+	return &policyv1.LogTarget{
+		Match: matchers,
+		Keep:  keep,
 	}, nil
 }
 
-func (p *Parser) convertLogMatcher(m LogMatcher) (engine.Matcher, error) {
-	selector, err := p.parseFieldSelector(m)
-	if err != nil {
-		return engine.Matcher{}, err
+func (p *Parser) convertLogMatcher(m LogMatcher) (*policyv1.LogMatcher, error) {
+	matcher := &policyv1.LogMatcher{
+		Negate: m.Negated,
 	}
 
-	// Determine the pattern
-	var pattern string
-	var exists *bool
+	// Set field selector
+	if err := p.setFieldSelector(matcher, m); err != nil {
+		return nil, err
+	}
 
+	// Set match type
 	if m.Exists != nil {
-		exists = m.Exists
+		matcher.Match = &policyv1.LogMatcher_Exists{Exists: *m.Exists}
 	} else if m.Exact != "" {
-		// Convert exact match to anchored regex
-		pattern = "^" + regexp.QuoteMeta(m.Exact) + "$"
+		matcher.Match = &policyv1.LogMatcher_Exact{Exact: m.Exact}
 	} else if m.Regex != "" {
-		pattern = m.Regex
 		// Validate regex
-		if _, err := regexp.Compile(pattern); err != nil {
-			return engine.Matcher{}, fmt.Errorf("invalid regex: %w", err)
+		if _, err := regexp.Compile(m.Regex); err != nil {
+			return nil, fmt.Errorf("invalid regex: %w", err)
 		}
+		matcher.Match = &policyv1.LogMatcher_Regex{Regex: m.Regex}
 	} else {
-		return engine.Matcher{}, NewParseError("matcher", "must have regex, exact, or exists")
+		return nil, NewParseError("matcher", "must have regex, exact, or exists")
 	}
 
-	return engine.Matcher{
-		Field:   selector,
-		Pattern: pattern,
-		Negated: m.Negated,
-		Exists:  exists,
-	}, nil
+	return matcher, nil
 }
 
-func (p *Parser) parseFieldSelector(m LogMatcher) (engine.FieldSelector, error) {
+func (p *Parser) setFieldSelector(matcher *policyv1.LogMatcher, m LogMatcher) error {
 	// Count how many field types are set
 	count := 0
 	if m.LogField != "" {
@@ -146,92 +146,87 @@ func (p *Parser) parseFieldSelector(m LogMatcher) (engine.FieldSelector, error) 
 	}
 
 	if count == 0 {
-		return engine.FieldSelector{}, NewParseError("matcher", "must specify a field type")
+		return NewParseError("matcher", "must specify a field type")
 	}
 	if count > 1 {
-		return engine.FieldSelector{}, NewParseError("matcher", "must specify only one field type")
+		return NewParseError("matcher", "must specify only one field type")
 	}
 
 	if m.LogField != "" {
 		field, ok := parseLogField(m.LogField)
 		if !ok {
-			return engine.FieldSelector{}, NewParseError("log_field",
-				fmt.Sprintf("unknown field: %s", m.LogField))
+			return NewParseError("log_field", fmt.Sprintf("unknown field: %s", m.LogField))
 		}
-		return engine.FieldSelector{Type: engine.FieldTypeLogField, Field: field}, nil
+		matcher.Field = &policyv1.LogMatcher_LogField{LogField: field}
+		return nil
 	}
 
 	if m.LogAttribute != "" {
-		return engine.FieldSelector{Type: engine.FieldTypeLogAttribute, Key: m.LogAttribute}, nil
+		matcher.Field = &policyv1.LogMatcher_LogAttribute{LogAttribute: m.LogAttribute}
+		return nil
 	}
 
 	if m.ResourceAttribute != "" {
-		return engine.FieldSelector{Type: engine.FieldTypeResourceAttribute, Key: m.ResourceAttribute}, nil
+		matcher.Field = &policyv1.LogMatcher_ResourceAttribute{ResourceAttribute: m.ResourceAttribute}
+		return nil
 	}
 
 	if m.ScopeAttribute != "" {
-		return engine.FieldSelector{Type: engine.FieldTypeScopeAttribute, Key: m.ScopeAttribute}, nil
+		matcher.Field = &policyv1.LogMatcher_ScopeAttribute{ScopeAttribute: m.ScopeAttribute}
+		return nil
 	}
 
-	// Should not reach here
-	return engine.FieldSelector{}, NewParseError("matcher", "no field selector")
+	return NewParseError("matcher", "no field selector")
 }
 
-func parseLogField(s string) (engine.LogField, bool) {
+func parseLogField(s string) (policyv1.LogField, bool) {
 	switch s {
 	case "body":
-		return engine.LogFieldBody, true
+		return policyv1.LogField_LOG_FIELD_BODY, true
 	case "severity_text":
-		return engine.LogFieldSeverityText, true
-	case "severity_number":
-		return engine.LogFieldSeverityNumber, true
-	case "timestamp":
-		return engine.LogFieldTimestamp, true
+		return policyv1.LogField_LOG_FIELD_SEVERITY_TEXT, true
 	case "trace_id":
-		return engine.LogFieldTraceID, true
+		return policyv1.LogField_LOG_FIELD_TRACE_ID, true
 	case "span_id":
-		return engine.LogFieldSpanID, true
+		return policyv1.LogField_LOG_FIELD_SPAN_ID, true
+	case "event_name":
+		return policyv1.LogField_LOG_FIELD_EVENT_NAME, true
+	case "resource_schema_url":
+		return policyv1.LogField_LOG_FIELD_RESOURCE_SCHEMA_URL, true
+	case "scope_schema_url":
+		return policyv1.LogField_LOG_FIELD_SCOPE_SCHEMA_URL, true
 	default:
-		return 0, false
+		return policyv1.LogField_LOG_FIELD_UNSPECIFIED, false
 	}
 }
 
-func (p *Parser) convertKeep(k KeepValue) (engine.Keep, error) {
+func (p *Parser) convertKeep(k KeepValue) (string, error) {
 	if k.StringValue != nil {
 		switch *k.StringValue {
 		case "all", "":
-			return engine.Keep{Action: engine.KeepAll}, nil
+			return "all", nil
 		case "none":
-			return engine.Keep{Action: engine.KeepNone}, nil
+			return "none", nil
 		default:
-			return engine.Keep{}, NewParseError("keep",
-				fmt.Sprintf("unknown value: %s", *k.StringValue))
+			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", *k.StringValue))
 		}
 	}
 
 	if k.BoolValue != nil {
 		if *k.BoolValue {
-			return engine.Keep{Action: engine.KeepAll}, nil
+			return "all", nil
 		}
-		return engine.Keep{Action: engine.KeepNone}, nil
+		return "none", nil
 	}
 
 	if k.SampleValue != nil {
 		percentage := k.SampleValue.Percentage
 		if percentage < 0 || percentage > 100 {
-			return engine.Keep{}, NewParseError("keep.percentage",
-				"must be between 0 and 100")
+			return "", NewParseError("keep.percentage", "must be between 0 and 100")
 		}
-		// 0% is drop, 100% is keep all
-		if percentage == 0 {
-			return engine.Keep{Action: engine.KeepNone}, nil
-		}
-		if percentage == 100 {
-			return engine.Keep{Action: engine.KeepAll}, nil
-		}
-		return engine.Keep{Action: engine.KeepSample, Value: percentage}, nil
+		return fmt.Sprintf("%.0f%%", percentage), nil
 	}
 
 	// Default to keep all
-	return engine.Keep{Action: engine.KeepAll}, nil
+	return "all", nil
 }

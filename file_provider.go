@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/usetero/policy-go/internal/jsonpolicy"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
 
 // FileProviderOption configures a FileProvider.
@@ -74,7 +75,7 @@ func NewFileProvider(path string, opts ...FileProviderOption) *FileProvider {
 }
 
 // Load reads and parses policies from the file.
-func (f *FileProvider) Load() ([]*Policy, error) {
+func (f *FileProvider) Load() ([]*policyv1.Policy, error) {
 	data, err := os.ReadFile(f.path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", f.path, err)
@@ -130,13 +131,6 @@ func (f *FileProvider) SetStatsCollector(collector StatsCollector) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statsCollector = collector
-}
-
-// GetStatsCollector returns the registered stats collector.
-func (f *FileProvider) GetStatsCollector() StatsCollector {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.statsCollector
 }
 
 func (f *FileProvider) startPolling() {

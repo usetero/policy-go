@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
 
 // ProviderId is a unique identifier for a registered provider.
@@ -26,7 +27,7 @@ func (h *ProviderHandle) Unregister() {
 
 type providerEntry struct {
 	provider PolicyProvider
-	policies []*Policy
+	policies []*policyv1.Policy
 }
 
 // PolicyRegistry manages policies from multiple providers.
@@ -36,7 +37,7 @@ type PolicyRegistry struct {
 	mu          sync.RWMutex
 	nextId      atomic.Uint64
 	providers   map[ProviderId]*providerEntry
-	stats       map[string]*PolicyStats
+	stats       map[string]*engine.PolicyStats
 	snapshot    *PolicySnapshot
 	compiler    *engine.Compiler
 	onRecompile func(*PolicySnapshot) // for testing
@@ -46,7 +47,7 @@ type PolicyRegistry struct {
 func NewPolicyRegistry() *PolicyRegistry {
 	return &PolicyRegistry{
 		providers: make(map[ProviderId]*providerEntry),
-		stats:     make(map[string]*PolicyStats),
+		stats:     make(map[string]*engine.PolicyStats),
 		compiler:  engine.NewCompiler(),
 	}
 }
@@ -60,7 +61,7 @@ func (r *PolicyRegistry) Register(provider PolicyProvider) (ProviderHandle, erro
 	provider.SetStatsCollector(r.CollectStats)
 
 	// Subscribe to policy updates
-	err := provider.Subscribe(func(policies []*Policy) {
+	err := provider.Subscribe(func(policies []*policyv1.Policy) {
 		r.onProviderUpdate(id, policies)
 	})
 	if err != nil {
@@ -110,7 +111,7 @@ func (r *PolicyRegistry) SetOnRecompile(fn func(*PolicySnapshot)) {
 	r.onRecompile = fn
 }
 
-func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*Policy) {
+func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*policyv1.Policy) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -124,15 +125,15 @@ func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*Policy) {
 // INVARIANT: A lock MUST be acquired.
 func (r *PolicyRegistry) recompileLocked() {
 	// Collect all policies from all providers
-	var allPolicies []*Policy
+	var allPolicies []*policyv1.Policy
 	for _, entry := range r.providers {
 		allPolicies = append(allPolicies, entry.policies...)
 	}
 
 	// Update stats map - add new policies, keep existing stats
 	for _, p := range allPolicies {
-		if _, ok := r.stats[p.ID]; !ok {
-			r.stats[p.ID] = &PolicyStats{}
+		if _, ok := r.stats[p.GetId()]; !ok {
+			r.stats[p.GetId()] = &engine.PolicyStats{}
 		}
 	}
 

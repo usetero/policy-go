@@ -12,11 +12,11 @@ import (
 // old snapshots remain valid until garbage collected.
 type PolicySnapshot struct {
 	matchers *engine.CompiledMatchers
-	stats    map[string]*PolicyStats
+	stats    map[string]*engine.PolicyStats
 }
 
 // newPolicySnapshot creates a new snapshot from compiled matchers.
-func newPolicySnapshot(matchers *engine.CompiledMatchers, stats map[string]*PolicyStats) *PolicySnapshot {
+func newPolicySnapshot(matchers *engine.CompiledMatchers, stats map[string]*engine.PolicyStats) *PolicySnapshot {
 	return &PolicySnapshot{
 		matchers: matchers,
 		stats:    stats,
@@ -29,7 +29,7 @@ func (s *PolicySnapshot) CompiledMatchers() *engine.CompiledMatchers {
 }
 
 // GetStats returns the stats for a policy, or nil if not found.
-func (s *PolicySnapshot) GetStats(policyID string) *PolicyStats {
+func (s *PolicySnapshot) GetStats(policyID string) *engine.PolicyStats {
 	return s.stats[policyID]
 }
 

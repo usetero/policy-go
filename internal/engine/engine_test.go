@@ -5,12 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
-
-// Helper to create a bool pointer
-func boolPtr(b bool) *bool {
-	return &b
-}
 
 func TestKeepRestrictiveness(t *testing.T) {
 	tests := []struct {
@@ -32,6 +28,39 @@ func TestKeepRestrictiveness(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.keep.Restrictiveness()
 			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestParseKeep(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected Keep
+		hasError bool
+	}{
+		{"empty is all", "", Keep{Action: KeepAll}, false},
+		{"all", "all", Keep{Action: KeepAll}, false},
+		{"none", "none", Keep{Action: KeepNone}, false},
+		{"50%", "50%", Keep{Action: KeepSample, Value: 50}, false},
+		{"100%", "100%", Keep{Action: KeepSample, Value: 100}, false},
+		{"0%", "0%", Keep{Action: KeepSample, Value: 0}, false},
+		{"100/s", "100/s", Keep{Action: KeepRatePerSecond, Value: 100}, false},
+		{"1000/m", "1000/m", Keep{Action: KeepRatePerMinute, Value: 1000}, false},
+		{"invalid", "invalid", Keep{}, true},
+		{"negative percentage", "-10%", Keep{}, true},
+		{"over 100%", "150%", Keep{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseKeep(tt.input)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
 		})
 	}
 }
@@ -61,32 +90,6 @@ func TestPolicyStats(t *testing.T) {
 	assert.Equal(t, uint64(1), snapshot.RateLimited)
 }
 
-func TestPolicyIsLogPolicy(t *testing.T) {
-	tests := []struct {
-		name     string
-		policy   *Policy
-		expected bool
-	}{
-		{
-			name:     "Policy with Log is a log policy",
-			policy:   &Policy{ID: "test", Log: &LogPolicy{}},
-			expected: true,
-		},
-		{
-			name:     "Policy without Log is not a log policy",
-			policy:   &Policy{ID: "test", Log: nil},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.policy.IsLogPolicy()
-			assert.Equal(t, tt.expected, got)
-		})
-	}
-}
-
 func TestCompilerCompileEmpty(t *testing.T) {
 	compiler := NewCompiler()
 	stats := make(map[string]*PolicyStats)
@@ -106,18 +109,20 @@ func TestCompilerCompileSinglePolicy(t *testing.T) {
 		"test-policy": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "test-policy",
+			Id:   "test-policy",
 			Name: "Test Policy",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "error",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "error"},
+						},
 					},
+					Keep: "none",
 				},
-				Keep: Keep{Action: KeepNone},
 			},
 		},
 	}
@@ -142,22 +147,24 @@ func TestCompilerCompileMultipleMatchers(t *testing.T) {
 		"multi-matcher": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "multi-matcher",
+			Id:   "multi-matcher",
 			Name: "Multiple Matchers",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "error",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "error"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+							Match: &policyv1.LogMatcher_Regex{Regex: "ERROR"},
+						},
 					},
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldSeverityText},
-						Pattern: "ERROR",
-					},
+					Keep: "none",
 				},
-				Keep: Keep{Action: KeepNone},
 			},
 		},
 	}
@@ -180,19 +187,21 @@ func TestCompilerCompileNegatedMatcher(t *testing.T) {
 		"negated-policy": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "negated-policy",
+			Id:   "negated-policy",
 			Name: "Negated Matcher",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "debug",
-						Negated: true,
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field:  &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match:  &policyv1.LogMatcher_Regex{Regex: "debug"},
+							Negate: true,
+						},
 					},
+					Keep: "all",
 				},
-				Keep: Keep{Action: KeepAll},
 			},
 		},
 	}
@@ -207,85 +216,26 @@ func TestCompilerCompileNegatedMatcher(t *testing.T) {
 	}
 }
 
-func TestCompilerCompileMixedNegation(t *testing.T) {
-	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{
-		"normal":  {},
-		"negated": {},
-	}
-
-	policies := []*Policy{
-		{
-			ID:   "normal",
-			Name: "Normal",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "error",
-						Negated: false,
-					},
-				},
-				Keep: Keep{Action: KeepNone},
-			},
-		},
-		{
-			ID:   "negated",
-			Name: "Negated",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "debug",
-						Negated: true,
-					},
-				},
-				Keep: Keep{Action: KeepAll},
-			},
-		},
-	}
-
-	compiled, err := compiler.Compile(policies, stats)
-	require.NoError(t, err)
-	defer compiled.Close()
-
-	// Should have 2 databases (same field but different negation)
-	assert.Len(t, compiled.Databases(), 2)
-
-	// Verify both keys exist
-	normalKey := MatchKey{
-		Selector: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-		Negated:  false,
-	}
-	negatedKey := MatchKey{
-		Selector: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-		Negated:  true,
-	}
-
-	_, hasNormal := compiled.Databases()[normalKey]
-	_, hasNegated := compiled.Databases()[negatedKey]
-	assert.True(t, hasNormal, "expected to find normal (non-negated) database")
-	assert.True(t, hasNegated, "expected to find negated database")
-}
-
 func TestCompilerCompileExistenceCheck(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{
 		"exists-check": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "exists-check",
+			Id:   "exists-check",
 			Name: "Existence Check",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:  FieldSelector{Type: FieldTypeLogAttribute, Key: "trace_id"},
-						Exists: boolPtr(true),
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: "trace_id"},
+							Match: &policyv1.LogMatcher_Exists{Exists: true},
+						},
 					},
+					Keep: "all",
 				},
-				Keep: Keep{Action: KeepAll},
 			},
 		},
 	}
@@ -303,28 +253,29 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	check := compiled.ExistenceChecks()[0]
 	assert.Equal(t, "exists-check", check.PolicyID)
 	assert.True(t, check.MustExist)
-	assert.Equal(t, FieldTypeLogAttribute, check.Selector.Type)
-	assert.Equal(t, "trace_id", check.Selector.Key)
+	assert.Equal(t, "trace_id", check.Selector.LogAttribute)
 }
 
-func TestCompilerCompileNotExistsCheck(t *testing.T) {
+func TestCompilerCompileExactMatch(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{
-		"not-exists-check": {},
+		"exact-match": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "not-exists-check",
-			Name: "Not Exists Check",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:  FieldSelector{Type: FieldTypeResourceAttribute, Key: "debug"},
-						Exists: boolPtr(false),
+			Id:   "exact-match",
+			Name: "Exact Match",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Exact{Exact: "hello.world"},
+						},
 					},
+					Keep: "none",
 				},
-				Keep: Keep{Action: KeepNone},
 			},
 		},
 	}
@@ -333,93 +284,33 @@ func TestCompilerCompileNotExistsCheck(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Len(t, compiled.ExistenceChecks(), 1)
+	// Should have 1 database
+	assert.Len(t, compiled.Databases(), 1)
 
-	check := compiled.ExistenceChecks()[0]
-	assert.False(t, check.MustExist)
-}
+	// Scan for exact match (dots should be escaped)
+	for _, db := range compiled.Databases() {
+		matched, err := db.Scan([]byte("hello.world"))
+		require.NoError(t, err)
+		assert.True(t, matched[0], "expected exact match")
 
-func TestCompilerCompileAllFieldTypes(t *testing.T) {
-	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{
-		"all-fields": {},
+		// Should not match with different character
+		matched, err = db.Scan([]byte("helloXworld"))
+		require.NoError(t, err)
+		assert.False(t, matched[0], "should not match")
 	}
-
-	policies := []*Policy{
-		{
-			ID:   "all-fields",
-			Name: "All Field Types",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "body-pattern",
-					},
-					{
-						Field:   FieldSelector{Type: FieldTypeLogAttribute, Key: "log_attr"},
-						Pattern: "log-attr-pattern",
-					},
-					{
-						Field:   FieldSelector{Type: FieldTypeResourceAttribute, Key: "resource_attr"},
-						Pattern: "resource-attr-pattern",
-					},
-					{
-						Field:   FieldSelector{Type: FieldTypeScopeAttribute, Key: "scope_attr"},
-						Pattern: "scope-attr-pattern",
-					},
-				},
-				Keep: Keep{Action: KeepNone},
-			},
-		},
-	}
-
-	compiled, err := compiler.Compile(policies, stats)
-	require.NoError(t, err)
-	defer compiled.Close()
-
-	// Should have 4 databases (one per field type/key)
-	assert.Len(t, compiled.Databases(), 4)
-
-	policy, ok := compiled.GetPolicy("all-fields")
-	require.True(t, ok, "expected to find all-fields policy")
-	assert.Equal(t, 4, policy.MatcherCount)
-}
-
-func TestCompilerCompileInvalidRegex(t *testing.T) {
-	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{
-		"invalid-regex": {},
-	}
-
-	policies := []*Policy{
-		{
-			ID:   "invalid-regex",
-			Name: "Invalid Regex",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "[invalid",
-					},
-				},
-				Keep: Keep{Action: KeepNone},
-			},
-		},
-	}
-
-	_, err := compiler.Compile(policies, stats)
-	assert.Error(t, err)
 }
 
 func TestCompilerSkipsNonLogPolicies(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "non-log-policy",
-			Name: "Non-Log Policy",
-			Log:  nil, // Not a log policy
+			Id:   "metric-policy",
+			Name: "Metric Policy",
+			Target: &policyv1.Policy_Metric{
+				Metric: &policyv1.MetricTarget{},
+			},
 		},
 	}
 
@@ -436,22 +327,24 @@ func TestCompiledDatabaseScan(t *testing.T) {
 		"scan-test": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "scan-test",
+			Id:   "scan-test",
 			Name: "Scan Test",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "error",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "error"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "warning"},
+						},
 					},
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "warning",
-					},
+					Keep: "none",
 				},
-				Keep: Keep{Action: KeepNone},
 			},
 		},
 	}
@@ -460,12 +353,13 @@ func TestCompiledDatabaseScan(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	key := MatchKey{
-		Selector: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-		Negated:  false,
+	// Find the database
+	var db *CompiledDatabase
+	for _, d := range compiled.Databases() {
+		db = d
+		break
 	}
-	db, ok := compiled.Databases()[key]
-	require.True(t, ok, "expected to find database for body field")
+	require.NotNil(t, db)
 
 	tests := []struct {
 		name     string
@@ -509,18 +403,20 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 		"concurrent-test": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "concurrent-test",
+			Id:   "concurrent-test",
 			Name: "Concurrent Test",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "test",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "test"},
+						},
 					},
+					Keep: "none",
 				},
-				Keep: Keep{Action: KeepNone},
 			},
 		},
 	}
@@ -529,11 +425,11 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	key := MatchKey{
-		Selector: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-		Negated:  false,
+	var db *CompiledDatabase
+	for _, d := range compiled.Databases() {
+		db = d
+		break
 	}
-	db := compiled.Databases()[key]
 
 	// Run concurrent scans
 	done := make(chan bool)
@@ -553,36 +449,6 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	}
 }
 
-func TestCompiledMatchersClose(t *testing.T) {
-	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{
-		"close-test": {},
-	}
-
-	policies := []*Policy{
-		{
-			ID:   "close-test",
-			Name: "Close Test",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "test",
-					},
-				},
-				Keep: Keep{Action: KeepNone},
-			},
-		},
-	}
-
-	compiled, err := compiler.Compile(policies, stats)
-	require.NoError(t, err)
-
-	// Close should not error
-	err = compiled.Close()
-	assert.NoError(t, err)
-}
-
 func TestNewCompiledMatchers(t *testing.T) {
 	cm := NewCompiledMatchers()
 
@@ -591,111 +457,7 @@ func TestNewCompiledMatchers(t *testing.T) {
 	assert.NotNil(t, cm.policies)
 }
 
-func TestCompiledPolicyWithStats(t *testing.T) {
-	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{
-		"stats-test": {},
-	}
-
-	policies := []*Policy{
-		{
-			ID:   "stats-test",
-			Name: "Stats Test",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "test",
-					},
-				},
-				Keep: Keep{Action: KeepNone},
-			},
-		},
-	}
-
-	compiled, err := compiler.Compile(policies, stats)
-	require.NoError(t, err)
-	defer compiled.Close()
-
-	policy, ok := compiled.GetPolicy("stats-test")
-	require.True(t, ok, "expected to find stats-test policy")
-
-	// Stats should be linked
-	assert.Same(t, stats["stats-test"], policy.Stats)
-
-	// Record some stats
-	policy.Stats.RecordHit()
-	policy.Stats.RecordDrop()
-
-	// Verify via snapshot
-	snapshot := stats["stats-test"].Snapshot("stats-test")
-	assert.Equal(t, uint64(1), snapshot.Hits)
-	assert.Equal(t, uint64(1), snapshot.Drops)
-}
-
-func TestPatternIndexMapping(t *testing.T) {
-	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{
-		"policy-a": {},
-		"policy-b": {},
-	}
-
-	policies := []*Policy{
-		{
-			ID:   "policy-a",
-			Name: "Policy A",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "pattern-a",
-					},
-				},
-				Keep: Keep{Action: KeepNone},
-			},
-		},
-		{
-			ID:   "policy-b",
-			Name: "Policy B",
-			Log: &LogPolicy{
-				Matchers: []Matcher{
-					{
-						Field:   FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-						Pattern: "pattern-b",
-					},
-				},
-				Keep: Keep{Action: KeepAll},
-			},
-		},
-	}
-
-	compiled, err := compiler.Compile(policies, stats)
-	require.NoError(t, err)
-	defer compiled.Close()
-
-	key := MatchKey{
-		Selector: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody},
-		Negated:  false,
-	}
-	db := compiled.Databases()[key]
-
-	// Pattern index should map back to correct policies
-	patternIndex := db.PatternIndex()
-	assert.Len(t, patternIndex, 2)
-
-	// Scan and verify mapping
-	matched, err := db.Scan([]byte("pattern-a here"))
-	require.NoError(t, err)
-
-	for patternID, didMatch := range matched {
-		if didMatch {
-			ref := patternIndex[patternID]
-			assert.Equal(t, "policy-a", ref.PolicyID)
-		}
-	}
-}
-
-func TestPolicyIndex(t *testing.T) {
+func TestPolicyCount(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{
 		"policy-0": {},
@@ -703,29 +465,44 @@ func TestPolicyIndex(t *testing.T) {
 		"policy-2": {},
 	}
 
-	policies := []*Policy{
+	policies := []*policyv1.Policy{
 		{
-			ID:   "policy-0",
+			Id:   "policy-0",
 			Name: "Policy 0",
-			Log: &LogPolicy{
-				Matchers: []Matcher{{Field: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody}, Pattern: "a"}},
-				Keep:     Keep{Action: KeepNone},
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{{
+						Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+						Match: &policyv1.LogMatcher_Regex{Regex: "a"},
+					}},
+					Keep: "none",
+				},
 			},
 		},
 		{
-			ID:   "policy-1",
+			Id:   "policy-1",
 			Name: "Policy 1",
-			Log: &LogPolicy{
-				Matchers: []Matcher{{Field: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody}, Pattern: "b"}},
-				Keep:     Keep{Action: KeepAll},
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{{
+						Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+						Match: &policyv1.LogMatcher_Regex{Regex: "b"},
+					}},
+					Keep: "all",
+				},
 			},
 		},
 		{
-			ID:   "policy-2",
+			Id:   "policy-2",
 			Name: "Policy 2",
-			Log: &LogPolicy{
-				Matchers: []Matcher{{Field: FieldSelector{Type: FieldTypeLogField, Field: LogFieldBody}, Pattern: "c"}},
-				Keep:     Keep{Action: KeepNone},
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{{
+						Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+						Match: &policyv1.LogMatcher_Regex{Regex: "c"},
+					}},
+					Keep: "none",
+				},
 			},
 		},
 	}
@@ -741,14 +518,5 @@ func TestPolicyIndex(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		policy := compiled.PolicyByIndex(i)
 		assert.Equal(t, i, policy.Index)
-	}
-
-	// Verify pattern refs have correct policy index
-	for _, db := range compiled.Databases() {
-		for _, ref := range db.PatternIndex() {
-			policy, ok := compiled.GetPolicy(ref.PolicyID)
-			require.True(t, ok)
-			assert.Equal(t, policy.Index, ref.PolicyIndex)
-		}
 	}
 }

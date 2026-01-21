@@ -19,7 +19,7 @@ func TestFileProviderLoad(t *testing.T) {
 	// We have 7 log policies in the test file
 	logPolicies := 0
 	for _, p := range policies {
-		if p.IsLogPolicy() {
+		if p.GetLog() != nil {
 			logPolicies++
 		}
 	}
@@ -29,16 +29,18 @@ func TestFileProviderLoad(t *testing.T) {
 	// Check first policy
 	var found *Policy
 	for _, p := range policies {
-		if p.ID == "drop-echo-logs" {
+		if p.GetId() == "drop-echo-logs" {
 			found = p
 			break
 		}
 	}
 	require.NotNil(t, found, "policy 'drop-echo-logs' not found")
-	assert.Equal(t, "drop-echo-logs", found.Name)
-	assert.True(t, found.IsLogPolicy())
-	assert.Equal(t, KeepNone, found.Log.Keep.Action)
-	assert.Len(t, found.Log.Matchers, 1)
+	assert.Equal(t, "drop-echo-logs", found.GetName())
+	assert.NotNil(t, found.GetLog())
+	keep, err := ParseKeep(found.GetLog().GetKeep())
+	require.NoError(t, err)
+	assert.Equal(t, KeepNone, keep.Action)
+	assert.Len(t, found.GetLog().GetMatch(), 1)
 }
 
 func TestRegistryAndSnapshot(t *testing.T) {
@@ -340,7 +342,7 @@ func TestFileProviderWithPollInterval(t *testing.T) {
 	// Verify initial load
 	mu.Lock()
 	assert.Len(t, lastPolicies, 1, "expected 1 policy after initial load")
-	assert.Equal(t, "test-policy", lastPolicies[0].ID)
+	assert.Equal(t, "test-policy", lastPolicies[0].GetId())
 	mu.Unlock()
 
 	// Wait a bit, then update the file
