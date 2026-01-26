@@ -1,20 +1,73 @@
 package policy
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
 )
+
+// configTestPolicyServer implements PolicyServiceServer for config tests.
+type configTestPolicyServer struct {
+	policyv1.UnimplementedPolicyServiceServer
+	mu          sync.Mutex
+	syncHandler func(context.Context, *policyv1.SyncRequest) (*policyv1.SyncResponse, error)
+}
+
+func (s *configTestPolicyServer) Sync(ctx context.Context, req *policyv1.SyncRequest) (*policyv1.SyncResponse, error) {
+	s.mu.Lock()
+	handler := s.syncHandler
+	s.mu.Unlock()
+
+	if handler != nil {
+		return handler(ctx, req)
+	}
+
+	return &policyv1.SyncResponse{Hash: "default-hash"}, nil
+}
+
+func (s *configTestPolicyServer) setHandler(h func(context.Context, *policyv1.SyncRequest) (*policyv1.SyncResponse, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncHandler = h
+}
+
+// startTestGrpcServer starts a gRPC test server and returns the address and cleanup function.
+func startTestGrpcServer(t *testing.T, server *configTestPolicyServer) (string, func()) {
+	t.Helper()
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+
+	grpcServer := grpc.NewServer()
+	policyv1.RegisterPolicyServiceServer(grpcServer, server)
+
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			t.Logf("server error: %v", err)
+		}
+	}()
+
+	cleanup := func() {
+		grpcServer.GracefulStop()
+	}
+
+	return lis.Addr().String(), cleanup
+}
 
 func TestParseConfigEmpty(t *testing.T) {
 	config, err := ParseConfig([]byte(`{"policy_providers": []}`))
@@ -602,13 +655,41 @@ func TestConfigLoaderLoadHttpWithContentType(t *testing.T) {
 	UnregisterAll(loaded)
 }
 
-func TestConfigLoaderLoadGrpcNotImplemented(t *testing.T) {
+func TestConfigLoaderLoadGrpc(t *testing.T) {
+	// Create a test gRPC server
+	server := &configTestPolicyServer{}
+	server.setHandler(func(ctx context.Context, req *policyv1.SyncRequest) (*policyv1.SyncResponse, error) {
+		return &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:      "grpc-policy-1",
+					Name:    "gRPC Policy",
+					Enabled: true,
+					Target: &policyv1.Policy_Log{
+						Log: &policyv1.LogTarget{
+							Keep: "all",
+						},
+					},
+				},
+			},
+			Hash: "test-hash",
+		}, nil
+	})
+
+	addr, cleanup := startTestGrpcServer(t, server)
+	defer cleanup()
+
+	pollInterval := 0 // Disable polling for test
 	config := &Config{
 		Providers: []ProviderConfig{
 			{
-				Type: "grpc",
-				ID:   "test-provider",
-				URL:  "grpc://example.com:443",
+				Type:             "grpc",
+				ID:               "test-grpc-provider",
+				URL:              addr,
+				PollIntervalSecs: &pollInterval,
+				Headers: []Header{
+					{Name: "authorization", Value: "Bearer test-token"},
+				},
 			},
 		},
 	}
@@ -616,9 +697,19 @@ func TestConfigLoaderLoadGrpcNotImplemented(t *testing.T) {
 	registry := NewPolicyRegistry()
 	loader := NewConfigLoader(registry)
 
-	_, err := loader.Load(config)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not yet implemented")
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "test-grpc-provider", loaded[0].ID)
+
+	// Verify policies were loaded
+	snapshot := registry.Snapshot()
+	_, ok := snapshot.GetPolicy("grpc-policy-1")
+	assert.True(t, ok, "expected grpc-policy-1 to be loaded")
+
+	// Cleanup
+	StopAll(loaded)
+	UnregisterAll(loaded)
 }
 
 func TestStopAllAndUnregisterAll(t *testing.T) {

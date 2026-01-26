@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
@@ -40,9 +42,7 @@ func TestContentType_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.contentType.String(); got != tt.want {
-				t.Errorf("ContentType.String() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, tt.contentType.String())
 		})
 	}
 }
@@ -122,25 +122,15 @@ func TestNewHttpProvider(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := NewHttpProvider(tt.url, tt.opts...)
 
-			if p.config.URL != tt.wantURL {
-				t.Errorf("URL = %v, want %v", p.config.URL, tt.wantURL)
-			}
-			if p.config.PollInterval != tt.wantPollInterval {
-				t.Errorf("PollInterval = %v, want %v", p.config.PollInterval, tt.wantPollInterval)
-			}
-			if p.config.ContentType != tt.wantContentType {
-				t.Errorf("ContentType = %v, want %v", p.config.ContentType, tt.wantContentType)
-			}
+			assert.Equal(t, tt.wantURL, p.config.URL)
+			assert.Equal(t, tt.wantPollInterval, p.config.PollInterval)
+			assert.Equal(t, tt.wantContentType, p.config.ContentType)
 			if tt.wantHeaders != nil {
 				for k, v := range tt.wantHeaders {
-					if p.config.Headers[k] != v {
-						t.Errorf("Header[%s] = %v, want %v", k, p.config.Headers[k], v)
-					}
+					assert.Equal(t, v, p.config.Headers[k], "Header %s mismatch", k)
 				}
 			}
-			if p.client == nil {
-				t.Error("client should not be nil")
-			}
+			assert.NotNil(t, p.client)
 		})
 	}
 }
@@ -149,9 +139,7 @@ func TestNewHttpProvider_WithCustomClient(t *testing.T) {
 	customClient := &http.Client{Timeout: 5 * time.Second}
 	p := NewHttpProvider("http://example.com", WithHTTPClient(customClient))
 
-	if p.client != customClient {
-		t.Error("custom HTTP client was not set")
-	}
+	assert.Equal(t, customClient, p.client)
 }
 
 func TestNewHttpProvider_WithServiceMetadata(t *testing.T) {
@@ -166,9 +154,7 @@ func TestNewHttpProvider_WithServiceMetadata(t *testing.T) {
 
 	p := NewHttpProvider("http://example.com", WithServiceMetadata(metadata))
 
-	if p.config.ServiceMetadata != metadata {
-		t.Error("ServiceMetadata was not set")
-	}
+	assert.Equal(t, metadata, p.config.ServiceMetadata)
 }
 
 func TestNewHttpProvider_WithCallbacks(t *testing.T) {
@@ -179,31 +165,21 @@ func TestNewHttpProvider_WithCallbacks(t *testing.T) {
 		WithHTTPOnSync(func() { syncCalled = true }),
 	)
 
-	if p.config.OnError == nil {
-		t.Error("OnError callback was not set")
-	}
-	if p.config.OnSync == nil {
-		t.Error("OnSync callback was not set")
-	}
+	require.NotNil(t, p.config.OnError)
+	require.NotNil(t, p.config.OnSync)
 
 	// Verify callbacks are callable
 	p.config.OnError(nil)
 	p.config.OnSync()
 
-	if !errorCalled {
-		t.Error("OnError callback was not invoked")
-	}
-	if !syncCalled {
-		t.Error("OnSync callback was not invoked")
-	}
+	assert.True(t, errorCalled, "OnError callback was not invoked")
+	assert.True(t, syncCalled, "OnSync callback was not invoked")
 }
 
 func TestHttpProvider_SetStatsCollector(t *testing.T) {
 	p := NewHttpProvider("http://example.com")
 
-	if p.statsCollector != nil {
-		t.Error("statsCollector should be nil initially")
-	}
+	assert.Nil(t, p.statsCollector, "statsCollector should be nil initially")
 
 	collector := func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
@@ -213,18 +189,12 @@ func TestHttpProvider_SetStatsCollector(t *testing.T) {
 
 	p.SetStatsCollector(collector)
 
-	if p.statsCollector == nil {
-		t.Error("statsCollector should be set")
-	}
+	require.NotNil(t, p.statsCollector)
 
 	// Verify the collector returns expected data
 	snapshots := p.statsCollector()
-	if len(snapshots) != 1 {
-		t.Errorf("expected 1 snapshot, got %d", len(snapshots))
-	}
-	if snapshots[0].PolicyID != "policy-1" {
-		t.Errorf("expected policy-1, got %s", snapshots[0].PolicyID)
-	}
+	require.Len(t, snapshots, 1)
+	assert.Equal(t, "policy-1", snapshots[0].PolicyID)
 }
 
 func TestHttpProvider_Load_Protobuf(t *testing.T) {
@@ -235,25 +205,15 @@ func TestHttpProvider_Load_Protobuf(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		if ct := r.Header.Get("Content-Type"); ct != "application/x-protobuf" {
-			t.Errorf("expected application/x-protobuf, got %s", ct)
-		}
-		if accept := r.Header.Get("Accept"); accept != "application/x-protobuf" {
-			t.Errorf("expected application/x-protobuf Accept, got %s", accept)
-		}
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/x-protobuf", r.Header.Get("Content-Type"))
+		assert.Equal(t, "application/x-protobuf", r.Header.Get("Accept"))
 
 		// Parse request
 		body, _ := io.ReadAll(r.Body)
 		var req policyv1.SyncRequest
-		if err := proto.Unmarshal(body, &req); err != nil {
-			t.Errorf("failed to unmarshal request: %v", err)
-		}
-		if !req.FullSync {
-			t.Error("expected full_sync to be true")
-		}
+		require.NoError(t, proto.Unmarshal(body, &req))
+		assert.True(t, req.FullSync)
 
 		// Send response
 		resp := &policyv1.SyncResponse{
@@ -270,41 +230,25 @@ func TestHttpProvider_Load_Protobuf(t *testing.T) {
 	p := NewHttpProvider(server.URL)
 	policies, err := p.Load()
 
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if len(policies) != 2 {
-		t.Errorf("expected 2 policies, got %d", len(policies))
-	}
-	if policies[0].Id != "policy-1" {
-		t.Errorf("expected policy-1, got %s", policies[0].Id)
-	}
+	require.NoError(t, err)
+	require.Len(t, policies, 2)
+	assert.Equal(t, "policy-1", policies[0].Id)
 
 	// Verify state was updated
-	if p.lastHash != "hash123" {
-		t.Errorf("lastHash = %s, want hash123", p.lastHash)
-	}
-	if p.lastSyncTimestamp != 1234567890 {
-		t.Errorf("lastSyncTimestamp = %d, want 1234567890", p.lastSyncTimestamp)
-	}
+	assert.Equal(t, "hash123", p.lastHash)
+	assert.Equal(t, uint64(1234567890), p.lastSyncTimestamp)
 }
 
 func TestHttpProvider_Load_JSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
-		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
-			t.Errorf("expected application/json, got %s", ct)
-		}
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		// Parse JSON request
 		body, _ := io.ReadAll(r.Body)
 		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Errorf("failed to unmarshal JSON request: %v", err)
-		}
-		if fullSync, ok := req["full_sync"].(bool); !ok || !fullSync {
-			t.Error("expected full_sync to be true")
-		}
+		require.NoError(t, json.Unmarshal(body, &req))
+		assert.Equal(t, true, req["full_sync"])
 
 		// Send JSON response (using protobuf JSON format)
 		resp := &policyv1.SyncResponse{
@@ -322,23 +266,15 @@ func TestHttpProvider_Load_JSON(t *testing.T) {
 	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
 	policies, err := p.Load()
 
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if len(policies) != 1 {
-		t.Errorf("expected 1 policy, got %d", len(policies))
-	}
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
 }
 
 func TestHttpProvider_Load_WithHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify custom headers
-		if auth := r.Header.Get("Authorization"); auth != "Bearer secret-token" {
-			t.Errorf("expected Authorization header, got %s", auth)
-		}
-		if custom := r.Header.Get("X-Custom-Header"); custom != "custom-value" {
-			t.Errorf("expected X-Custom-Header, got %s", custom)
-		}
+		assert.Equal(t, "Bearer secret-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "custom-value", r.Header.Get("X-Custom-Header"))
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
@@ -352,9 +288,7 @@ func TestHttpProvider_Load_WithHeaders(t *testing.T) {
 	}))
 
 	_, err := p.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	require.NoError(t, err)
 }
 
 func TestHttpProvider_Load_WithServiceMetadata(t *testing.T) {
@@ -365,9 +299,7 @@ func TestHttpProvider_Load_WithServiceMetadata(t *testing.T) {
 
 		// Verify client metadata
 		cm := req.GetClientMetadata()
-		if cm == nil {
-			t.Fatal("expected client_metadata to be set")
-		}
+		require.NotNil(t, cm)
 
 		// Check resource attributes
 		attrs := cm.GetResourceAttributes()
@@ -378,12 +310,8 @@ func TestHttpProvider_Load_WithServiceMetadata(t *testing.T) {
 			}
 		}
 
-		if attrMap["service.name"] != "my-service" {
-			t.Errorf("service.name = %s, want my-service", attrMap["service.name"])
-		}
-		if attrMap["service.namespace"] != "my-namespace" {
-			t.Errorf("service.namespace = %s, want my-namespace", attrMap["service.namespace"])
-		}
+		assert.Equal(t, "my-service", attrMap["service.name"])
+		assert.Equal(t, "my-namespace", attrMap["service.namespace"])
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
@@ -399,9 +327,7 @@ func TestHttpProvider_Load_WithServiceMetadata(t *testing.T) {
 	}))
 
 	_, err := p.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	require.NoError(t, err)
 }
 
 func TestHttpProvider_Load_WithStatsCollector(t *testing.T) {
@@ -412,21 +338,15 @@ func TestHttpProvider_Load_WithStatsCollector(t *testing.T) {
 
 		// Verify policy statuses
 		statuses := req.GetPolicyStatuses()
-		if len(statuses) != 2 {
-			t.Errorf("expected 2 policy statuses, got %d", len(statuses))
-		}
+		require.Len(t, statuses, 2)
 
 		statusMap := make(map[string]*policyv1.PolicySyncStatus)
 		for _, s := range statuses {
 			statusMap[s.GetId()] = s
 		}
 
-		if s := statusMap["policy-1"]; s == nil || s.GetMatchHits() != 100 {
-			t.Errorf("policy-1 match_hits = %v, want 100", s)
-		}
-		if s := statusMap["policy-2"]; s == nil || s.GetMatchHits() != 50 {
-			t.Errorf("policy-2 match_hits = %v, want 50", s)
-		}
+		assert.Equal(t, int64(100), statusMap["policy-1"].GetMatchHits())
+		assert.Equal(t, int64(50), statusMap["policy-2"].GetMatchHits())
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
@@ -443,9 +363,7 @@ func TestHttpProvider_Load_WithStatsCollector(t *testing.T) {
 	})
 
 	_, err := p.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
+	require.NoError(t, err)
 }
 
 func TestHttpProvider_Load_HTTPError(t *testing.T) {
@@ -471,12 +389,8 @@ func TestHttpProvider_Load_HTTPError(t *testing.T) {
 			p := NewHttpProvider(server.URL)
 			_, err := p.Load()
 
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !IsProvider(err) {
-				t.Errorf("expected provider error, got %T", err)
-			}
+			require.Error(t, err)
+			assert.True(t, IsProvider(err))
 		})
 	}
 }
@@ -494,12 +408,8 @@ func TestHttpProvider_Load_SyncError(t *testing.T) {
 	p := NewHttpProvider(server.URL)
 	_, err := p.Load()
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !IsProvider(err) {
-		t.Errorf("expected provider error, got %T", err)
-	}
+	require.Error(t, err)
+	assert.True(t, IsProvider(err))
 }
 
 func TestHttpProvider_Load_InvalidResponse(t *testing.T) {
@@ -511,18 +421,14 @@ func TestHttpProvider_Load_InvalidResponse(t *testing.T) {
 	p := NewHttpProvider(server.URL)
 	_, err := p.Load()
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !IsProvider(err) {
-		t.Errorf("expected provider error, got %T", err)
-	}
+	require.Error(t, err)
+	assert.True(t, IsProvider(err))
 }
 
 func TestHttpProvider_Subscribe(t *testing.T) {
-	callCount := 0
-	var receivedPolicies []*policyv1.Policy
 	var mu sync.Mutex
+	var callCount int
+	var receivedPolicies []*policyv1.Policy
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := &policyv1.SyncResponse{
@@ -546,22 +452,14 @@ func TestHttpProvider_Subscribe(t *testing.T) {
 		mu.Unlock()
 	})
 
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	mu.Lock()
 	defer mu.Unlock()
 
-	if callCount != 1 {
-		t.Errorf("callback called %d times, want 1", callCount)
-	}
-	if len(receivedPolicies) != 1 {
-		t.Errorf("received %d policies, want 1", len(receivedPolicies))
-	}
-	if receivedPolicies[0].Id != "sub-policy" {
-		t.Errorf("policy ID = %s, want sub-policy", receivedPolicies[0].Id)
-	}
+	assert.Equal(t, 1, callCount, "callback should be called once")
+	require.Len(t, receivedPolicies, 1)
+	assert.Equal(t, "sub-policy", receivedPolicies[0].Id)
 }
 
 func TestHttpProvider_Subscribe_WithPolling(t *testing.T) {
@@ -596,9 +494,7 @@ func TestHttpProvider_Subscribe_WithPolling(t *testing.T) {
 		callbackCount++
 		mu.Unlock()
 	})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for at least one poll cycle
 	time.Sleep(150 * time.Millisecond)
@@ -609,9 +505,7 @@ func TestHttpProvider_Subscribe_WithPolling(t *testing.T) {
 	mu.Unlock()
 
 	// Should have initial call + at least one poll that detected change
-	if finalCount < 2 {
-		t.Errorf("callback called %d times, want at least 2", finalCount)
-	}
+	assert.GreaterOrEqual(t, finalCount, 2, "callback should be called at least twice")
 }
 
 func TestHttpProvider_Subscribe_Error(t *testing.T) {
@@ -626,9 +520,7 @@ func TestHttpProvider_Subscribe_Error(t *testing.T) {
 		t.Error("callback should not be called on error")
 	})
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 }
 
 func TestHttpProvider_Stop(t *testing.T) {
@@ -645,9 +537,7 @@ func TestHttpProvider_Stop(t *testing.T) {
 	p := NewHttpProvider(server.URL, WithHTTPPollInterval(50*time.Millisecond))
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Let a few polls happen
 	time.Sleep(150 * time.Millisecond)
@@ -662,9 +552,7 @@ func TestHttpProvider_Stop(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	countAfterStop := requestCount.Load()
 
-	if countAfterStop != countAtStop {
-		t.Errorf("requests continued after Stop(): before=%d, after=%d", countAtStop, countAfterStop)
-	}
+	assert.Equal(t, countAtStop, countAfterStop, "requests should not continue after Stop()")
 }
 
 func TestHttpProvider_Stop_Idempotent(t *testing.T) {
@@ -678,9 +566,7 @@ func TestHttpProvider_Stop_Idempotent(t *testing.T) {
 	p := NewHttpProvider(server.URL, WithHTTPPollInterval(100*time.Millisecond))
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Multiple stops should not panic
 	p.Stop()
@@ -722,17 +608,13 @@ func TestHttpProvider_OnErrorCallback(t *testing.T) {
 	)
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for a poll to fail
 	time.Sleep(100 * time.Millisecond)
 	p.Stop()
 
-	if errorReceived.Load() == nil {
-		t.Error("OnError callback was never called")
-	}
+	assert.NotNil(t, errorReceived.Load(), "OnError callback should have been called")
 }
 
 func TestHttpProvider_OnSyncCallback(t *testing.T) {
@@ -753,18 +635,14 @@ func TestHttpProvider_OnSyncCallback(t *testing.T) {
 	)
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for some polls
 	time.Sleep(100 * time.Millisecond)
 	p.Stop()
 
 	// OnSync should have been called multiple times (during polling, not initial load)
-	if syncCount.Load() == 0 {
-		t.Error("OnSync callback was never called")
-	}
+	assert.Greater(t, syncCount.Load(), int32(0), "OnSync callback should have been called")
 }
 
 func TestHttpProvider_HashChangeDetection(t *testing.T) {
@@ -799,20 +677,15 @@ func TestHttpProvider_HashChangeDetection(t *testing.T) {
 	err := p.Subscribe(func(policies []*policyv1.Policy) {
 		callbackCount.Add(1)
 	})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for several poll cycles
 	time.Sleep(150 * time.Millisecond)
 	p.Stop()
 
 	// Should have: 1 initial + 1 when hash changed to hash-2
-	// NOT called when hash stayed the same
 	count := callbackCount.Load()
-	if count < 2 {
-		t.Errorf("callback called %d times, want at least 2", count)
-	}
+	assert.GreaterOrEqual(t, count, int32(2), "callback should be called at least twice")
 }
 
 func TestHttpProvider_IncrementalSync(t *testing.T) {
@@ -826,19 +699,11 @@ func TestHttpProvider_IncrementalSync(t *testing.T) {
 
 		if isFirstRequest.Load() {
 			isFirstRequest.Store(false)
-			if !req.GetFullSync() {
-				t.Error("first request should have full_sync=true")
-			}
-			if req.GetLastSuccessfulHash() != "" {
-				t.Error("first request should have empty last_successful_hash")
-			}
+			assert.True(t, req.GetFullSync(), "first request should have full_sync=true")
+			assert.Empty(t, req.GetLastSuccessfulHash(), "first request should have empty last_successful_hash")
 		} else {
-			if req.GetFullSync() {
-				t.Error("subsequent requests should have full_sync=false")
-			}
-			if req.GetLastSuccessfulHash() != "hash-1" {
-				t.Errorf("expected last_successful_hash=hash-1, got %s", req.GetLastSuccessfulHash())
-			}
+			assert.False(t, req.GetFullSync(), "subsequent requests should have full_sync=false")
+			assert.Equal(t, "hash-1", req.GetLastSuccessfulHash())
 		}
 
 		resp := &policyv1.SyncResponse{
@@ -853,9 +718,7 @@ func TestHttpProvider_IncrementalSync(t *testing.T) {
 	p := NewHttpProvider(server.URL, WithHTTPPollInterval(30*time.Millisecond))
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for at least one poll after initial load
 	time.Sleep(100 * time.Millisecond)
@@ -898,15 +761,11 @@ func TestCollectPolicyStatuses(t *testing.T) {
 			result := collectPolicyStatuses(tt.collector)
 
 			if tt.wantNil {
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
+				assert.Nil(t, result)
 				return
 			}
 
-			if len(result) != tt.wantLen {
-				t.Errorf("len = %d, want %d", len(result), tt.wantLen)
-			}
+			assert.Len(t, result, tt.wantLen)
 		})
 	}
 }
@@ -920,21 +779,13 @@ func TestCollectPolicyStatuses_Values(t *testing.T) {
 
 	result := collectPolicyStatuses(collector)
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(result))
-	}
+	require.Len(t, result, 1)
 
 	status := result[0]
-	if status.GetId() != "p1" {
-		t.Errorf("Id = %s, want p1", status.GetId())
-	}
-	if status.GetMatchHits() != 100 {
-		t.Errorf("MatchHits = %d, want 100", status.GetMatchHits())
-	}
+	assert.Equal(t, "p1", status.GetId())
+	assert.Equal(t, int64(100), status.GetMatchHits())
 	// MatchMisses = Drops + Samples + RateLimited = 10 + 5 + 3 = 18
-	if status.GetMatchMisses() != 18 {
-		t.Errorf("MatchMisses = %d, want 18", status.GetMatchMisses())
-	}
+	assert.Equal(t, int64(18), status.GetMatchMisses())
 }
 
 func TestSyncRequestToMap(t *testing.T) {
@@ -973,12 +824,8 @@ func TestSyncRequestToMap(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := syncRequestToMap(tt.req)
 
-			if got["full_sync"] != tt.want["full_sync"] {
-				t.Errorf("full_sync = %v, want %v", got["full_sync"], tt.want["full_sync"])
-			}
-			if got["last_successful_hash"] != tt.want["last_successful_hash"] {
-				t.Errorf("last_successful_hash = %v, want %v", got["last_successful_hash"], tt.want["last_successful_hash"])
-			}
+			assert.Equal(t, tt.want["full_sync"], got["full_sync"])
+			assert.Equal(t, tt.want["last_successful_hash"], got["last_successful_hash"])
 		})
 	}
 }
@@ -997,9 +844,7 @@ func TestHttpProvider_ConcurrentAccess(t *testing.T) {
 	p := NewHttpProvider(server.URL, WithHTTPPollInterval(10*time.Millisecond))
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Concurrent operations
 	var wg sync.WaitGroup

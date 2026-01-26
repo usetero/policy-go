@@ -188,7 +188,7 @@ func (l *ConfigLoader) createProvider(pc ProviderConfig) (PolicyProvider, error)
 	case "http":
 		return l.createHTTPProvider(pc), nil
 	case "grpc":
-		return nil, fmt.Errorf("grpc provider not yet implemented")
+		return l.createGrpcProvider(pc), nil
 	default:
 		return nil, fmt.Errorf("unknown provider type: %s", pc.Type)
 	}
@@ -238,6 +238,31 @@ func (l *ConfigLoader) createHTTPProvider(pc ProviderConfig) *HttpProvider {
 	}
 
 	return NewHttpProvider(pc.URL, opts...)
+}
+
+func (l *ConfigLoader) createGrpcProvider(pc ProviderConfig) *GrpcProvider {
+	opts := []GrpcProviderOption{}
+
+	if pc.PollIntervalSecs != nil && *pc.PollIntervalSecs > 0 {
+		opts = append(opts, WithGrpcPollInterval(time.Duration(*pc.PollIntervalSecs)*time.Second))
+	}
+
+	if len(pc.Headers) > 0 {
+		headers := make(map[string]string, len(pc.Headers))
+		for _, h := range pc.Headers {
+			headers[h.Name] = h.Value
+		}
+		opts = append(opts, WithGrpcHeaders(headers))
+	}
+
+	// Default to insecure for now (TLS configuration can be added later)
+	opts = append(opts, WithGrpcInsecure())
+
+	if l.onError != nil {
+		opts = append(opts, WithGrpcOnError(l.onError))
+	}
+
+	return NewGrpcProvider(pc.URL, opts...)
 }
 
 // StopAll stops all providers that support stopping.
