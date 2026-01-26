@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 func TestContentType_String(t *testing.T) {
@@ -539,8 +539,10 @@ func TestHttpProvider_Stop(t *testing.T) {
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
 	require.NoError(t, err)
 
-	// Let a few polls happen
-	time.Sleep(150 * time.Millisecond)
+	// Wait for at least one poll to happen
+	assert.Eventually(t, func() bool {
+		return requestCount.Load() >= 1
+	}, time.Second, 10*time.Millisecond, "should have at least one request")
 
 	// Stop and wait for goroutine to exit
 	p.Stop()
@@ -548,11 +550,10 @@ func TestHttpProvider_Stop(t *testing.T) {
 	// Record count after stop completes (wg.Wait ensures goroutine exited)
 	countAtStop := requestCount.Load()
 
-	// Wait and verify no more requests
-	time.Sleep(150 * time.Millisecond)
-	countAfterStop := requestCount.Load()
-
-	assert.Equal(t, countAtStop, countAfterStop, "requests should not continue after Stop()")
+	// Verify no more requests happen after stop
+	assert.Never(t, func() bool {
+		return requestCount.Load() > countAtStop
+	}, 200*time.Millisecond, 20*time.Millisecond, "requests should not continue after Stop()")
 }
 
 func TestHttpProvider_Stop_Idempotent(t *testing.T) {

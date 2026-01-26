@@ -1,7 +1,7 @@
 // Package engine contains the policy evaluation engine implementation.
 package engine
 
-import policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+import policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 
 // LogFieldSelector represents the field to match against in a log record.
 // This is a normalized representation of the proto's oneof field.

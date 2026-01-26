@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 func TestKeepRestrictiveness(t *testing.T) {

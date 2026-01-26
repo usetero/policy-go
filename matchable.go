@@ -2,7 +2,7 @@ package policy
 
 import (
 	"github.com/usetero/policy-go/internal/engine"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // Matchable is the interface for telemetry records that can be matched against policies.

@@ -3,7 +3,7 @@ package policy
 import (
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // ServiceMetadata describes the client's identity for policy sync requests.
