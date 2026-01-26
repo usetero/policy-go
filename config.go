@@ -186,7 +186,7 @@ func (l *ConfigLoader) createProvider(pc ProviderConfig) (PolicyProvider, error)
 	case "file":
 		return l.createFileProvider(pc), nil
 	case "http":
-		return nil, fmt.Errorf("http provider not yet implemented")
+		return l.createHTTPProvider(pc), nil
 	case "grpc":
 		return nil, fmt.Errorf("grpc provider not yet implemented")
 	default:
@@ -206,6 +206,38 @@ func (l *ConfigLoader) createFileProvider(pc ProviderConfig) *FileProvider {
 	}
 
 	return NewFileProvider(pc.Path, opts...)
+}
+
+func (l *ConfigLoader) createHTTPProvider(pc ProviderConfig) *HttpProvider {
+	opts := []HttpProviderOption{}
+
+	if pc.PollIntervalSecs != nil && *pc.PollIntervalSecs > 0 {
+		opts = append(opts, WithHTTPPollInterval(time.Duration(*pc.PollIntervalSecs)*time.Second))
+	}
+
+	if len(pc.Headers) > 0 {
+		headers := make(map[string]string, len(pc.Headers))
+		for _, h := range pc.Headers {
+			headers[h.Name] = h.Value
+		}
+		opts = append(opts, WithHeaders(headers))
+	}
+
+	if pc.ContentType != "" {
+		switch pc.ContentType {
+		case "json", "application/json":
+			opts = append(opts, WithContentType(ContentTypeJSON))
+		default:
+			// Default to protobuf
+			opts = append(opts, WithContentType(ContentTypeProtobuf))
+		}
+	}
+
+	if l.onError != nil {
+		opts = append(opts, WithHTTPOnError(l.onError))
+	}
+
+	return NewHttpProvider(pc.URL, opts...)
 }
 
 // StopAll stops all providers that support stopping.

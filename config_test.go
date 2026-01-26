@@ -1,6 +1,9 @@
 package policy
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestParseConfigEmpty(t *testing.T) {
@@ -505,13 +510,40 @@ func TestConfigLoaderLoadPartialFailure(t *testing.T) {
 	}
 }
 
-func TestConfigLoaderLoadHttpNotImplemented(t *testing.T) {
+func TestConfigLoaderLoadHttp(t *testing.T) {
+	// Create a test server that returns policies with log target (required for compilation)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:      "http-policy-1",
+					Name:    "HTTP Policy",
+					Enabled: true,
+					Target: &policyv1.Policy_Log{
+						Log: &policyv1.LogTarget{
+							Keep: "all",
+						},
+					},
+				},
+			},
+			Hash: "test-hash",
+		}
+		respBytes, _ := proto.Marshal(resp)
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0 // Disable polling for test
 	config := &Config{
 		Providers: []ProviderConfig{
 			{
-				Type: "http",
-				ID:   "test-provider",
-				URL:  "https://example.com/policies",
+				Type:             "http",
+				ID:               "test-http-provider",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+				Headers: []Header{
+					{Name: "Authorization", Value: "Bearer test-token"},
+				},
 			},
 		},
 	}
@@ -519,9 +551,55 @@ func TestConfigLoaderLoadHttpNotImplemented(t *testing.T) {
 	registry := NewPolicyRegistry()
 	loader := NewConfigLoader(registry)
 
-	_, err := loader.Load(config)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not yet implemented")
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "test-http-provider", loaded[0].ID)
+
+	// Verify policies were loaded
+	snapshot := registry.Snapshot()
+	_, ok := snapshot.GetPolicy("http-policy-1")
+	assert.True(t, ok, "expected http-policy-1 to be loaded")
+
+	// Cleanup
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func TestConfigLoaderLoadHttpWithContentType(t *testing.T) {
+	// Test JSON content type configuration
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify JSON content type was set
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		resp := &policyv1.SyncResponse{Hash: "test"}
+		respBytes, _ := json.Marshal(resp)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0
+	config := &Config{
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http-json",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+				ContentType:      "json",
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry)
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+
+	StopAll(loaded)
+	UnregisterAll(loaded)
 }
 
 func TestConfigLoaderLoadGrpcNotImplemented(t *testing.T) {
