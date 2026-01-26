@@ -13,7 +13,7 @@ import (
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
 
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // ContentType specifies the encoding format for HTTP requests.

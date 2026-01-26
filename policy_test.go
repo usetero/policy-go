@@ -80,8 +80,8 @@ func TestEngineEvaluateDropDebugLogs(t *testing.T) {
 	// Test log that should be dropped (matches "drop-debug-logs" - body contains BOTH "debug" AND "trace")
 	// Note: multiple matchers in a policy are AND'd together
 	debugTraceLog := &SimpleLogRecord{
-		BodyValue:         []byte("this is a debug trace message"),
-		SeverityTextValue: []byte("INFO"),
+		Body:         []byte("this is a debug trace message"),
+		SeverityText: []byte("INFO"),
 	}
 
 	result := engine.Evaluate(snapshot, debugTraceLog)
@@ -102,8 +102,8 @@ func TestEngineEvaluateDropBySeverity(t *testing.T) {
 
 	// Test log that should be dropped (matches "drop-debug-level" - severity_text is DEBUG)
 	debugLog := &SimpleLogRecord{
-		BodyValue:         []byte("some normal message"),
-		SeverityTextValue: []byte("DEBUG"),
+		Body:         []byte("some normal message"),
+		SeverityText: []byte("DEBUG"),
 	}
 
 	result := engine.Evaluate(snapshot, debugLog)
@@ -128,8 +128,8 @@ func TestEngineEvaluateNoMatch(t *testing.T) {
 	// - Severity is INFO so it doesn't match "drop-debug-level"
 	// - No log attributes or resource attributes to match other policies
 	debugOnlyLog := &SimpleLogRecord{
-		BodyValue:         []byte("debug only message"),
-		SeverityTextValue: []byte("INFO"),
+		Body:         []byte("debug only message"),
+		SeverityText: []byte("INFO"),
 	}
 
 	result := engine.Evaluate(snapshot, debugOnlyLog)
@@ -150,8 +150,8 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 
 	// Test log that should be dropped (matches "drop-echo-logs" - log_attribute ddsource=nginx)
 	nginxLog := &SimpleLogRecord{
-		BodyValue:         []byte("GET /api/health 200"),
-		SeverityTextValue: []byte("INFO"),
+		Body:         []byte("GET /api/health 200"),
+		SeverityText: []byte("INFO"),
 		LogAttributes: map[string][]byte{
 			"ddsource": []byte("nginx"),
 		},
@@ -175,8 +175,8 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 
 	// Test log that should be dropped (matches "drop-edge-logs" - service.name ends with "edge")
 	edgeLog := &SimpleLogRecord{
-		BodyValue:         []byte("processing request"),
-		SeverityTextValue: []byte("INFO"),
+		Body:         []byte("processing request"),
+		SeverityText: []byte("INFO"),
 		ResourceAttributes: map[string][]byte{
 			"service.name": []byte("api-edge"),
 		},
@@ -204,8 +204,8 @@ func TestEngineEvaluateAllNegatedMatchersPass(t *testing.T) {
 	// - severity_text NOT contains "TRACE" (negated)
 	// This log has neither, so all negated conditions are satisfied
 	normalLog := &SimpleLogRecord{
-		BodyValue:         []byte("normal application message"),
-		SeverityTextValue: []byte("INFO"),
+		Body:         []byte("normal application message"),
+		SeverityText: []byte("INFO"),
 	}
 
 	result := engine.Evaluate(snapshot, normalLog)
@@ -227,8 +227,8 @@ func TestEngineEvaluateAllNegatedMatchersFailOne(t *testing.T) {
 	// Test log that should NOT match "keep-non-debug-non-trace" policy
 	// because body contains "debug" (fails the negated matcher)
 	debugLog := &SimpleLogRecord{
-		BodyValue:         []byte("this is a debug message"),
-		SeverityTextValue: []byte("INFO"),
+		Body:         []byte("this is a debug message"),
+		SeverityText: []byte("INFO"),
 	}
 
 	result := engine.Evaluate(snapshot, debugLog)
@@ -254,8 +254,8 @@ func TestEngineEvaluateAllNegatedMatchersFailBoth(t *testing.T) {
 	// - body contains "debug" (fails negated)
 	// - severity_text is "TRACE" (fails negated)
 	traceDebugLog := &SimpleLogRecord{
-		BodyValue:         []byte("debug information here"),
-		SeverityTextValue: []byte("TRACE"),
+		Body:         []byte("debug information here"),
+		SeverityText: []byte("TRACE"),
 	}
 
 	result := engine.Evaluate(snapshot, traceDebugLog)
@@ -277,8 +277,8 @@ func TestStatsCollection(t *testing.T) {
 
 	// Evaluate a log that matches drop-debug-level (severity_text = DEBUG)
 	debugLog := &SimpleLogRecord{
-		BodyValue:         []byte("some message"),
-		SeverityTextValue: []byte("DEBUG"),
+		Body:         []byte("some message"),
+		SeverityText: []byte("DEBUG"),
 	}
 
 	engine.Evaluate(snapshot, debugLog)

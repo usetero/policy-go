@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 func TestKeepRestrictiveness(t *testing.T) {
@@ -253,7 +253,8 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	check := compiled.ExistenceChecks()[0]
 	assert.Equal(t, "exists-check", check.PolicyID)
 	assert.True(t, check.MustExist)
-	assert.Equal(t, "trace_id", check.Selector.LogAttribute)
+	assert.Equal(t, "trace_id", check.Selector.AttrName)
+	assert.Equal(t, AttrScopeRecord, check.Selector.AttrScope)
 }
 
 func TestCompilerCompileExactMatch(t *testing.T) {

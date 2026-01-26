@@ -1,6 +1,6 @@
 package policy
 
-import policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+import policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 
 // PolicyCallback is called when policies are updated by a provider.
 type PolicyCallback func(policies []*policyv1.Policy)

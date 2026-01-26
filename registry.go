@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/usetero/policy-go/internal/engine"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // ProviderId is a unique identifier for a registered provider.

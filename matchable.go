@@ -1,73 +1,105 @@
 package policy
 
 import (
-	"github.com/usetero/policy-go/internal/engine"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// Matchable is the interface for telemetry records that can be matched against policies.
-// Implementations should return field values without allocating new memory where possible.
-type Matchable interface {
-	// GetField returns the value of the specified field.
-	// Returns nil if the field doesn't exist or isn't applicable.
-	// The returned slice should be a view into existing data when possible
-	// to avoid allocations in the hot path.
-	GetField(selector engine.LogFieldSelector) []byte
+// AttrScope identifies the scope for attribute lookups.
+type AttrScope int
+
+const (
+	// AttrScopeResource is for resource-level attributes.
+	AttrScopeResource AttrScope = iota
+	// AttrScopeScope is for instrumentation scope attributes.
+	AttrScopeScope
+	// AttrScopeRecord is for record-level attributes (log attributes, span attributes, datapoint attributes).
+	AttrScopeRecord
+	// AttrScopeEvent is for span event attributes (traces only).
+	AttrScopeEvent
+	// AttrScopeLink is for span link attributes (traces only).
+	AttrScopeLink
+)
+
+// FieldEnum is a constraint for telemetry field enum types.
+type FieldEnum interface {
+	policyv1.LogField | policyv1.MetricField | policyv1.TraceField
 }
 
-// SimpleLogRecord is a simple implementation of Matchable for testing.
+// Matchable is the interface for telemetry records that can be matched against policies.
+// The type parameter F specifies the field enum type (LogField, MetricField, or TraceField).
+//
+// Implementations should return field values without allocating new memory where possible.
+// The returned byte slices should be views into existing data when possible to avoid
+// allocations in the hot path.
+type Matchable[F FieldEnum] interface {
+	// GetField returns the value of the specified field.
+	// Returns nil if the field doesn't exist or isn't applicable.
+	GetField(field F) []byte
+
+	// GetAttribute returns the value of an attribute at the specified scope.
+	// For logs: AttrScopeRecord = log attributes
+	// For traces: AttrScopeRecord = span attributes, AttrScopeEvent = event attributes
+	// For metrics: AttrScopeRecord = datapoint attributes
+	// Returns nil if the attribute doesn't exist.
+	GetAttribute(scope AttrScope, name string) []byte
+}
+
+// Type aliases for convenience.
+type (
+	LogMatchable    = Matchable[policyv1.LogField]
+	MetricMatchable = Matchable[policyv1.MetricField]
+	TraceMatchable  = Matchable[policyv1.TraceField]
+)
+
+// SimpleLogRecord is a simple implementation of LogMatchable for testing.
 type SimpleLogRecord struct {
-	BodyValue          []byte
-	SeverityTextValue  []byte
-	TraceIDValue       []byte
-	SpanIDValue        []byte
-	EventNameValue     []byte
+	Body               []byte
+	SeverityText       []byte
+	TraceID            []byte
+	SpanID             []byte
+	EventName          []byte
 	LogAttributes      map[string][]byte
 	ResourceAttributes map[string][]byte
 	ScopeAttributes    map[string][]byte
 }
 
-// GetField implements Matchable.
-func (r *SimpleLogRecord) GetField(selector engine.LogFieldSelector) []byte {
-	// Check simple log fields first
-	if selector.LogField != policyv1.LogField_LOG_FIELD_UNSPECIFIED {
-		switch selector.LogField {
-		case policyv1.LogField_LOG_FIELD_BODY:
-			return r.BodyValue
-		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
-			return r.SeverityTextValue
-		case policyv1.LogField_LOG_FIELD_TRACE_ID:
-			return r.TraceIDValue
-		case policyv1.LogField_LOG_FIELD_SPAN_ID:
-			return r.SpanIDValue
-		case policyv1.LogField_LOG_FIELD_EVENT_NAME:
-			return r.EventNameValue
-		default:
-			return nil
-		}
+// GetField implements LogMatchable.
+func (r *SimpleLogRecord) GetField(field policyv1.LogField) []byte {
+	switch field {
+	case policyv1.LogField_LOG_FIELD_BODY:
+		return r.Body
+	case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+		return r.SeverityText
+	case policyv1.LogField_LOG_FIELD_TRACE_ID:
+		return r.TraceID
+	case policyv1.LogField_LOG_FIELD_SPAN_ID:
+		return r.SpanID
+	case policyv1.LogField_LOG_FIELD_EVENT_NAME:
+		return r.EventName
+	default:
+		return nil
 	}
+}
 
-	// Check attribute selectors
-	if selector.LogAttribute != "" {
-		if r.LogAttributes == nil {
-			return nil
-		}
-		return r.LogAttributes[selector.LogAttribute]
-	}
-
-	if selector.ResourceAttribute != "" {
+// GetAttribute implements LogMatchable.
+func (r *SimpleLogRecord) GetAttribute(scope AttrScope, name string) []byte {
+	switch scope {
+	case AttrScopeResource:
 		if r.ResourceAttributes == nil {
 			return nil
 		}
-		return r.ResourceAttributes[selector.ResourceAttribute]
-	}
-
-	if selector.ScopeAttribute != "" {
+		return r.ResourceAttributes[name]
+	case AttrScopeScope:
 		if r.ScopeAttributes == nil {
 			return nil
 		}
-		return r.ScopeAttributes[selector.ScopeAttribute]
+		return r.ScopeAttributes[name]
+	case AttrScopeRecord:
+		if r.LogAttributes == nil {
+			return nil
+		}
+		return r.LogAttributes[name]
+	default:
+		return nil
 	}
-
-	return nil
 }

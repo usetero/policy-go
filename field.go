@@ -2,7 +2,7 @@ package policy
 
 import (
 	"github.com/usetero/policy-go/internal/engine"
-	policyv1 "github.com/usetero/policy-go/internal/proto/tero/policy/v1"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // Re-export proto types for convenience.
@@ -15,6 +15,10 @@ type (
 	LogMatcher = policyv1.LogMatcher
 	// LogField is the proto log field enum.
 	LogField = policyv1.LogField
+	// MetricField is the proto metric field enum.
+	MetricField = policyv1.MetricField
+	// TraceField is the proto trace field enum.
+	TraceField = policyv1.TraceField
 )
 
 // LogField constants.
@@ -31,9 +35,8 @@ const (
 
 // Re-export engine types.
 type (
-	LogFieldSelector = engine.LogFieldSelector
-	KeepAction       = engine.KeepAction
-	Keep             = engine.Keep
+	KeepAction = engine.KeepAction
+	Keep       = engine.Keep
 )
 
 // KeepAction constants.
