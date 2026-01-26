@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/usetero/policy-go/compare/v1.0.0...v1.0.1) (2026-01-26)
+
+
+### Bug Fixes
+
+* interface needs to be generic, lower go version ([#5](https://github.com/usetero/policy-go/issues/5)) ([ebfe097](https://github.com/usetero/policy-go/commit/ebfe0977583a27f1f5fad7ce6e7ad3383d07e2c6))
+
 ## 1.0.0 (2026-01-26)
 
 
