@@ -253,7 +253,8 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	check := compiled.ExistenceChecks()[0]
 	assert.Equal(t, "exists-check", check.PolicyID)
 	assert.True(t, check.MustExist)
-	assert.Equal(t, "trace_id", check.Selector.LogAttribute)
+	assert.Equal(t, "trace_id", check.Selector.AttrName)
+	assert.Equal(t, AttrScopeRecord, check.Selector.AttrScope)
 }
 
 func TestCompilerCompileExactMatch(t *testing.T) {

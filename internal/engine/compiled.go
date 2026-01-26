@@ -95,7 +95,7 @@ func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
 
 // ExistenceCheck represents a field existence check that can't be compiled to Hyperscan.
 type ExistenceCheck struct {
-	Selector    LogFieldSelector
+	Selector    FieldSelector
 	MustExist   bool
 	PolicyID    string
 	PolicyIndex int // Dense index for array-based tracking
@@ -222,7 +222,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 
 		// Process matchers
 		for i, m := range log.GetMatch() {
-			selector := LogFieldSelectorFromMatcher(m)
+			selector := FieldSelectorFromLogMatcher(m)
 
 			// Check if this is an existence check
 			if _, ok := m.GetMatch().(*policyv1.LogMatcher_Exists); ok {

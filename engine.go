@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // evalState holds reusable slices for policy evaluation to avoid allocations.
@@ -63,9 +64,17 @@ func NewPolicyEngine() *PolicyEngine {
 	return &PolicyEngine{}
 }
 
+// getFieldValue extracts a field value from a LogMatchable using the internal FieldSelector.
+func getFieldValue(record LogMatchable, selector engine.FieldSelector) []byte {
+	if selector.IsAttribute() {
+		return record.GetAttribute(AttrScope(selector.AttrScope), selector.AttrName)
+	}
+	return record.GetField(policyv1.LogField(selector.Field))
+}
+
 // Evaluate checks a log record against the snapshot and returns the result.
 // This method uses index-based arrays instead of maps for better performance.
-func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) EvaluateResult {
+func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) EvaluateResult {
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
 	}
@@ -102,7 +111,7 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) Eval
 			continue
 		}
 
-		value := record.GetField(check.Selector)
+		value := getFieldValue(record, check.Selector)
 		exists := value != nil || len(value) > 0
 
 		if check.MustExist && !exists {
@@ -116,7 +125,7 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) Eval
 
 	// Process Hyperscan databases
 	for key, db := range matchers.Databases() {
-		value := record.GetField(key.Selector)
+		value := getFieldValue(record, key.Selector)
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified
 			// unless this is a negated match (which would succeed on absence)
@@ -164,7 +173,7 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record Matchable) Eval
 	var bestPolicy *engine.CompiledPolicy
 	bestRestrictiveness := -1
 
-	for i := 0; i < policyCount; i++ {
+	for i := range policyCount {
 		if disqualified[i] {
 			continue
 		}

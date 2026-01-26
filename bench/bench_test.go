@@ -6,33 +6,40 @@ import (
 	"testing"
 
 	"github.com/usetero/policy-go"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// BenchLogRecord implements policy.Matchable for benchmarking.
+// BenchLogRecord implements policy.LogMatchable for benchmarking.
 type BenchLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
 	LogAttributes      map[string][]byte
 	ResourceAttributes map[string][]byte
+	ScopeAttributes    map[string][]byte
 }
 
-func (r *BenchLogRecord) GetField(selector policy.LogFieldSelector) []byte {
-	if selector.LogField != policy.LogFieldUnspecified {
-		switch selector.LogField {
-		case policy.LogFieldBody:
-			return r.Body
-		case policy.LogFieldSeverityText:
-			return r.SeverityText
-		}
+func (r *BenchLogRecord) GetField(field policyv1.LogField) []byte {
+	switch field {
+	case policyv1.LogField_LOG_FIELD_BODY:
+		return r.Body
+	case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+		return r.SeverityText
+	default:
 		return nil
 	}
-	if selector.LogAttribute != "" {
-		return r.LogAttributes[selector.LogAttribute]
+}
+
+func (r *BenchLogRecord) GetAttribute(scope policy.AttrScope, name string) []byte {
+	switch scope {
+	case policy.AttrScopeResource:
+		return r.ResourceAttributes[name]
+	case policy.AttrScopeScope:
+		return r.ScopeAttributes[name]
+	case policy.AttrScopeRecord:
+		return r.LogAttributes[name]
+	default:
+		return nil
 	}
-	if selector.ResourceAttribute != "" {
-		return r.ResourceAttributes[selector.ResourceAttribute]
-	}
-	return nil
 }
 
 // setupBenchmark creates a registry with policies loaded from testdata.

@@ -5,38 +5,40 @@ import (
 	"log"
 
 	"github.com/usetero/policy-go"
-	"github.com/usetero/policy-go/internal/engine"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// ExampleLogRecord implements policy.Matchable for demonstration.
+// ExampleLogRecord implements policy.LogMatchable for demonstration.
 type ExampleLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
 	LogAttributes      map[string][]byte
 	ResourceAttributes map[string][]byte
+	ScopeAttributes    map[string][]byte
 }
 
-func (r *ExampleLogRecord) GetField(selector engine.LogFieldSelector) []byte {
-	// Check simple log fields first
-	if selector.LogField != policyv1.LogField_LOG_FIELD_UNSPECIFIED {
-		switch selector.LogField {
-		case policyv1.LogField_LOG_FIELD_BODY:
-			return r.Body
-		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
-			return r.SeverityText
-		}
+func (r *ExampleLogRecord) GetField(field policyv1.LogField) []byte {
+	switch field {
+	case policyv1.LogField_LOG_FIELD_BODY:
+		return r.Body
+	case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+		return r.SeverityText
+	default:
 		return nil
 	}
+}
 
-	// Check attribute selectors
-	if selector.LogAttribute != "" {
-		return r.LogAttributes[selector.LogAttribute]
+func (r *ExampleLogRecord) GetAttribute(scope policy.AttrScope, name string) []byte {
+	switch scope {
+	case policy.AttrScopeResource:
+		return r.ResourceAttributes[name]
+	case policy.AttrScopeScope:
+		return r.ScopeAttributes[name]
+	case policy.AttrScopeRecord:
+		return r.LogAttributes[name]
+	default:
+		return nil
 	}
-	if selector.ResourceAttribute != "" {
-		return r.ResourceAttributes[selector.ResourceAttribute]
-	}
-	return nil
 }
 
 func main() {
