@@ -142,23 +142,63 @@ tasks:
 
   # CI
   ci:setup:
-    desc: Install CI dependencies (idempotent)
+    desc: "🔧 Install CI/development dependencies (idempotent, safe to run locally)"
+    dir: "{{.TASKFILE_DIR}}"
     cmds:
       - |
-        if ! command -v golangci-lint &> /dev/null; then
-          echo "Installing golangci-lint..."
-          if [[ "$OSTYPE" == "darwin"* ]]; then
-            brew install golangci-lint
-          elif command -v apt-get &> /dev/null; then
-            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
-          elif command -v yum &> /dev/null; then
-            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+        echo "🔧 Setting up CI environment..."
+
+        # Clean up Docker resources to free disk space (important for CI with testcontainers)
+        if [ -n "$CI" ]; then
+          echo "🧹 Cleaning Docker resources in CI..."
+          docker system prune -af --volumes 2>/dev/null || true
+        fi
+
+        echo "🔧 Checking for required dependencies..."
+
+        # Check for hyperscan/vectorscan (needed for pattern matching)
+        if ! pkg-config --exists libhs 2>/dev/null; then
+          echo "📦 Installing vectorscan..."
+          if [ "$(uname)" = "Darwin" ]; then
+            # macOS: use vectorscan (hyperscan replacement)
+            if command -v brew >/dev/null 2>&1; then
+              brew install vectorscan pkg-config
+            else
+              echo "⚠️  Homebrew not found. Install vectorscan manually or use Hermit."
+            fi
+          elif [ "$(uname)" = "Linux" ]; then
+            # Linux: use hyperscan
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y libhyperscan-dev pkg-config
+            elif command -v yum >/dev/null 2>&1; then
+              sudo yum install -y hyperscan-devel pkg-config
+            else
+              echo "⚠️  Unknown package manager. Install hyperscan manually."
+            fi
           else
-            echo "Warning: Could not find a supported package manager to install golangci-lint"
+            echo "⚠️  Unknown platform: $(uname)"
           fi
         else
-          echo "golangci-lint is already installed"
+          echo "✅ Hyperscan/Vectorscan already installed"
         fi
+
+        # Install golangci-lint
+        if ! command -v golangci-lint >/dev/null 2>&1; then
+          echo "📦 Installing golangci-lint..."
+          if [ "$(uname)" = "Darwin" ]; then
+            brew install golangci-lint
+          elif command -v apt-get >/dev/null 2>&1; then
+            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+          elif command -v yum >/dev/null 2>&1; then
+            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+          else
+            echo "⚠️  Unknown package manager. Install golangci-lint manually."
+          fi
+        else
+          echo "✅ golangci-lint already installed"
+        fi
+
+        echo "✅ CI setup complete"
 
   ci:
     desc: Run CI pipeline
