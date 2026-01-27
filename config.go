@@ -10,29 +10,29 @@ import (
 
 // Config represents the root configuration for policy providers.
 type Config struct {
-	Providers []ProviderConfig `json:"policy_providers"`
+	Providers []ProviderConfig `json:"policy_providers" mapstructure:"policy_providers"`
 }
 
 // ProviderConfig represents a single provider configuration.
 // The Type field determines which provider to instantiate.
 type ProviderConfig struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
+	Type string `json:"type" mapstructure:"type"`
+	ID   string `json:"id" mapstructure:"id"`
 
 	// File provider options
-	Path             string `json:"path,omitempty"`
-	PollIntervalSecs *int   `json:"poll_interval_secs,omitempty"`
+	Path             string `json:"path,omitempty" mapstructure:"path"`
+	PollIntervalSecs *int   `json:"poll_interval_secs,omitempty" mapstructure:"poll_interval_secs"`
 
 	// HTTP provider options (for future use)
-	URL         string   `json:"url,omitempty"`
-	Headers     []Header `json:"headers,omitempty"`
-	ContentType string   `json:"content_type,omitempty"`
+	URL         string   `json:"url,omitempty" mapstructure:"url"`
+	Headers     []Header `json:"headers,omitempty" mapstructure:"headers"`
+	ContentType string   `json:"content_type,omitempty" mapstructure:"content_type"`
 }
 
 // Header represents an HTTP header for provider configuration.
 type Header struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name  string `json:"name" mapstructure:"name"`
+	Value string `json:"value" mapstructure:"value"`
 }
 
 // LoadConfig loads a configuration from a JSON file.
