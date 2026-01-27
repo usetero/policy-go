@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/usetero/policy-go/compare/v1.0.1...v1.0.2) (2026-01-27)
+
+
+### Bug Fixes
+
+* add map structure tags ([#7](https://github.com/usetero/policy-go/issues/7)) ([625c5e3](https://github.com/usetero/policy-go/commit/625c5e328b0e28e904a7529a0cebacb355a5e982))
+
 ## [1.0.1](https://github.com/usetero/policy-go/compare/v1.0.0...v1.0.1) (2026-01-26)
 
 
