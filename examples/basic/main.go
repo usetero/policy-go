@@ -157,6 +157,45 @@ func main() {
 				},
 			},
 		},
+		// New v1.2.0 features
+		{
+			name: "Log starting with ERROR: (starts_with)",
+			record: &ExampleLogRecord{
+				Body:         []byte("ERROR: connection refused"),
+				SeverityText: []byte("ERROR"),
+			},
+		},
+		{
+			name: "Service ending with -prod (ends_with)",
+			record: &ExampleLogRecord{
+				Body:         []byte("processing order"),
+				SeverityText: []byte("INFO"),
+				ResourceAttributes: map[string]any{
+					"service.name": "api-prod",
+				},
+			},
+		},
+		{
+			name: "Timeout message case insensitive (contains)",
+			record: &ExampleLogRecord{
+				Body:         []byte("Connection TIMEOUT after 30s"),
+				SeverityText: []byte("WARN"),
+			},
+		},
+		{
+			name: "Nested HTTP method attribute",
+			record: &ExampleLogRecord{
+				Body:         []byte("handling request"),
+				SeverityText: []byte("INFO"),
+				LogAttributes: map[string]any{
+					"http": map[string]any{
+						"request": map[string]any{
+							"method": "POST",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	// Evaluate each log record

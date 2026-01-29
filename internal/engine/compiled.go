@@ -109,6 +109,7 @@ type CompiledPolicy struct {
 	Index        int // Dense index for array-based tracking (0 to N-1)
 	Keep         Keep
 	MatcherCount int
+	SampleKey    *FieldSelector // Optional field to use for consistent sampling
 	Stats        *PolicyStats
 }
 
@@ -211,12 +212,20 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 			return nil, fmt.Errorf("policy %s: %w", id, err)
 		}
 
+		// Extract sample key if present
+		var sampleKey *FieldSelector
+		if log.GetSampleKey() != nil {
+			sk := FieldSelectorFromLogSampleKey(log.GetSampleKey())
+			sampleKey = &sk
+		}
+
 		// Create compiled policy
 		compiled := &CompiledPolicy{
 			ID:           id,
 			Index:        idx,
 			Keep:         keep,
 			MatcherCount: len(log.GetMatch()),
+			SampleKey:    sampleKey,
 			Stats:        stats[id],
 		}
 		result.policies[id] = compiled

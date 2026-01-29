@@ -71,6 +71,62 @@
       }
     },
     {
+      "id": "drop-error-prefix",
+      "name": "Drop logs starting with ERROR:",
+      "log": {
+        "match": [{ "log_field": "body", "starts_with": "ERROR:" }],
+        "keep": "none"
+      }
+    },
+    {
+      "id": "drop-prod-suffix",
+      "name": "Drop logs from services ending with -prod",
+      "log": {
+        "match": [
+          { "resource_attribute": "service.name", "ends_with": "-prod" }
+        ],
+        "keep": "none"
+      }
+    },
+    {
+      "id": "drop-timeout-logs",
+      "name": "Drop logs containing timeout (case insensitive)",
+      "log": {
+        "match": [
+          {
+            "log_field": "body",
+            "contains": "timeout",
+            "case_insensitive": true
+          }
+        ],
+        "keep": "none"
+      }
+    },
+    {
+      "id": "sample-by-trace-id",
+      "name": "Sample 50% of request logs by trace_id",
+      "log": {
+        "match": [{ "log_field": "body", "contains": "request" }],
+        "keep": "50%",
+        "sample_key": {
+          "log_field": "trace_id"
+        }
+      }
+    },
+    {
+      "id": "match-nested-http-method",
+      "name": "Drop POST requests using nested attribute path",
+      "log": {
+        "match": [
+          {
+            "log_attribute": { "path": ["http", "request", "method"] },
+            "exact": "POST"
+          }
+        ],
+        "keep": "none"
+      }
+    },
+    {
       "id": "drop-system-load-metric",
       "name": "drop-system-load-metric",
       "metric": {

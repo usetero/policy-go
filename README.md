@@ -47,31 +47,67 @@ package main
 import (
     "fmt"
     "log"
+    "time"
 
     "github.com/usetero/policy-go"
+    policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// Implement the Matchable interface for your log records
+// Implement the LogMatchable interface for your log records
 type LogRecord struct {
     Body               []byte
     SeverityText       []byte
-    LogAttributes      map[string][]byte
-    ResourceAttributes map[string][]byte
+    TraceID            []byte
+    LogAttributes      map[string]any
+    ResourceAttributes map[string]any
 }
 
-func (r *LogRecord) GetField(selector policy.FieldSelector) []byte {
-    switch selector.Type {
-    case policy.FieldTypeLogField:
-        switch selector.Field {
-        case policy.LogFieldBody:
-            return r.Body
-        case policy.LogFieldSeverityText:
-            return r.SeverityText
+func (r *LogRecord) GetField(field policyv1.LogField) []byte {
+    switch field {
+    case policyv1.LogField_LOG_FIELD_BODY:
+        return r.Body
+    case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+        return r.SeverityText
+    case policyv1.LogField_LOG_FIELD_TRACE_ID:
+        return r.TraceID
+    default:
+        return nil
+    }
+}
+
+func (r *LogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+    var attrs map[string]any
+    switch scope {
+    case policy.AttrScopeResource:
+        attrs = r.ResourceAttributes
+    case policy.AttrScopeRecord:
+        attrs = r.LogAttributes
+    default:
+        return nil
+    }
+    // Traverse the path for nested attribute access
+    return traversePath(attrs, path)
+}
+
+func traversePath(m map[string]any, path []string) []byte {
+    if len(path) == 0 || m == nil {
+        return nil
+    }
+    val, ok := m[path[0]]
+    if !ok {
+        return nil
+    }
+    if len(path) == 1 {
+        if s, ok := val.(string); ok {
+            return []byte(s)
         }
-    case policy.FieldTypeLogAttribute:
-        return r.LogAttributes[selector.Key]
-    case policy.FieldTypeResourceAttribute:
-        return r.ResourceAttributes[selector.Key]
+        if b, ok := val.([]byte); ok {
+            return b
+        }
+        return nil
+    }
+    if nested, ok := val.(map[string]any); ok {
+        return traversePath(nested, path[1:])
     }
     return nil
 }
@@ -106,6 +142,11 @@ func main() {
     record := &LogRecord{
         Body:         []byte("debug trace message"),
         SeverityText: []byte("INFO"),
+        LogAttributes: map[string]any{
+            "http": map[string]any{
+                "method": "GET",
+            },
+        },
     }
 
     result := engine.Evaluate(snapshot, record)
@@ -177,21 +218,49 @@ case policy.ResultSample:
 Implement the `Matchable` interface for your telemetry types:
 
 ```go
-type Matchable interface {
+type Matchable[F FieldEnum] interface {
     // GetField returns the value of the specified field.
     // Returns nil if the field doesn't exist.
-    // Return a view into existing data to avoid allocations.
-    GetField(selector FieldSelector) []byte
+    GetField(field F) []byte
+
+    // GetAttribute returns the value of an attribute at the specified scope and path.
+    // Path is a slice of strings representing nested access (e.g., ["http", "method"]).
+    // Returns nil if the attribute doesn't exist.
+    GetAttribute(scope AttrScope, path []string) []byte
 }
 ```
 
-The `FieldSelector` contains:
+For logs, use `LogMatchable` (alias for `Matchable[policyv1.LogField]`):
 
-- `Type`: The field type (log field, log attribute, resource attribute, scope
-  attribute)
-- `Field`: For log fields, which specific field (body, severity_text,
-  severity_number)
-- `Key`: For attributes, the attribute key
+```go
+type LogRecord struct {
+    Body          []byte
+    LogAttributes map[string]any
+}
+
+func (r *LogRecord) GetField(field policyv1.LogField) []byte {
+    switch field {
+    case policyv1.LogField_LOG_FIELD_BODY:
+        return r.Body
+    default:
+        return nil
+    }
+}
+
+func (r *LogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+    if scope != policy.AttrScopeRecord {
+        return nil
+    }
+    // Traverse nested path in LogAttributes
+    return traversePath(r.LogAttributes, path)
+}
+```
+
+Attribute scopes:
+
+- `AttrScopeResource`: Resource-level attributes
+- `AttrScopeScope`: Instrumentation scope attributes
+- `AttrScopeRecord`: Record-level attributes (log attributes, span attributes)
 
 ## Configuration
 
@@ -276,29 +345,84 @@ Policies are defined in JSON format following the
 
 ### Matcher Types
 
-| Field                | Description                                                     |
-| -------------------- | --------------------------------------------------------------- |
-| `log_field`          | Match on log fields: `body`, `severity_text`, `severity_number` |
-| `log_attribute`      | Match on log record attributes                                  |
-| `resource_attribute` | Match on resource attributes                                    |
-| `scope_attribute`    | Match on scope attributes                                       |
+| Field                | Description                                                    |
+| -------------------- | -------------------------------------------------------------- |
+| `log_field`          | Match on log fields: `body`, `severity_text`, `trace_id`, etc. |
+| `log_attribute`      | Match on log record attributes                                 |
+| `resource_attribute` | Match on resource attributes                                   |
+| `scope_attribute`    | Match on scope attributes                                      |
+
+#### Nested Attribute Access
+
+Attributes can be accessed using nested paths for structured data:
+
+```json
+{
+  "log_attribute": { "path": ["http", "request", "method"] },
+  "exact": "POST"
+}
+```
+
+Shorthand forms are also supported:
+
+- Array: `"log_attribute": ["http", "request", "method"]`
+- String (single key): `"log_attribute": "user_id"`
 
 ### Match Conditions
 
-| Condition | Description                                           |
-| --------- | ----------------------------------------------------- |
-| `regex`   | Match if field matches the regex pattern              |
-| `exact`   | Match if field equals the exact value                 |
-| `exists`  | Match if field exists (true) or doesn't exist (false) |
-| `negated` | Invert the match condition                            |
+| Condition          | Description                                               |
+| ------------------ | --------------------------------------------------------- |
+| `regex`            | Match if field matches the regex pattern                  |
+| `exact`            | Match if field equals the exact value                     |
+| `starts_with`      | Match if field starts with the literal prefix             |
+| `ends_with`        | Match if field ends with the literal suffix               |
+| `contains`         | Match if field contains the literal substring             |
+| `exists`           | Match if field exists (true) or doesn't exist (false)     |
+| `negated`          | Invert the match condition                                |
+| `case_insensitive` | Make the match case-insensitive (works with all matchers) |
+
+The literal matchers (`starts_with`, `ends_with`, `contains`, `exact`) are
+optimized using Hyperscan and are more efficient than equivalent regex patterns.
 
 ### Keep Actions
 
-| Action                | Description               |
-| --------------------- | ------------------------- |
-| `"all"`               | Keep all matching records |
-| `"none"`              | Drop all matching records |
-| `{ "percentage": N }` | Sample at N%              |
+| Action   | Description               |
+| -------- | ------------------------- |
+| `"all"`  | Keep all matching records |
+| `"none"` | Drop all matching records |
+| `"N%"`   | Sample at N%              |
+
+### Sampling with Sample Key
+
+For consistent sampling (same key always produces same decision), use
+`sample_key`:
+
+```json
+{
+  "id": "sample-by-trace",
+  "name": "Sample 10% of logs by trace ID",
+  "log": {
+    "match": [{ "log_field": "body", "contains": "request" }],
+    "keep": "10%",
+    "sample_key": {
+      "log_field": "trace_id"
+    }
+  }
+}
+```
+
+The sample key can reference any field or attribute:
+
+- `log_field`: Use a log field (body, trace_id, span_id, etc.)
+- `log_attribute`: Use a log record attribute
+- `resource_attribute`: Use a resource attribute
+- `scope_attribute`: Use a scope attribute
+
+When a sample key is configured:
+
+- Records with the same key value always get the same keep/drop decision
+- This ensures consistent sampling across distributed systems
+- If the sample key field is empty/missing, the record is kept by default
 
 ### AND Semantics
 
@@ -352,11 +476,11 @@ for _, s := range stats {
 The current implementation allocates ~16-25 objects per evaluation. To achieve
 zero-allocation evaluation:
 
-- [ ] Pool `matchCounts` map in `PolicyEngine.Evaluate()`
-- [ ] Pool `disqualified` map in `PolicyEngine.Evaluate()`
-- [ ] Pool Hyperscan scratch space per-engine (currently created per-scan)
-- [ ] Pool match result maps from `db.Scan()`
-- [ ] Consider bitset instead of map for policy match tracking
+- [x] Pool `matchCounts` slice in `PolicyEngine.Evaluate()`
+- [x] Pool `disqualified` slice in `PolicyEngine.Evaluate()`
+- [x] Pool Hyperscan scratch space per-database
+- [x] Pool match result slices from `db.Scan()`
+- [x] Use dense index arrays instead of maps for policy match tracking
 - [ ] Pre-allocate result slices in hot paths
 
 ### Telemetry Type Support
@@ -375,7 +499,10 @@ Currently only log policies are fully implemented:
 
 ### Additional Features
 
-- [ ] Sampling with hash-based determinism (currently stubbed)
+- [x] Nested attribute path access (e.g., `http.request.method`)
+- [x] Optimized literal matchers (`starts_with`, `ends_with`, `contains`)
+- [x] Case-insensitive matching via Hyperscan flags
+- [x] Sampling with hash-based determinism via `sample_key`
 - [ ] Rate limiting support (currently stubbed)
 - [ ] Transform actions (keep with modifications)
 - [ ] Policy validation CLI tool

@@ -283,13 +283,19 @@ func parseLogField(s string) (policyv1.LogField, bool) {
 
 func (p *Parser) convertKeep(k KeepValue) (string, error) {
 	if k.StringValue != nil {
-		switch *k.StringValue {
+		s := *k.StringValue
+		switch s {
 		case "all", "":
 			return "all", nil
 		case "none":
 			return "none", nil
 		default:
-			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", *k.StringValue))
+			// Check if it's a percentage string like "50%"
+			if len(s) > 0 && s[len(s)-1] == '%' {
+				// Pass through percentage strings as-is for the engine to parse
+				return s, nil
+			}
+			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", s))
 		}
 	}
 
