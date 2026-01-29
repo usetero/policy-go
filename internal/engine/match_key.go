@@ -71,11 +71,12 @@ func FieldSelectorFromLogSampleKey(sk *policyv1.LogSampleKey) FieldSelector {
 	}
 }
 
-// MatchKey identifies a group of patterns that share the same field selector and negation.
+// MatchKey identifies a group of patterns that share the same field selector, negation, and case sensitivity.
 // Patterns are grouped by MatchKey for efficient Hyperscan compilation.
 type MatchKey struct {
-	Selector FieldSelector
-	Negated  bool
+	Selector        FieldSelector
+	Negated         bool
+	CaseInsensitive bool
 }
 
 // DatabaseEntry pairs a MatchKey with its compiled database.

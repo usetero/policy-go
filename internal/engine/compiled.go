@@ -238,7 +238,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				continue
 			}
 
-			// Get the pattern (regex or exact)
+			// Get the pattern (regex or literal match variants)
 			var pattern string
 			switch match := m.GetMatch().(type) {
 			case *policyv1.LogMatcher_Regex:
@@ -246,13 +246,23 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 			case *policyv1.LogMatcher_Exact:
 				// Escape for literal match
 				pattern = regexp.QuoteMeta(match.Exact)
+			case *policyv1.LogMatcher_StartsWith:
+				// Anchor at start
+				pattern = "^" + regexp.QuoteMeta(match.StartsWith)
+			case *policyv1.LogMatcher_EndsWith:
+				// Anchor at end
+				pattern = regexp.QuoteMeta(match.EndsWith) + "$"
+			case *policyv1.LogMatcher_Contains:
+				// No anchors, just escaped literal
+				pattern = regexp.QuoteMeta(match.Contains)
 			default:
 				continue
 			}
 
 			key := MatchKey{
-				Selector: selector,
-				Negated:  m.GetNegate(),
+				Selector:        selector,
+				Negated:         m.GetNegate(),
+				CaseInsensitive: m.GetCaseInsensitive(),
 			}
 			keyStr := makeMatchKeyString(key)
 
@@ -268,12 +278,13 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 
 	// Compile each group
 	for keyStr, entries := range groups {
-		db, err := c.compileGroup(entries)
+		key := groupKeys[keyStr]
+		db, err := c.compileGroup(entries, key.CaseInsensitive)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compile patterns for %v: %w", keyStr, err)
 		}
 		result.databases = append(result.databases, DatabaseEntry{
-			Key:      groupKeys[keyStr],
+			Key:      key,
 			Database: db,
 		})
 	}
@@ -293,7 +304,7 @@ type patternEntry struct {
 type matchKeyString string
 
 func makeMatchKeyString(k MatchKey) matchKeyString {
-	// Format: "field|scope|path[0].path[1]...|negated"
+	// Format: "field|scope|path[0].path[1]...|negated|case_insensitive"
 	var s strings.Builder
 	fmt.Fprintf(&s, "%d|%d|", k.Selector.Field, k.Selector.AttrScope)
 	for i, p := range k.Selector.AttrPath {
@@ -302,13 +313,19 @@ func makeMatchKeyString(k MatchKey) matchKeyString {
 		}
 		s.WriteString(p)
 	}
-	fmt.Fprintf(&s, "|%t", k.Negated)
+	fmt.Fprintf(&s, "|%t|%t", k.Negated, k.CaseInsensitive)
 	return matchKeyString(s.String())
 }
 
-func (c *Compiler) compileGroup(entries []patternEntry) (*CompiledDatabase, error) {
+func (c *Compiler) compileGroup(entries []patternEntry, caseInsensitive bool) (*CompiledDatabase, error) {
 	patterns := make([]*hyperscan.Pattern, len(entries))
 	patternIndex := make([]PatternRef, len(entries))
+
+	// Build flags - always use SomLeftMost, add Caseless if case insensitive
+	flags := hyperscan.SomLeftMost
+	if caseInsensitive {
+		flags |= hyperscan.Caseless
+	}
 
 	for i, e := range entries {
 		// Validate the pattern is valid regex
@@ -316,7 +333,7 @@ func (c *Compiler) compileGroup(entries []patternEntry) (*CompiledDatabase, erro
 			return nil, fmt.Errorf("invalid regex %q: %w", e.pattern, err)
 		}
 
-		patterns[i] = hyperscan.NewPattern(e.pattern, hyperscan.SomLeftMost)
+		patterns[i] = hyperscan.NewPattern(e.pattern, flags)
 		patterns[i].Id = i
 
 		patternIndex[i] = PatternRef{
