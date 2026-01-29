@@ -12,9 +12,9 @@ import (
 type ExampleLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
-	LogAttributes      map[string][]byte
-	ResourceAttributes map[string][]byte
-	ScopeAttributes    map[string][]byte
+	LogAttributes      map[string]any
+	ResourceAttributes map[string]any
+	ScopeAttributes    map[string]any
 }
 
 func (r *ExampleLogRecord) GetField(field policyv1.LogField) []byte {
@@ -28,17 +28,44 @@ func (r *ExampleLogRecord) GetField(field policyv1.LogField) []byte {
 	}
 }
 
-func (r *ExampleLogRecord) GetAttribute(scope policy.AttrScope, name string) []byte {
+func (r *ExampleLogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+	var attrs map[string]any
 	switch scope {
 	case policy.AttrScopeResource:
-		return r.ResourceAttributes[name]
+		attrs = r.ResourceAttributes
 	case policy.AttrScopeScope:
-		return r.ScopeAttributes[name]
+		attrs = r.ScopeAttributes
 	case policy.AttrScopeRecord:
-		return r.LogAttributes[name]
+		attrs = r.LogAttributes
 	default:
 		return nil
 	}
+	return traversePath(attrs, path)
+}
+
+func traversePath(m map[string]any, path []string) []byte {
+	if len(path) == 0 || m == nil {
+		return nil
+	}
+	val, ok := m[path[0]]
+	if !ok {
+		return nil
+	}
+	if len(path) == 1 {
+		switch v := val.(type) {
+		case []byte:
+			return v
+		case string:
+			return []byte(v)
+		default:
+			return nil
+		}
+	}
+	nested, ok := val.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return traversePath(nested, path[1:])
 }
 
 func main() {
@@ -115,8 +142,8 @@ func main() {
 			record: &ExampleLogRecord{
 				Body:         []byte("request processed"),
 				SeverityText: []byte("INFO"),
-				LogAttributes: map[string][]byte{
-					"ddsource": []byte("nginx"),
+				LogAttributes: map[string]any{
+					"ddsource": "nginx",
 				},
 			},
 		},
@@ -125,8 +152,8 @@ func main() {
 			record: &ExampleLogRecord{
 				Body:         []byte("forwarding request"),
 				SeverityText: []byte("INFO"),
-				ResourceAttributes: map[string][]byte{
-					"service.name": []byte("edge"),
+				ResourceAttributes: map[string]any{
+					"service.name": "edge",
 				},
 			},
 		},

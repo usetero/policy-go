@@ -13,9 +13,9 @@ import (
 type BenchLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
-	LogAttributes      map[string][]byte
-	ResourceAttributes map[string][]byte
-	ScopeAttributes    map[string][]byte
+	LogAttributes      map[string]any
+	ResourceAttributes map[string]any
+	ScopeAttributes    map[string]any
 }
 
 func (r *BenchLogRecord) GetField(field policyv1.LogField) []byte {
@@ -29,17 +29,44 @@ func (r *BenchLogRecord) GetField(field policyv1.LogField) []byte {
 	}
 }
 
-func (r *BenchLogRecord) GetAttribute(scope policy.AttrScope, name string) []byte {
+func (r *BenchLogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+	var attrs map[string]any
 	switch scope {
 	case policy.AttrScopeResource:
-		return r.ResourceAttributes[name]
+		attrs = r.ResourceAttributes
 	case policy.AttrScopeScope:
-		return r.ScopeAttributes[name]
+		attrs = r.ScopeAttributes
 	case policy.AttrScopeRecord:
-		return r.LogAttributes[name]
+		attrs = r.LogAttributes
 	default:
 		return nil
 	}
+	return traversePath(attrs, path)
+}
+
+func traversePath(m map[string]any, path []string) []byte {
+	if len(path) == 0 || m == nil {
+		return nil
+	}
+	val, ok := m[path[0]]
+	if !ok {
+		return nil
+	}
+	if len(path) == 1 {
+		switch v := val.(type) {
+		case []byte:
+			return v
+		case string:
+			return []byte(v)
+		default:
+			return nil
+		}
+	}
+	nested, ok := val.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return traversePath(nested, path[1:])
 }
 
 // setupBenchmark creates a registry with policies loaded from testdata.
@@ -125,8 +152,8 @@ func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
 	record := &BenchLogRecord{
 		Body:         []byte("GET /api/health 200"),
 		SeverityText: []byte("INFO"),
-		LogAttributes: map[string][]byte{
-			"ddsource": []byte("nginx"),
+		LogAttributes: map[string]any{
+			"ddsource": "nginx",
 		},
 	}
 
@@ -146,8 +173,8 @@ func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
 	record := &BenchLogRecord{
 		Body:         []byte("processing request"),
 		SeverityText: []byte("INFO"),
-		ResourceAttributes: map[string][]byte{
-			"service.name": []byte("api-edge"),
+		ResourceAttributes: map[string]any{
+			"service.name": "api-edge",
 		},
 	}
 
@@ -227,9 +254,9 @@ func BenchmarkEvaluateMixedWorkload(b *testing.B) {
 		// Match severity
 		{Body: []byte("some message"), SeverityText: []byte("DEBUG")},
 		// Match log attribute
-		{Body: []byte("request"), SeverityText: []byte("INFO"), LogAttributes: map[string][]byte{"ddsource": []byte("nginx")}},
+		{Body: []byte("request"), SeverityText: []byte("INFO"), LogAttributes: map[string]any{"ddsource": "nginx"}},
 		// Match resource attribute
-		{Body: []byte("request"), SeverityText: []byte("INFO"), ResourceAttributes: map[string][]byte{"service.name": []byte("edge")}},
+		{Body: []byte("request"), SeverityText: []byte("INFO"), ResourceAttributes: map[string]any{"service.name": "edge"}},
 	}
 
 	b.ResetTimer()
@@ -284,7 +311,7 @@ func BenchmarkEvaluateLongBody(b *testing.B) {
 	for i := range longBody {
 		longBody[i] = 'x'
 	}
-	copy(longBody[len(longBody)-20:], []byte("debug trace message"))
+	copy(longBody[len(longBody)-20:], "debug trace message")
 
 	record := &BenchLogRecord{
 		Body:         longBody,
@@ -304,14 +331,14 @@ func BenchmarkEvaluateWithManyAttributes(b *testing.B) {
 	_, snapshot, engine := setupBenchmark(b)
 
 	// Create a record with many attributes
-	logAttrs := make(map[string][]byte)
-	resourceAttrs := make(map[string][]byte)
+	logAttrs := make(map[string]any)
+	resourceAttrs := make(map[string]any)
 	for i := 0; i < 50; i++ {
-		logAttrs[fmt.Sprintf("attr_%d", i)] = []byte(fmt.Sprintf("value_%d", i))
-		resourceAttrs[fmt.Sprintf("resource_%d", i)] = []byte(fmt.Sprintf("value_%d", i))
+		logAttrs[fmt.Sprintf("attr_%d", i)] = fmt.Sprintf("value_%d", i)
+		resourceAttrs[fmt.Sprintf("resource_%d", i)] = fmt.Sprintf("value_%d", i)
 	}
 	// Add the matching attribute
-	logAttrs["ddsource"] = []byte("nginx")
+	logAttrs["ddsource"] = "nginx"
 
 	record := &BenchLogRecord{
 		Body:               []byte("request processed"),

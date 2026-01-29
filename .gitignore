@@ -31,4 +31,4 @@ Thumbs.db
 dist/
 
 # Proto exports (regenerated from buf registry)
-internal/proto/
+proto/**/*.proto

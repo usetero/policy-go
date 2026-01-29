@@ -286,11 +286,16 @@ type MetricMatcher struct {
 	//	*MetricMatcher_Exact
 	//	*MetricMatcher_Regex
 	//	*MetricMatcher_Exists
+	//	*MetricMatcher_StartsWith
+	//	*MetricMatcher_EndsWith
+	//	*MetricMatcher_Contains
 	Match isMetricMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
-	Negate        bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
+	// If true, applies case-insensitive matching to all match types
+	CaseInsensitive bool `protobuf:"varint,21,opt,name=case_insensitive,json=caseInsensitive,proto3" json:"case_insensitive,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MetricMatcher) Reset() {
@@ -339,31 +344,31 @@ func (x *MetricMatcher) GetMetricField() MetricField {
 	return MetricField_METRIC_FIELD_UNSPECIFIED
 }
 
-func (x *MetricMatcher) GetDatapointAttribute() string {
+func (x *MetricMatcher) GetDatapointAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*MetricMatcher_DatapointAttribute); ok {
 			return x.DatapointAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *MetricMatcher) GetResourceAttribute() string {
+func (x *MetricMatcher) GetResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*MetricMatcher_ResourceAttribute); ok {
 			return x.ResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *MetricMatcher) GetScopeAttribute() string {
+func (x *MetricMatcher) GetScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*MetricMatcher_ScopeAttribute); ok {
 			return x.ScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *MetricMatcher) GetMetricType() MetricType {
@@ -418,9 +423,43 @@ func (x *MetricMatcher) GetExists() bool {
 	return false
 }
 
+func (x *MetricMatcher) GetStartsWith() string {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_StartsWith); ok {
+			return x.StartsWith
+		}
+	}
+	return ""
+}
+
+func (x *MetricMatcher) GetEndsWith() string {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_EndsWith); ok {
+			return x.EndsWith
+		}
+	}
+	return ""
+}
+
+func (x *MetricMatcher) GetContains() string {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_Contains); ok {
+			return x.Contains
+		}
+	}
+	return ""
+}
+
 func (x *MetricMatcher) GetNegate() bool {
 	if x != nil {
 		return x.Negate
+	}
+	return false
+}
+
+func (x *MetricMatcher) GetCaseInsensitive() bool {
+	if x != nil {
+		return x.CaseInsensitive
 	}
 	return false
 }
@@ -435,18 +474,18 @@ type MetricMatcher_MetricField struct {
 }
 
 type MetricMatcher_DatapointAttribute struct {
-	// Data point attribute by key
-	DatapointAttribute string `protobuf:"bytes,2,opt,name=datapoint_attribute,json=datapointAttribute,proto3,oneof"`
+	// Data point attribute by key or path
+	DatapointAttribute *AttributePath `protobuf:"bytes,2,opt,name=datapoint_attribute,json=datapointAttribute,proto3,oneof"`
 }
 
 type MetricMatcher_ResourceAttribute struct {
-	// Resource attribute by key
-	ResourceAttribute string `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
 }
 
 type MetricMatcher_ScopeAttribute struct {
-	// Scope attribute by key
-	ScopeAttribute string `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
 }
 
 type MetricMatcher_MetricType struct {
@@ -490,33 +529,59 @@ type MetricMatcher_Exists struct {
 	Exists bool `protobuf:"varint,12,opt,name=exists,proto3,oneof"`
 }
 
+type MetricMatcher_StartsWith struct {
+	// Literal prefix match
+	StartsWith string `protobuf:"bytes,13,opt,name=starts_with,json=startsWith,proto3,oneof"`
+}
+
+type MetricMatcher_EndsWith struct {
+	// Literal suffix match
+	EndsWith string `protobuf:"bytes,14,opt,name=ends_with,json=endsWith,proto3,oneof"`
+}
+
+type MetricMatcher_Contains struct {
+	// Literal substring match
+	Contains string `protobuf:"bytes,15,opt,name=contains,proto3,oneof"`
+}
+
 func (*MetricMatcher_Exact) isMetricMatcher_Match() {}
 
 func (*MetricMatcher_Regex) isMetricMatcher_Match() {}
 
 func (*MetricMatcher_Exists) isMetricMatcher_Match() {}
 
+func (*MetricMatcher_StartsWith) isMetricMatcher_Match() {}
+
+func (*MetricMatcher_EndsWith) isMetricMatcher_Match() {}
+
+func (*MetricMatcher_Contains) isMetricMatcher_Match() {}
+
 var File_tero_policy_v1_metric_proto protoreflect.FileDescriptor
 
 const file_tero_policy_v1_metric_proto_rawDesc = "" +
 	"\n" +
-	"\x1btero/policy/v1/metric.proto\x12\x0etero.policy.v1\"W\n" +
+	"\x1btero/policy/v1/metric.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"W\n" +
 	"\fMetricTarget\x123\n" +
 	"\x05match\x18\x01 \x03(\v2\x1d.tero.policy.v1.MetricMatcherR\x05match\x12\x12\n" +
-	"\x04keep\x18\x02 \x01(\bR\x04keep\"\xf6\x03\n" +
+	"\x04keep\x18\x02 \x01(\bR\x04keep\"\xde\x05\n" +
 	"\rMetricMatcher\x12@\n" +
-	"\fmetric_field\x18\x01 \x01(\x0e2\x1b.tero.policy.v1.MetricFieldH\x00R\vmetricField\x121\n" +
-	"\x13datapoint_attribute\x18\x02 \x01(\tH\x00R\x12datapointAttribute\x12/\n" +
-	"\x12resource_attribute\x18\x03 \x01(\tH\x00R\x11resourceAttribute\x12)\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\tH\x00R\x0escopeAttribute\x12=\n" +
+	"\fmetric_field\x18\x01 \x01(\x0e2\x1b.tero.policy.v1.MetricFieldH\x00R\vmetricField\x12P\n" +
+	"\x13datapoint_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x12datapointAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12=\n" +
 	"\vmetric_type\x18\x05 \x01(\x0e2\x1a.tero.policy.v1.MetricTypeH\x00R\n" +
 	"metricType\x12a\n" +
 	"\x17aggregation_temporality\x18\x06 \x01(\x0e2&.tero.policy.v1.AggregationTemporalityH\x00R\x16aggregationTemporality\x12\x16\n" +
 	"\x05exact\x18\n" +
 	" \x01(\tH\x01R\x05exact\x12\x16\n" +
 	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x12\x18\n" +
-	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12\x16\n" +
-	"\x06negate\x18\x14 \x01(\bR\x06negateB\a\n" +
+	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12!\n" +
+	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
+	"startsWith\x12\x1d\n" +
+	"\tends_with\x18\x0e \x01(\tH\x01R\bendsWith\x12\x1c\n" +
+	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12\x16\n" +
+	"\x06negate\x18\x14 \x01(\bR\x06negate\x12)\n" +
+	"\x10case_insensitive\x18\x15 \x01(\bR\x0fcaseInsensitiveB\a\n" +
 	"\x05fieldB\a\n" +
 	"\x05match*\xfd\x01\n" +
 	"\vMetricField\x12\x1c\n" +
@@ -562,17 +627,21 @@ var file_tero_policy_v1_metric_proto_goTypes = []any{
 	(AggregationTemporality)(0), // 2: tero.policy.v1.AggregationTemporality
 	(*MetricTarget)(nil),        // 3: tero.policy.v1.MetricTarget
 	(*MetricMatcher)(nil),       // 4: tero.policy.v1.MetricMatcher
+	(*AttributePath)(nil),       // 5: tero.policy.v1.AttributePath
 }
 var file_tero_policy_v1_metric_proto_depIdxs = []int32{
 	4, // 0: tero.policy.v1.MetricTarget.match:type_name -> tero.policy.v1.MetricMatcher
 	0, // 1: tero.policy.v1.MetricMatcher.metric_field:type_name -> tero.policy.v1.MetricField
-	1, // 2: tero.policy.v1.MetricMatcher.metric_type:type_name -> tero.policy.v1.MetricType
-	2, // 3: tero.policy.v1.MetricMatcher.aggregation_temporality:type_name -> tero.policy.v1.AggregationTemporality
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 2: tero.policy.v1.MetricMatcher.datapoint_attribute:type_name -> tero.policy.v1.AttributePath
+	5, // 3: tero.policy.v1.MetricMatcher.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	5, // 4: tero.policy.v1.MetricMatcher.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	1, // 5: tero.policy.v1.MetricMatcher.metric_type:type_name -> tero.policy.v1.MetricType
+	2, // 6: tero.policy.v1.MetricMatcher.aggregation_temporality:type_name -> tero.policy.v1.AggregationTemporality
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_metric_proto_init() }
@@ -580,6 +649,7 @@ func file_tero_policy_v1_metric_proto_init() {
 	if File_tero_policy_v1_metric_proto != nil {
 		return
 	}
+	file_tero_policy_v1_shared_proto_init()
 	file_tero_policy_v1_metric_proto_msgTypes[1].OneofWrappers = []any{
 		(*MetricMatcher_MetricField)(nil),
 		(*MetricMatcher_DatapointAttribute)(nil),
@@ -590,6 +660,9 @@ func file_tero_policy_v1_metric_proto_init() {
 		(*MetricMatcher_Exact)(nil),
 		(*MetricMatcher_Regex)(nil),
 		(*MetricMatcher_Exists)(nil),
+		(*MetricMatcher_StartsWith)(nil),
+		(*MetricMatcher_EndsWith)(nil),
+		(*MetricMatcher_Contains)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

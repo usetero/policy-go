@@ -152,8 +152,8 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 	nginxLog := &SimpleLogRecord{
 		Body:         []byte("GET /api/health 200"),
 		SeverityText: []byte("INFO"),
-		LogAttributes: map[string][]byte{
-			"ddsource": []byte("nginx"),
+		LogAttributes: map[string]any{
+			"ddsource": "nginx",
 		},
 	}
 
@@ -177,8 +177,8 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 	edgeLog := &SimpleLogRecord{
 		Body:         []byte("processing request"),
 		SeverityText: []byte("INFO"),
-		ResourceAttributes: map[string][]byte{
-			"service.name": []byte("api-edge"),
+		ResourceAttributes: map[string]any{
+			"service.name": "api-edge",
 		},
 	}
 

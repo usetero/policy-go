@@ -36,12 +36,15 @@ type Matchable[F FieldEnum] interface {
 	// Returns nil if the field doesn't exist or isn't applicable.
 	GetField(field F) []byte
 
-	// GetAttribute returns the value of an attribute at the specified scope.
+	// GetAttribute returns the value of an attribute at the specified scope and path.
+	// Path is a slice of strings representing nested access (e.g., ["http", "method"]).
+	// For single-segment paths, this is equivalent to a flat attribute lookup.
+	// Returns nil if the attribute doesn't exist or any intermediate path segment is missing.
+	//
 	// For logs: AttrScopeRecord = log attributes
 	// For traces: AttrScopeRecord = span attributes, AttrScopeEvent = event attributes
 	// For metrics: AttrScopeRecord = datapoint attributes
-	// Returns nil if the attribute doesn't exist.
-	GetAttribute(scope AttrScope, name string) []byte
+	GetAttribute(scope AttrScope, path []string) []byte
 }
 
 // Type aliases for convenience.
@@ -52,15 +55,16 @@ type (
 )
 
 // SimpleLogRecord is a simple implementation of LogMatchable for testing.
+// Attribute maps support nested structures via map[string]any values.
 type SimpleLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
 	TraceID            []byte
 	SpanID             []byte
 	EventName          []byte
-	LogAttributes      map[string][]byte
-	ResourceAttributes map[string][]byte
-	ScopeAttributes    map[string][]byte
+	LogAttributes      map[string]any
+	ResourceAttributes map[string]any
+	ScopeAttributes    map[string]any
 }
 
 // GetField implements LogMatchable.
@@ -81,24 +85,53 @@ func (r *SimpleLogRecord) GetField(field policyv1.LogField) []byte {
 	}
 }
 
-// GetAttribute implements LogMatchable.
-func (r *SimpleLogRecord) GetAttribute(scope AttrScope, name string) []byte {
+// GetAttribute implements LogMatchable with path traversal support.
+func (r *SimpleLogRecord) GetAttribute(scope AttrScope, path []string) []byte {
+	var attrs map[string]any
 	switch scope {
 	case AttrScopeResource:
-		if r.ResourceAttributes == nil {
-			return nil
-		}
-		return r.ResourceAttributes[name]
+		attrs = r.ResourceAttributes
 	case AttrScopeScope:
-		if r.ScopeAttributes == nil {
-			return nil
-		}
-		return r.ScopeAttributes[name]
+		attrs = r.ScopeAttributes
 	case AttrScopeRecord:
-		if r.LogAttributes == nil {
-			return nil
-		}
-		return r.LogAttributes[name]
+		attrs = r.LogAttributes
+	default:
+		return nil
+	}
+	return traversePath(attrs, path)
+}
+
+// traversePath navigates through nested maps following the path segments.
+func traversePath(m map[string]any, path []string) []byte {
+	if len(path) == 0 || m == nil {
+		return nil
+	}
+
+	val, ok := m[path[0]]
+	if !ok {
+		return nil
+	}
+
+	// If this is the last segment, return the value
+	if len(path) == 1 {
+		return toBytes(val)
+	}
+
+	// Otherwise, recurse into nested map
+	nested, ok := val.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return traversePath(nested, path[1:])
+}
+
+// toBytes converts a value to bytes for matching.
+func toBytes(val any) []byte {
+	switch v := val.(type) {
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
 	default:
 		return nil
 	}

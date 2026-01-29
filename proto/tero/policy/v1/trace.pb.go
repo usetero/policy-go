@@ -361,11 +361,16 @@ type TraceMatcher struct {
 	//	*TraceMatcher_Exact
 	//	*TraceMatcher_Regex
 	//	*TraceMatcher_Exists
+	//	*TraceMatcher_StartsWith
+	//	*TraceMatcher_EndsWith
+	//	*TraceMatcher_Contains
 	Match isTraceMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
-	Negate        bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
+	// If true, applies case-insensitive matching to all match types
+	CaseInsensitive bool `protobuf:"varint,21,opt,name=case_insensitive,json=caseInsensitive,proto3" json:"case_insensitive,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TraceMatcher) Reset() {
@@ -414,31 +419,31 @@ func (x *TraceMatcher) GetTraceField() TraceField {
 	return TraceField_TRACE_FIELD_UNSPECIFIED
 }
 
-func (x *TraceMatcher) GetSpanAttribute() string {
+func (x *TraceMatcher) GetSpanAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*TraceMatcher_SpanAttribute); ok {
 			return x.SpanAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *TraceMatcher) GetResourceAttribute() string {
+func (x *TraceMatcher) GetResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*TraceMatcher_ResourceAttribute); ok {
 			return x.ResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *TraceMatcher) GetScopeAttribute() string {
+func (x *TraceMatcher) GetScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*TraceMatcher_ScopeAttribute); ok {
 			return x.ScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *TraceMatcher) GetSpanKind() SpanKind {
@@ -468,13 +473,13 @@ func (x *TraceMatcher) GetEventName() string {
 	return ""
 }
 
-func (x *TraceMatcher) GetEventAttribute() string {
+func (x *TraceMatcher) GetEventAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*TraceMatcher_EventAttribute); ok {
 			return x.EventAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *TraceMatcher) GetLinkTraceId() string {
@@ -520,9 +525,43 @@ func (x *TraceMatcher) GetExists() bool {
 	return false
 }
 
+func (x *TraceMatcher) GetStartsWith() string {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_StartsWith); ok {
+			return x.StartsWith
+		}
+	}
+	return ""
+}
+
+func (x *TraceMatcher) GetEndsWith() string {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_EndsWith); ok {
+			return x.EndsWith
+		}
+	}
+	return ""
+}
+
+func (x *TraceMatcher) GetContains() string {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_Contains); ok {
+			return x.Contains
+		}
+	}
+	return ""
+}
+
 func (x *TraceMatcher) GetNegate() bool {
 	if x != nil {
 		return x.Negate
+	}
+	return false
+}
+
+func (x *TraceMatcher) GetCaseInsensitive() bool {
+	if x != nil {
+		return x.CaseInsensitive
 	}
 	return false
 }
@@ -537,18 +576,18 @@ type TraceMatcher_TraceField struct {
 }
 
 type TraceMatcher_SpanAttribute struct {
-	// Span attribute by key
-	SpanAttribute string `protobuf:"bytes,2,opt,name=span_attribute,json=spanAttribute,proto3,oneof"`
+	// Span attribute by key or path
+	SpanAttribute *AttributePath `protobuf:"bytes,2,opt,name=span_attribute,json=spanAttribute,proto3,oneof"`
 }
 
 type TraceMatcher_ResourceAttribute struct {
-	// Resource attribute by key
-	ResourceAttribute string `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
 }
 
 type TraceMatcher_ScopeAttribute struct {
-	// Scope attribute by key
-	ScopeAttribute string `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
 }
 
 type TraceMatcher_SpanKind struct {
@@ -568,7 +607,7 @@ type TraceMatcher_EventName struct {
 
 type TraceMatcher_EventAttribute struct {
 	// Event attribute matcher (matches if span contains an event with this attribute)
-	EventAttribute string `protobuf:"bytes,8,opt,name=event_attribute,json=eventAttribute,proto3,oneof"`
+	EventAttribute *AttributePath `protobuf:"bytes,8,opt,name=event_attribute,json=eventAttribute,proto3,oneof"`
 }
 
 type TraceMatcher_LinkTraceId struct {
@@ -613,11 +652,32 @@ type TraceMatcher_Exists struct {
 	Exists bool `protobuf:"varint,12,opt,name=exists,proto3,oneof"`
 }
 
+type TraceMatcher_StartsWith struct {
+	// Literal prefix match
+	StartsWith string `protobuf:"bytes,13,opt,name=starts_with,json=startsWith,proto3,oneof"`
+}
+
+type TraceMatcher_EndsWith struct {
+	// Literal suffix match
+	EndsWith string `protobuf:"bytes,14,opt,name=ends_with,json=endsWith,proto3,oneof"`
+}
+
+type TraceMatcher_Contains struct {
+	// Literal substring match
+	Contains string `protobuf:"bytes,15,opt,name=contains,proto3,oneof"`
+}
+
 func (*TraceMatcher_Exact) isTraceMatcher_Match() {}
 
 func (*TraceMatcher_Regex) isTraceMatcher_Match() {}
 
 func (*TraceMatcher_Exists) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_StartsWith) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_EndsWith) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_Contains) isTraceMatcher_Match() {}
 
 // TraceSamplingConfig configures probabilistic sampling for traces.
 //
@@ -730,28 +790,33 @@ var File_tero_policy_v1_trace_proto protoreflect.FileDescriptor
 
 const file_tero_policy_v1_trace_proto_rawDesc = "" +
 	"\n" +
-	"\x1atero/policy/v1/trace.proto\x12\x0etero.policy.v1\"z\n" +
+	"\x1atero/policy/v1/trace.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"z\n" +
 	"\vTraceTarget\x122\n" +
 	"\x05match\x18\x01 \x03(\v2\x1c.tero.policy.v1.TraceMatcherR\x05match\x127\n" +
-	"\x04keep\x18\x02 \x01(\v2#.tero.policy.v1.TraceSamplingConfigR\x04keep\"\xb4\x04\n" +
+	"\x04keep\x18\x02 \x01(\v2#.tero.policy.v1.TraceSamplingConfigR\x04keep\"\xbb\x06\n" +
 	"\fTraceMatcher\x12=\n" +
 	"\vtrace_field\x18\x01 \x01(\x0e2\x1a.tero.policy.v1.TraceFieldH\x00R\n" +
-	"traceField\x12'\n" +
-	"\x0espan_attribute\x18\x02 \x01(\tH\x00R\rspanAttribute\x12/\n" +
-	"\x12resource_attribute\x18\x03 \x01(\tH\x00R\x11resourceAttribute\x12)\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\tH\x00R\x0escopeAttribute\x127\n" +
+	"traceField\x12F\n" +
+	"\x0espan_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\rspanAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x127\n" +
 	"\tspan_kind\x18\x05 \x01(\x0e2\x18.tero.policy.v1.SpanKindH\x00R\bspanKind\x12A\n" +
 	"\vspan_status\x18\x06 \x01(\x0e2\x1e.tero.policy.v1.SpanStatusCodeH\x00R\n" +
 	"spanStatus\x12\x1f\n" +
 	"\n" +
-	"event_name\x18\a \x01(\tH\x00R\teventName\x12)\n" +
-	"\x0fevent_attribute\x18\b \x01(\tH\x00R\x0eeventAttribute\x12$\n" +
+	"event_name\x18\a \x01(\tH\x00R\teventName\x12H\n" +
+	"\x0fevent_attribute\x18\b \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0eeventAttribute\x12$\n" +
 	"\rlink_trace_id\x18\t \x01(\tH\x00R\vlinkTraceId\x12\x16\n" +
 	"\x05exact\x18\n" +
 	" \x01(\tH\x01R\x05exact\x12\x16\n" +
 	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x12\x18\n" +
-	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12\x16\n" +
-	"\x06negate\x18\x14 \x01(\bR\x06negateB\a\n" +
+	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12!\n" +
+	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
+	"startsWith\x12\x1d\n" +
+	"\tends_with\x18\x0e \x01(\tH\x01R\bendsWith\x12\x1c\n" +
+	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12\x16\n" +
+	"\x06negate\x18\x14 \x01(\bR\x06negate\x12)\n" +
+	"\x10case_insensitive\x18\x15 \x01(\bR\x0fcaseInsensitiveB\a\n" +
 	"\x05fieldB\a\n" +
 	"\x05match\"\xa6\x02\n" +
 	"\x13TraceSamplingConfig\x12\x1e\n" +
@@ -820,19 +885,24 @@ var file_tero_policy_v1_trace_proto_goTypes = []any{
 	(*TraceTarget)(nil),         // 4: tero.policy.v1.TraceTarget
 	(*TraceMatcher)(nil),        // 5: tero.policy.v1.TraceMatcher
 	(*TraceSamplingConfig)(nil), // 6: tero.policy.v1.TraceSamplingConfig
+	(*AttributePath)(nil),       // 7: tero.policy.v1.AttributePath
 }
 var file_tero_policy_v1_trace_proto_depIdxs = []int32{
-	5, // 0: tero.policy.v1.TraceTarget.match:type_name -> tero.policy.v1.TraceMatcher
-	6, // 1: tero.policy.v1.TraceTarget.keep:type_name -> tero.policy.v1.TraceSamplingConfig
-	0, // 2: tero.policy.v1.TraceMatcher.trace_field:type_name -> tero.policy.v1.TraceField
-	1, // 3: tero.policy.v1.TraceMatcher.span_kind:type_name -> tero.policy.v1.SpanKind
-	2, // 4: tero.policy.v1.TraceMatcher.span_status:type_name -> tero.policy.v1.SpanStatusCode
-	3, // 5: tero.policy.v1.TraceSamplingConfig.mode:type_name -> tero.policy.v1.SamplingMode
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5,  // 0: tero.policy.v1.TraceTarget.match:type_name -> tero.policy.v1.TraceMatcher
+	6,  // 1: tero.policy.v1.TraceTarget.keep:type_name -> tero.policy.v1.TraceSamplingConfig
+	0,  // 2: tero.policy.v1.TraceMatcher.trace_field:type_name -> tero.policy.v1.TraceField
+	7,  // 3: tero.policy.v1.TraceMatcher.span_attribute:type_name -> tero.policy.v1.AttributePath
+	7,  // 4: tero.policy.v1.TraceMatcher.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	7,  // 5: tero.policy.v1.TraceMatcher.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	1,  // 6: tero.policy.v1.TraceMatcher.span_kind:type_name -> tero.policy.v1.SpanKind
+	2,  // 7: tero.policy.v1.TraceMatcher.span_status:type_name -> tero.policy.v1.SpanStatusCode
+	7,  // 8: tero.policy.v1.TraceMatcher.event_attribute:type_name -> tero.policy.v1.AttributePath
+	3,  // 9: tero.policy.v1.TraceSamplingConfig.mode:type_name -> tero.policy.v1.SamplingMode
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_trace_proto_init() }
@@ -840,6 +910,7 @@ func file_tero_policy_v1_trace_proto_init() {
 	if File_tero_policy_v1_trace_proto != nil {
 		return
 	}
+	file_tero_policy_v1_shared_proto_init()
 	file_tero_policy_v1_trace_proto_msgTypes[1].OneofWrappers = []any{
 		(*TraceMatcher_TraceField)(nil),
 		(*TraceMatcher_SpanAttribute)(nil),
@@ -853,6 +924,9 @@ func file_tero_policy_v1_trace_proto_init() {
 		(*TraceMatcher_Exact)(nil),
 		(*TraceMatcher_Regex)(nil),
 		(*TraceMatcher_Exists)(nil),
+		(*TraceMatcher_StartsWith)(nil),
+		(*TraceMatcher_EndsWith)(nil),
+		(*TraceMatcher_Contains)(nil),
 	}
 	file_tero_policy_v1_trace_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}

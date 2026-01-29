@@ -106,7 +106,16 @@ type LogTarget struct {
 	//	"N/m"  - Keep at most N per minute, e.g. "1000/m"
 	Keep string `protobuf:"bytes,2,opt,name=keep,proto3" json:"keep,omitempty"`
 	// Transform operations to apply
-	Transform     *LogTransform `protobuf:"bytes,3,opt,name=transform,proto3" json:"transform,omitempty"`
+	Transform *LogTransform `protobuf:"bytes,3,opt,name=transform,proto3" json:"transform,omitempty"`
+	// Field to use as the sampling key for consistent sampling.
+	// When set, all logs with the same value for this field get the same
+	// keep/drop decision. Use for lifecycle events (request_id, trace_id, job_id)
+	// to avoid sampling individual log lines independently.
+	//
+	// Only applies when keep is a sampling value (N%, N/s, N/m).
+	// Example: sample_key = log_attribute["request_id"] with keep = "10%" means
+	// 10% of requests are kept, with all logs from each kept request preserved.
+	SampleKey     *LogSampleKey `protobuf:"bytes,4,opt,name=sample_key,json=sampleKey,proto3" json:"sample_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -162,6 +171,136 @@ func (x *LogTarget) GetTransform() *LogTransform {
 	return nil
 }
 
+func (x *LogTarget) GetSampleKey() *LogSampleKey {
+	if x != nil {
+		return x.SampleKey
+	}
+	return nil
+}
+
+// LogSampleKey specifies which field to use as the sampling key for consistent
+// sampling decisions.
+type LogSampleKey struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// FIELD SELECTION (subset of LogMatcher fields appropriate for sampling keys)
+	// The field to use as the sampling key. Exactly one must be set.
+	//
+	// Types that are valid to be assigned to Field:
+	//
+	//	*LogSampleKey_LogField
+	//	*LogSampleKey_LogAttribute
+	//	*LogSampleKey_ResourceAttribute
+	//	*LogSampleKey_ScopeAttribute
+	Field         isLogSampleKey_Field `protobuf_oneof:"field"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogSampleKey) Reset() {
+	*x = LogSampleKey{}
+	mi := &file_tero_policy_v1_log_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogSampleKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogSampleKey) ProtoMessage() {}
+
+func (x *LogSampleKey) ProtoReflect() protoreflect.Message {
+	mi := &file_tero_policy_v1_log_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogSampleKey.ProtoReflect.Descriptor instead.
+func (*LogSampleKey) Descriptor() ([]byte, []int) {
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *LogSampleKey) GetField() isLogSampleKey_Field {
+	if x != nil {
+		return x.Field
+	}
+	return nil
+}
+
+func (x *LogSampleKey) GetLogField() LogField {
+	if x != nil {
+		if x, ok := x.Field.(*LogSampleKey_LogField); ok {
+			return x.LogField
+		}
+	}
+	return LogField_LOG_FIELD_UNSPECIFIED
+}
+
+func (x *LogSampleKey) GetLogAttribute() *AttributePath {
+	if x != nil {
+		if x, ok := x.Field.(*LogSampleKey_LogAttribute); ok {
+			return x.LogAttribute
+		}
+	}
+	return nil
+}
+
+func (x *LogSampleKey) GetResourceAttribute() *AttributePath {
+	if x != nil {
+		if x, ok := x.Field.(*LogSampleKey_ResourceAttribute); ok {
+			return x.ResourceAttribute
+		}
+	}
+	return nil
+}
+
+func (x *LogSampleKey) GetScopeAttribute() *AttributePath {
+	if x != nil {
+		if x, ok := x.Field.(*LogSampleKey_ScopeAttribute); ok {
+			return x.ScopeAttribute
+		}
+	}
+	return nil
+}
+
+type isLogSampleKey_Field interface {
+	isLogSampleKey_Field()
+}
+
+type LogSampleKey_LogField struct {
+	// Simple fields (trace_id, span_id, etc.)
+	LogField LogField `protobuf:"varint,1,opt,name=log_field,json=logField,proto3,enum=tero.policy.v1.LogField,oneof"`
+}
+
+type LogSampleKey_LogAttribute struct {
+	// Log record attribute by key or path
+	LogAttribute *AttributePath `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
+}
+
+type LogSampleKey_ResourceAttribute struct {
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+}
+
+type LogSampleKey_ScopeAttribute struct {
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+}
+
+func (*LogSampleKey_LogField) isLogSampleKey_Field() {}
+
+func (*LogSampleKey_LogAttribute) isLogSampleKey_Field() {}
+
+func (*LogSampleKey_ResourceAttribute) isLogSampleKey_Field() {}
+
+func (*LogSampleKey_ScopeAttribute) isLogSampleKey_Field() {}
+
 // LogMatcher provides a way to match against log telemetry data using known fields.
 //
 // IMPORTANT CONSTRAINTS:
@@ -191,16 +330,21 @@ type LogMatcher struct {
 	//	*LogMatcher_Exact
 	//	*LogMatcher_Regex
 	//	*LogMatcher_Exists
+	//	*LogMatcher_StartsWith
+	//	*LogMatcher_EndsWith
+	//	*LogMatcher_Contains
 	Match isLogMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
-	Negate        bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
+	// If true, applies case-insensitive matching to all match types
+	CaseInsensitive bool `protobuf:"varint,21,opt,name=case_insensitive,json=caseInsensitive,proto3" json:"case_insensitive,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *LogMatcher) Reset() {
 	*x = LogMatcher{}
-	mi := &file_tero_policy_v1_log_proto_msgTypes[1]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -212,7 +356,7 @@ func (x *LogMatcher) String() string {
 func (*LogMatcher) ProtoMessage() {}
 
 func (x *LogMatcher) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_log_proto_msgTypes[1]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -225,7 +369,7 @@ func (x *LogMatcher) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogMatcher.ProtoReflect.Descriptor instead.
 func (*LogMatcher) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{1}
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *LogMatcher) GetField() isLogMatcher_Field {
@@ -244,31 +388,31 @@ func (x *LogMatcher) GetLogField() LogField {
 	return LogField_LOG_FIELD_UNSPECIFIED
 }
 
-func (x *LogMatcher) GetLogAttribute() string {
+func (x *LogMatcher) GetLogAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogMatcher_LogAttribute); ok {
 			return x.LogAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogMatcher) GetResourceAttribute() string {
+func (x *LogMatcher) GetResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogMatcher_ResourceAttribute); ok {
 			return x.ResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogMatcher) GetScopeAttribute() string {
+func (x *LogMatcher) GetScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogMatcher_ScopeAttribute); ok {
 			return x.ScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *LogMatcher) GetMatch() isLogMatcher_Match {
@@ -305,9 +449,43 @@ func (x *LogMatcher) GetExists() bool {
 	return false
 }
 
+func (x *LogMatcher) GetStartsWith() string {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_StartsWith); ok {
+			return x.StartsWith
+		}
+	}
+	return ""
+}
+
+func (x *LogMatcher) GetEndsWith() string {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_EndsWith); ok {
+			return x.EndsWith
+		}
+	}
+	return ""
+}
+
+func (x *LogMatcher) GetContains() string {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_Contains); ok {
+			return x.Contains
+		}
+	}
+	return ""
+}
+
 func (x *LogMatcher) GetNegate() bool {
 	if x != nil {
 		return x.Negate
+	}
+	return false
+}
+
+func (x *LogMatcher) GetCaseInsensitive() bool {
+	if x != nil {
+		return x.CaseInsensitive
 	}
 	return false
 }
@@ -322,18 +500,18 @@ type LogMatcher_LogField struct {
 }
 
 type LogMatcher_LogAttribute struct {
-	// Log record attribute by key
-	LogAttribute string `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
+	// Log record attribute by key or path
+	LogAttribute *AttributePath `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
 }
 
 type LogMatcher_ResourceAttribute struct {
-	// Resource attribute by key
-	ResourceAttribute string `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
 }
 
 type LogMatcher_ScopeAttribute struct {
-	// Scope attribute by key
-	ScopeAttribute string `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
 }
 
 func (*LogMatcher_LogField) isLogMatcher_Field() {}
@@ -363,11 +541,32 @@ type LogMatcher_Exists struct {
 	Exists bool `protobuf:"varint,12,opt,name=exists,proto3,oneof"`
 }
 
+type LogMatcher_StartsWith struct {
+	// Literal prefix match
+	StartsWith string `protobuf:"bytes,13,opt,name=starts_with,json=startsWith,proto3,oneof"`
+}
+
+type LogMatcher_EndsWith struct {
+	// Literal suffix match
+	EndsWith string `protobuf:"bytes,14,opt,name=ends_with,json=endsWith,proto3,oneof"`
+}
+
+type LogMatcher_Contains struct {
+	// Literal substring match
+	Contains string `protobuf:"bytes,15,opt,name=contains,proto3,oneof"`
+}
+
 func (*LogMatcher_Exact) isLogMatcher_Match() {}
 
 func (*LogMatcher_Regex) isLogMatcher_Match() {}
 
 func (*LogMatcher_Exists) isLogMatcher_Match() {}
+
+func (*LogMatcher_StartsWith) isLogMatcher_Match() {}
+
+func (*LogMatcher_EndsWith) isLogMatcher_Match() {}
+
+func (*LogMatcher_Contains) isLogMatcher_Match() {}
 
 // LogTransform defines modifications to logs.
 type LogTransform struct {
@@ -386,7 +585,7 @@ type LogTransform struct {
 
 func (x *LogTransform) Reset() {
 	*x = LogTransform{}
-	mi := &file_tero_policy_v1_log_proto_msgTypes[2]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -398,7 +597,7 @@ func (x *LogTransform) String() string {
 func (*LogTransform) ProtoMessage() {}
 
 func (x *LogTransform) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_log_proto_msgTypes[2]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,7 +610,7 @@ func (x *LogTransform) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogTransform.ProtoReflect.Descriptor instead.
 func (*LogTransform) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{2}
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *LogTransform) GetRemove() []*LogRemove {
@@ -461,7 +660,7 @@ type LogRemove struct {
 
 func (x *LogRemove) Reset() {
 	*x = LogRemove{}
-	mi := &file_tero_policy_v1_log_proto_msgTypes[3]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -473,7 +672,7 @@ func (x *LogRemove) String() string {
 func (*LogRemove) ProtoMessage() {}
 
 func (x *LogRemove) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_log_proto_msgTypes[3]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,7 +685,7 @@ func (x *LogRemove) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRemove.ProtoReflect.Descriptor instead.
 func (*LogRemove) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{3}
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *LogRemove) GetField() isLogRemove_Field {
@@ -505,31 +704,31 @@ func (x *LogRemove) GetLogField() LogField {
 	return LogField_LOG_FIELD_UNSPECIFIED
 }
 
-func (x *LogRemove) GetLogAttribute() string {
+func (x *LogRemove) GetLogAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogRemove_LogAttribute); ok {
 			return x.LogAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogRemove) GetResourceAttribute() string {
+func (x *LogRemove) GetResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogRemove_ResourceAttribute); ok {
 			return x.ResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogRemove) GetScopeAttribute() string {
+func (x *LogRemove) GetScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogRemove_ScopeAttribute); ok {
 			return x.ScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 type isLogRemove_Field interface {
@@ -542,18 +741,18 @@ type LogRemove_LogField struct {
 }
 
 type LogRemove_LogAttribute struct {
-	// Log record attribute by key
-	LogAttribute string `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
+	// Log record attribute by key or path
+	LogAttribute *AttributePath `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
 }
 
 type LogRemove_ResourceAttribute struct {
-	// Resource attribute by key
-	ResourceAttribute string `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
 }
 
 type LogRemove_ScopeAttribute struct {
-	// Scope attribute by key
-	ScopeAttribute string `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
 }
 
 func (*LogRemove_LogField) isLogRemove_Field() {}
@@ -585,7 +784,7 @@ type LogRedact struct {
 
 func (x *LogRedact) Reset() {
 	*x = LogRedact{}
-	mi := &file_tero_policy_v1_log_proto_msgTypes[4]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -597,7 +796,7 @@ func (x *LogRedact) String() string {
 func (*LogRedact) ProtoMessage() {}
 
 func (x *LogRedact) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_log_proto_msgTypes[4]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -610,7 +809,7 @@ func (x *LogRedact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRedact.ProtoReflect.Descriptor instead.
 func (*LogRedact) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{4}
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *LogRedact) GetField() isLogRedact_Field {
@@ -629,31 +828,31 @@ func (x *LogRedact) GetLogField() LogField {
 	return LogField_LOG_FIELD_UNSPECIFIED
 }
 
-func (x *LogRedact) GetLogAttribute() string {
+func (x *LogRedact) GetLogAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogRedact_LogAttribute); ok {
 			return x.LogAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogRedact) GetResourceAttribute() string {
+func (x *LogRedact) GetResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogRedact_ResourceAttribute); ok {
 			return x.ResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogRedact) GetScopeAttribute() string {
+func (x *LogRedact) GetScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogRedact_ScopeAttribute); ok {
 			return x.ScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *LogRedact) GetReplacement() string {
@@ -673,18 +872,18 @@ type LogRedact_LogField struct {
 }
 
 type LogRedact_LogAttribute struct {
-	// Log record attribute by key
-	LogAttribute string `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
+	// Log record attribute by key or path
+	LogAttribute *AttributePath `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
 }
 
 type LogRedact_ResourceAttribute struct {
-	// Resource attribute by key
-	ResourceAttribute string `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
 }
 
 type LogRedact_ScopeAttribute struct {
-	// Scope attribute by key
-	ScopeAttribute string `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
 }
 
 func (*LogRedact_LogField) isLogRedact_Field() {}
@@ -718,7 +917,7 @@ type LogRename struct {
 
 func (x *LogRename) Reset() {
 	*x = LogRename{}
-	mi := &file_tero_policy_v1_log_proto_msgTypes[5]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -730,7 +929,7 @@ func (x *LogRename) String() string {
 func (*LogRename) ProtoMessage() {}
 
 func (x *LogRename) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_log_proto_msgTypes[5]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -743,7 +942,7 @@ func (x *LogRename) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRename.ProtoReflect.Descriptor instead.
 func (*LogRename) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{5}
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LogRename) GetFrom() isLogRename_From {
@@ -762,31 +961,31 @@ func (x *LogRename) GetFromLogField() LogField {
 	return LogField_LOG_FIELD_UNSPECIFIED
 }
 
-func (x *LogRename) GetFromLogAttribute() string {
+func (x *LogRename) GetFromLogAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.From.(*LogRename_FromLogAttribute); ok {
 			return x.FromLogAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogRename) GetFromResourceAttribute() string {
+func (x *LogRename) GetFromResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.From.(*LogRename_FromResourceAttribute); ok {
 			return x.FromResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogRename) GetFromScopeAttribute() string {
+func (x *LogRename) GetFromScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.From.(*LogRename_FromScopeAttribute); ok {
 			return x.FromScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *LogRename) GetTo() string {
@@ -813,18 +1012,18 @@ type LogRename_FromLogField struct {
 }
 
 type LogRename_FromLogAttribute struct {
-	// Log record attribute by key
-	FromLogAttribute string `protobuf:"bytes,2,opt,name=from_log_attribute,json=fromLogAttribute,proto3,oneof"`
+	// Log record attribute by key or path
+	FromLogAttribute *AttributePath `protobuf:"bytes,2,opt,name=from_log_attribute,json=fromLogAttribute,proto3,oneof"`
 }
 
 type LogRename_FromResourceAttribute struct {
-	// Resource attribute by key
-	FromResourceAttribute string `protobuf:"bytes,3,opt,name=from_resource_attribute,json=fromResourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	FromResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=from_resource_attribute,json=fromResourceAttribute,proto3,oneof"`
 }
 
 type LogRename_FromScopeAttribute struct {
-	// Scope attribute by key
-	FromScopeAttribute string `protobuf:"bytes,4,opt,name=from_scope_attribute,json=fromScopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	FromScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=from_scope_attribute,json=fromScopeAttribute,proto3,oneof"`
 }
 
 func (*LogRename_FromLogField) isLogRename_From() {}
@@ -858,7 +1057,7 @@ type LogAdd struct {
 
 func (x *LogAdd) Reset() {
 	*x = LogAdd{}
-	mi := &file_tero_policy_v1_log_proto_msgTypes[6]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -870,7 +1069,7 @@ func (x *LogAdd) String() string {
 func (*LogAdd) ProtoMessage() {}
 
 func (x *LogAdd) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_log_proto_msgTypes[6]
+	mi := &file_tero_policy_v1_log_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -883,7 +1082,7 @@ func (x *LogAdd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogAdd.ProtoReflect.Descriptor instead.
 func (*LogAdd) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{6}
+	return file_tero_policy_v1_log_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *LogAdd) GetField() isLogAdd_Field {
@@ -902,31 +1101,31 @@ func (x *LogAdd) GetLogField() LogField {
 	return LogField_LOG_FIELD_UNSPECIFIED
 }
 
-func (x *LogAdd) GetLogAttribute() string {
+func (x *LogAdd) GetLogAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogAdd_LogAttribute); ok {
 			return x.LogAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogAdd) GetResourceAttribute() string {
+func (x *LogAdd) GetResourceAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogAdd_ResourceAttribute); ok {
 			return x.ResourceAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
-func (x *LogAdd) GetScopeAttribute() string {
+func (x *LogAdd) GetScopeAttribute() *AttributePath {
 	if x != nil {
 		if x, ok := x.Field.(*LogAdd_ScopeAttribute); ok {
 			return x.ScopeAttribute
 		}
 	}
-	return ""
+	return nil
 }
 
 func (x *LogAdd) GetValue() string {
@@ -953,18 +1152,18 @@ type LogAdd_LogField struct {
 }
 
 type LogAdd_LogAttribute struct {
-	// Log record attribute by key
-	LogAttribute string `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
+	// Log record attribute by key or path
+	LogAttribute *AttributePath `protobuf:"bytes,2,opt,name=log_attribute,json=logAttribute,proto3,oneof"`
 }
 
 type LogAdd_ResourceAttribute struct {
-	// Resource attribute by key
-	ResourceAttribute string `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
+	// Resource attribute by key or path
+	ResourceAttribute *AttributePath `protobuf:"bytes,3,opt,name=resource_attribute,json=resourceAttribute,proto3,oneof"`
 }
 
 type LogAdd_ScopeAttribute struct {
-	// Scope attribute by key
-	ScopeAttribute string `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
+	// Scope attribute by key or path
+	ScopeAttribute *AttributePath `protobuf:"bytes,4,opt,name=scope_attribute,json=scopeAttribute,proto3,oneof"`
 }
 
 func (*LogAdd_LogField) isLogAdd_Field() {}
@@ -979,57 +1178,70 @@ var File_tero_policy_v1_log_proto protoreflect.FileDescriptor
 
 const file_tero_policy_v1_log_proto_rawDesc = "" +
 	"\n" +
-	"\x18tero/policy/v1/log.proto\x12\x0etero.policy.v1\"\x8d\x01\n" +
+	"\x18tero/policy/v1/log.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"\xca\x01\n" +
 	"\tLogTarget\x120\n" +
 	"\x05match\x18\x01 \x03(\v2\x1a.tero.policy.v1.LogMatcherR\x05match\x12\x12\n" +
 	"\x04keep\x18\x02 \x01(\tR\x04keep\x12:\n" +
-	"\ttransform\x18\x03 \x01(\v2\x1c.tero.policy.v1.LogTransformR\ttransform\"\xbc\x02\n" +
+	"\ttransform\x18\x03 \x01(\v2\x1c.tero.policy.v1.LogTransformR\ttransform\x12;\n" +
+	"\n" +
+	"sample_key\x18\x04 \x01(\v2\x1c.tero.policy.v1.LogSampleKeyR\tsampleKey\"\xb0\x02\n" +
+	"\fLogSampleKey\x127\n" +
+	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
+	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttributeB\a\n" +
+	"\x05field\"\xa4\x04\n" +
 	"\n" +
 	"LogMatcher\x127\n" +
-	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12%\n" +
-	"\rlog_attribute\x18\x02 \x01(\tH\x00R\flogAttribute\x12/\n" +
-	"\x12resource_attribute\x18\x03 \x01(\tH\x00R\x11resourceAttribute\x12)\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\tH\x00R\x0escopeAttribute\x12\x16\n" +
+	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
+	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12\x16\n" +
 	"\x05exact\x18\n" +
 	" \x01(\tH\x01R\x05exact\x12\x16\n" +
 	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x12\x18\n" +
-	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12\x16\n" +
-	"\x06negate\x18\x14 \x01(\bR\x06negateB\a\n" +
+	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12!\n" +
+	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
+	"startsWith\x12\x1d\n" +
+	"\tends_with\x18\x0e \x01(\tH\x01R\bendsWith\x12\x1c\n" +
+	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12\x16\n" +
+	"\x06negate\x18\x14 \x01(\bR\x06negate\x12)\n" +
+	"\x10case_insensitive\x18\x15 \x01(\bR\x0fcaseInsensitiveB\a\n" +
 	"\x05fieldB\a\n" +
 	"\x05match\"\xd1\x01\n" +
 	"\fLogTransform\x121\n" +
 	"\x06remove\x18\x01 \x03(\v2\x19.tero.policy.v1.LogRemoveR\x06remove\x121\n" +
 	"\x06redact\x18\x02 \x03(\v2\x19.tero.policy.v1.LogRedactR\x06redact\x121\n" +
 	"\x06rename\x18\x03 \x03(\v2\x19.tero.policy.v1.LogRenameR\x06rename\x12(\n" +
-	"\x03add\x18\x04 \x03(\v2\x16.tero.policy.v1.LogAddR\x03add\"\xd0\x01\n" +
+	"\x03add\x18\x04 \x03(\v2\x16.tero.policy.v1.LogAddR\x03add\"\xad\x02\n" +
 	"\tLogRemove\x127\n" +
-	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12%\n" +
-	"\rlog_attribute\x18\x02 \x01(\tH\x00R\flogAttribute\x12/\n" +
-	"\x12resource_attribute\x18\x03 \x01(\tH\x00R\x11resourceAttribute\x12)\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\tH\x00R\x0escopeAttributeB\a\n" +
-	"\x05field\"\xf2\x01\n" +
+	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
+	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttributeB\a\n" +
+	"\x05field\"\xcf\x02\n" +
 	"\tLogRedact\x127\n" +
-	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12%\n" +
-	"\rlog_attribute\x18\x02 \x01(\tH\x00R\flogAttribute\x12/\n" +
-	"\x12resource_attribute\x18\x03 \x01(\tH\x00R\x11resourceAttribute\x12)\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\tH\x00R\x0escopeAttribute\x12 \n" +
+	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
+	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12 \n" +
 	"\vreplacement\x18\n" +
 	" \x01(\tR\vreplacementB\a\n" +
-	"\x05field\"\x9b\x02\n" +
+	"\x05field\"\xf8\x02\n" +
 	"\tLogRename\x12@\n" +
-	"\x0efrom_log_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\ffromLogField\x12.\n" +
-	"\x12from_log_attribute\x18\x02 \x01(\tH\x00R\x10fromLogAttribute\x128\n" +
-	"\x17from_resource_attribute\x18\x03 \x01(\tH\x00R\x15fromResourceAttribute\x122\n" +
-	"\x14from_scope_attribute\x18\x04 \x01(\tH\x00R\x12fromScopeAttribute\x12\x0e\n" +
+	"\x0efrom_log_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\ffromLogField\x12M\n" +
+	"\x12from_log_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x10fromLogAttribute\x12W\n" +
+	"\x17from_resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x15fromResourceAttribute\x12Q\n" +
+	"\x14from_scope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x12fromScopeAttribute\x12\x0e\n" +
 	"\x02to\x18\n" +
 	" \x01(\tR\x02to\x12\x16\n" +
 	"\x06upsert\x18\v \x01(\bR\x06upsertB\x06\n" +
-	"\x04from\"\xfb\x01\n" +
+	"\x04from\"\xd8\x02\n" +
 	"\x06LogAdd\x127\n" +
-	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12%\n" +
-	"\rlog_attribute\x18\x02 \x01(\tH\x00R\flogAttribute\x12/\n" +
-	"\x12resource_attribute\x18\x03 \x01(\tH\x00R\x11resourceAttribute\x12)\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\tH\x00R\x0escopeAttribute\x12\x14\n" +
+	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
+	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
+	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12\x14\n" +
 	"\x05value\x18\n" +
 	" \x01(\tR\x05value\x12\x16\n" +
 	"\x06upsert\x18\v \x01(\bR\x06upsertB\a\n" +
@@ -1058,34 +1270,56 @@ func file_tero_policy_v1_log_proto_rawDescGZIP() []byte {
 }
 
 var file_tero_policy_v1_log_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_tero_policy_v1_log_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_tero_policy_v1_log_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_tero_policy_v1_log_proto_goTypes = []any{
-	(LogField)(0),        // 0: tero.policy.v1.LogField
-	(*LogTarget)(nil),    // 1: tero.policy.v1.LogTarget
-	(*LogMatcher)(nil),   // 2: tero.policy.v1.LogMatcher
-	(*LogTransform)(nil), // 3: tero.policy.v1.LogTransform
-	(*LogRemove)(nil),    // 4: tero.policy.v1.LogRemove
-	(*LogRedact)(nil),    // 5: tero.policy.v1.LogRedact
-	(*LogRename)(nil),    // 6: tero.policy.v1.LogRename
-	(*LogAdd)(nil),       // 7: tero.policy.v1.LogAdd
+	(LogField)(0),         // 0: tero.policy.v1.LogField
+	(*LogTarget)(nil),     // 1: tero.policy.v1.LogTarget
+	(*LogSampleKey)(nil),  // 2: tero.policy.v1.LogSampleKey
+	(*LogMatcher)(nil),    // 3: tero.policy.v1.LogMatcher
+	(*LogTransform)(nil),  // 4: tero.policy.v1.LogTransform
+	(*LogRemove)(nil),     // 5: tero.policy.v1.LogRemove
+	(*LogRedact)(nil),     // 6: tero.policy.v1.LogRedact
+	(*LogRename)(nil),     // 7: tero.policy.v1.LogRename
+	(*LogAdd)(nil),        // 8: tero.policy.v1.LogAdd
+	(*AttributePath)(nil), // 9: tero.policy.v1.AttributePath
 }
 var file_tero_policy_v1_log_proto_depIdxs = []int32{
-	2,  // 0: tero.policy.v1.LogTarget.match:type_name -> tero.policy.v1.LogMatcher
-	3,  // 1: tero.policy.v1.LogTarget.transform:type_name -> tero.policy.v1.LogTransform
-	0,  // 2: tero.policy.v1.LogMatcher.log_field:type_name -> tero.policy.v1.LogField
-	4,  // 3: tero.policy.v1.LogTransform.remove:type_name -> tero.policy.v1.LogRemove
-	5,  // 4: tero.policy.v1.LogTransform.redact:type_name -> tero.policy.v1.LogRedact
-	6,  // 5: tero.policy.v1.LogTransform.rename:type_name -> tero.policy.v1.LogRename
-	7,  // 6: tero.policy.v1.LogTransform.add:type_name -> tero.policy.v1.LogAdd
-	0,  // 7: tero.policy.v1.LogRemove.log_field:type_name -> tero.policy.v1.LogField
-	0,  // 8: tero.policy.v1.LogRedact.log_field:type_name -> tero.policy.v1.LogField
-	0,  // 9: tero.policy.v1.LogRename.from_log_field:type_name -> tero.policy.v1.LogField
-	0,  // 10: tero.policy.v1.LogAdd.log_field:type_name -> tero.policy.v1.LogField
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	3,  // 0: tero.policy.v1.LogTarget.match:type_name -> tero.policy.v1.LogMatcher
+	4,  // 1: tero.policy.v1.LogTarget.transform:type_name -> tero.policy.v1.LogTransform
+	2,  // 2: tero.policy.v1.LogTarget.sample_key:type_name -> tero.policy.v1.LogSampleKey
+	0,  // 3: tero.policy.v1.LogSampleKey.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 4: tero.policy.v1.LogSampleKey.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 5: tero.policy.v1.LogSampleKey.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 6: tero.policy.v1.LogSampleKey.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 7: tero.policy.v1.LogMatcher.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 8: tero.policy.v1.LogMatcher.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 9: tero.policy.v1.LogMatcher.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 10: tero.policy.v1.LogMatcher.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	5,  // 11: tero.policy.v1.LogTransform.remove:type_name -> tero.policy.v1.LogRemove
+	6,  // 12: tero.policy.v1.LogTransform.redact:type_name -> tero.policy.v1.LogRedact
+	7,  // 13: tero.policy.v1.LogTransform.rename:type_name -> tero.policy.v1.LogRename
+	8,  // 14: tero.policy.v1.LogTransform.add:type_name -> tero.policy.v1.LogAdd
+	0,  // 15: tero.policy.v1.LogRemove.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 16: tero.policy.v1.LogRemove.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 17: tero.policy.v1.LogRemove.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 18: tero.policy.v1.LogRemove.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 19: tero.policy.v1.LogRedact.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 20: tero.policy.v1.LogRedact.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 21: tero.policy.v1.LogRedact.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 22: tero.policy.v1.LogRedact.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 23: tero.policy.v1.LogRename.from_log_field:type_name -> tero.policy.v1.LogField
+	9,  // 24: tero.policy.v1.LogRename.from_log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 25: tero.policy.v1.LogRename.from_resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 26: tero.policy.v1.LogRename.from_scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 27: tero.policy.v1.LogAdd.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 28: tero.policy.v1.LogAdd.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 29: tero.policy.v1.LogAdd.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 30: tero.policy.v1.LogAdd.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	31, // [31:31] is the sub-list for method output_type
+	31, // [31:31] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_log_proto_init() }
@@ -1093,7 +1327,14 @@ func file_tero_policy_v1_log_proto_init() {
 	if File_tero_policy_v1_log_proto != nil {
 		return
 	}
+	file_tero_policy_v1_shared_proto_init()
 	file_tero_policy_v1_log_proto_msgTypes[1].OneofWrappers = []any{
+		(*LogSampleKey_LogField)(nil),
+		(*LogSampleKey_LogAttribute)(nil),
+		(*LogSampleKey_ResourceAttribute)(nil),
+		(*LogSampleKey_ScopeAttribute)(nil),
+	}
+	file_tero_policy_v1_log_proto_msgTypes[2].OneofWrappers = []any{
 		(*LogMatcher_LogField)(nil),
 		(*LogMatcher_LogAttribute)(nil),
 		(*LogMatcher_ResourceAttribute)(nil),
@@ -1101,26 +1342,29 @@ func file_tero_policy_v1_log_proto_init() {
 		(*LogMatcher_Exact)(nil),
 		(*LogMatcher_Regex)(nil),
 		(*LogMatcher_Exists)(nil),
+		(*LogMatcher_StartsWith)(nil),
+		(*LogMatcher_EndsWith)(nil),
+		(*LogMatcher_Contains)(nil),
 	}
-	file_tero_policy_v1_log_proto_msgTypes[3].OneofWrappers = []any{
+	file_tero_policy_v1_log_proto_msgTypes[4].OneofWrappers = []any{
 		(*LogRemove_LogField)(nil),
 		(*LogRemove_LogAttribute)(nil),
 		(*LogRemove_ResourceAttribute)(nil),
 		(*LogRemove_ScopeAttribute)(nil),
 	}
-	file_tero_policy_v1_log_proto_msgTypes[4].OneofWrappers = []any{
+	file_tero_policy_v1_log_proto_msgTypes[5].OneofWrappers = []any{
 		(*LogRedact_LogField)(nil),
 		(*LogRedact_LogAttribute)(nil),
 		(*LogRedact_ResourceAttribute)(nil),
 		(*LogRedact_ScopeAttribute)(nil),
 	}
-	file_tero_policy_v1_log_proto_msgTypes[5].OneofWrappers = []any{
+	file_tero_policy_v1_log_proto_msgTypes[6].OneofWrappers = []any{
 		(*LogRename_FromLogField)(nil),
 		(*LogRename_FromLogAttribute)(nil),
 		(*LogRename_FromResourceAttribute)(nil),
 		(*LogRename_FromScopeAttribute)(nil),
 	}
-	file_tero_policy_v1_log_proto_msgTypes[6].OneofWrappers = []any{
+	file_tero_policy_v1_log_proto_msgTypes[7].OneofWrappers = []any{
 		(*LogAdd_LogField)(nil),
 		(*LogAdd_LogAttribute)(nil),
 		(*LogAdd_ResourceAttribute)(nil),
@@ -1132,7 +1376,7 @@ func file_tero_policy_v1_log_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tero_policy_v1_log_proto_rawDesc), len(file_tero_policy_v1_log_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

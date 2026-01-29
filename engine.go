@@ -67,7 +67,7 @@ func NewPolicyEngine() *PolicyEngine {
 // getFieldValue extracts a field value from a LogMatchable using the internal FieldSelector.
 func getFieldValue(record LogMatchable, selector engine.FieldSelector) []byte {
 	if selector.IsAttribute() {
-		return record.GetAttribute(AttrScope(selector.AttrScope), selector.AttrName)
+		return record.GetAttribute(AttrScope(selector.AttrScope), selector.AttrPath)
 	}
 	return record.GetField(policyv1.LogField(selector.Field))
 }
@@ -124,7 +124,10 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 	}
 
 	// Process Hyperscan databases
-	for key, db := range matchers.Databases() {
+	for _, entry := range matchers.Databases() {
+		key := entry.Key
+		db := entry.Database
+
 		value := getFieldValue(record, key.Selector)
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified

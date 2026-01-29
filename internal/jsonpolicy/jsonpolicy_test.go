@@ -178,7 +178,7 @@ func TestParserParseLogAttribute(t *testing.T) {
 	matcher := policies[0].GetLog().GetMatch()[0]
 	logAttr, ok := matcher.GetField().(*policyv1.LogMatcher_LogAttribute)
 	require.True(t, ok)
-	assert.Equal(t, "custom_attr", logAttr.LogAttribute)
+	assert.Equal(t, []string{"custom_attr"}, logAttr.LogAttribute.GetPath())
 }
 
 func TestParserParseResourceAttribute(t *testing.T) {
@@ -201,7 +201,7 @@ func TestParserParseResourceAttribute(t *testing.T) {
 	matcher := policies[0].GetLog().GetMatch()[0]
 	resAttr, ok := matcher.GetField().(*policyv1.LogMatcher_ResourceAttribute)
 	require.True(t, ok)
-	assert.Equal(t, "service.name", resAttr.ResourceAttribute)
+	assert.Equal(t, []string{"service.name"}, resAttr.ResourceAttribute.GetPath())
 }
 
 func TestParserParseScopeAttribute(t *testing.T) {
@@ -224,7 +224,7 @@ func TestParserParseScopeAttribute(t *testing.T) {
 	matcher := policies[0].GetLog().GetMatch()[0]
 	scopeAttr, ok := matcher.GetField().(*policyv1.LogMatcher_ScopeAttribute)
 	require.True(t, ok)
-	assert.Equal(t, "scope.name", scopeAttr.ScopeAttribute)
+	assert.Equal(t, []string{"scope.name"}, scopeAttr.ScopeAttribute.GetPath())
 }
 
 func TestParserParseMultipleFieldTypesError(t *testing.T) {

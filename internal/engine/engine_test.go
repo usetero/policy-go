@@ -98,7 +98,7 @@ func TestCompilerCompileEmpty(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	assert.Empty(t, compiled.Databases())
+	assert.Equal(t, 0, len(compiled.Databases()))
 	assert.Empty(t, compiled.ExistenceChecks())
 	assert.Empty(t, compiled.Policies())
 }
@@ -138,7 +138,7 @@ func TestCompilerCompileSinglePolicy(t *testing.T) {
 	assert.Equal(t, KeepNone, policy.Keep.Action)
 
 	// Check database was created
-	assert.Len(t, compiled.Databases(), 1)
+	assert.Equal(t, 1, len(compiled.Databases()))
 }
 
 func TestCompilerCompileMultipleMatchers(t *testing.T) {
@@ -178,7 +178,7 @@ func TestCompilerCompileMultipleMatchers(t *testing.T) {
 	assert.Equal(t, 2, policy.MatcherCount)
 
 	// Should have 2 databases (one per field selector)
-	assert.Len(t, compiled.Databases(), 2)
+	assert.Equal(t, 2, len(compiled.Databases()))
 }
 
 func TestCompilerCompileNegatedMatcher(t *testing.T) {
@@ -211,8 +211,8 @@ func TestCompilerCompileNegatedMatcher(t *testing.T) {
 	defer compiled.Close()
 
 	// Check database key has Negated = true
-	for key := range compiled.Databases() {
-		assert.True(t, key.Negated, "expected database key to have Negated = true")
+	for _, entry := range compiled.Databases() {
+		assert.True(t, entry.Key.Negated, "expected database key to have Negated = true")
 	}
 }
 
@@ -230,7 +230,7 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 				Log: &policyv1.LogTarget{
 					Match: []*policyv1.LogMatcher{
 						{
-							Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: "trace_id"},
+							Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: []string{"trace_id"}}},
 							Match: &policyv1.LogMatcher_Exists{Exists: true},
 						},
 					},
@@ -245,7 +245,7 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have no databases (existence checks don't use Hyperscan)
-	assert.Empty(t, compiled.Databases())
+	assert.Equal(t, 0, len(compiled.Databases()))
 
 	// Should have 1 existence check
 	require.Len(t, compiled.ExistenceChecks(), 1)
@@ -253,7 +253,7 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	check := compiled.ExistenceChecks()[0]
 	assert.Equal(t, "exists-check", check.PolicyID)
 	assert.True(t, check.MustExist)
-	assert.Equal(t, "trace_id", check.Selector.AttrName)
+	assert.Equal(t, []string{"trace_id"}, check.Selector.AttrPath)
 	assert.Equal(t, AttrScopeRecord, check.Selector.AttrScope)
 }
 
@@ -286,16 +286,16 @@ func TestCompilerCompileExactMatch(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have 1 database
-	assert.Len(t, compiled.Databases(), 1)
+	assert.Equal(t, 1, len(compiled.Databases()))
 
 	// Scan for exact match (dots should be escaped)
-	for _, db := range compiled.Databases() {
-		matched, err := db.Scan([]byte("hello.world"))
+	for _, entry := range compiled.Databases() {
+		matched, err := entry.Database.Scan([]byte("hello.world"))
 		require.NoError(t, err)
 		assert.True(t, matched[0], "expected exact match")
 
 		// Should not match with different character
-		matched, err = db.Scan([]byte("helloXworld"))
+		matched, err = entry.Database.Scan([]byte("helloXworld"))
 		require.NoError(t, err)
 		assert.False(t, matched[0], "should not match")
 	}
@@ -355,12 +355,8 @@ func TestCompiledDatabaseScan(t *testing.T) {
 	defer compiled.Close()
 
 	// Find the database
-	var db *CompiledDatabase
-	for _, d := range compiled.Databases() {
-		db = d
-		break
-	}
-	require.NotNil(t, db)
+	require.NotEmpty(t, compiled.Databases())
+	db := compiled.Databases()[0].Database
 
 	tests := []struct {
 		name     string
@@ -426,11 +422,8 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	var db *CompiledDatabase
-	for _, d := range compiled.Databases() {
-		db = d
-		break
-	}
+	require.NotEmpty(t, compiled.Databases())
+	db := compiled.Databases()[0].Database
 
 	// Run concurrent scans
 	done := make(chan bool)
