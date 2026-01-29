@@ -32,3 +32,4 @@ dist/
 
 # Proto exports (regenerated from buf registry)
 proto/**/*.proto
+PLAN.md
