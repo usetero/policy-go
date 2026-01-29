@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/flier/gohs/hyperscan"
@@ -108,12 +109,13 @@ type CompiledPolicy struct {
 	Index        int // Dense index for array-based tracking (0 to N-1)
 	Keep         Keep
 	MatcherCount int
+	SampleKey    *FieldSelector // Optional field to use for consistent sampling
 	Stats        *PolicyStats
 }
 
 // CompiledMatchers holds all compiled pattern databases for policy evaluation.
 type CompiledMatchers struct {
-	databases       map[MatchKey]*CompiledDatabase
+	databases       []DatabaseEntry
 	existenceChecks []ExistenceCheck
 	policies        map[string]*CompiledPolicy
 	policyList      []*CompiledPolicy // Index-ordered list for fast lookup
@@ -122,7 +124,7 @@ type CompiledMatchers struct {
 // NewCompiledMatchers creates a new empty CompiledMatchers.
 func NewCompiledMatchers() *CompiledMatchers {
 	return &CompiledMatchers{
-		databases:       make(map[MatchKey]*CompiledDatabase),
+		databases:       make([]DatabaseEntry, 0),
 		existenceChecks: make([]ExistenceCheck, 0),
 		policies:        make(map[string]*CompiledPolicy),
 	}
@@ -130,8 +132,8 @@ func NewCompiledMatchers() *CompiledMatchers {
 
 // Close releases all resources.
 func (c *CompiledMatchers) Close() error {
-	for _, db := range c.databases {
-		if err := db.Close(); err != nil {
+	for _, entry := range c.databases {
+		if err := entry.Database.Close(); err != nil {
 			return err
 		}
 	}
@@ -139,7 +141,7 @@ func (c *CompiledMatchers) Close() error {
 }
 
 // Databases returns the compiled databases.
-func (c *CompiledMatchers) Databases() map[MatchKey]*CompiledDatabase {
+func (c *CompiledMatchers) Databases() []DatabaseEntry {
 	return c.databases
 }
 
@@ -181,8 +183,9 @@ func NewCompiler() *Compiler {
 func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompiledMatchers, error) {
 	result := NewCompiledMatchers()
 
-	// Group patterns by MatchKey
-	groups := make(map[MatchKey][]patternEntry)
+	// Group patterns by MatchKey (using string key for map)
+	groups := make(map[matchKeyString][]patternEntry)
+	groupKeys := make(map[matchKeyString]MatchKey)
 
 	// First pass: assign dense indices to log policies
 	policyIndex := make(map[string]int)
@@ -209,12 +212,20 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 			return nil, fmt.Errorf("policy %s: %w", id, err)
 		}
 
+		// Extract sample key if present
+		var sampleKey *FieldSelector
+		if log.GetSampleKey() != nil {
+			sk := FieldSelectorFromLogSampleKey(log.GetSampleKey())
+			sampleKey = &sk
+		}
+
 		// Create compiled policy
 		compiled := &CompiledPolicy{
 			ID:           id,
 			Index:        idx,
 			Keep:         keep,
 			MatcherCount: len(log.GetMatch()),
+			SampleKey:    sampleKey,
 			Stats:        stats[id],
 		}
 		result.policies[id] = compiled
@@ -236,7 +247,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				continue
 			}
 
-			// Get the pattern (regex or exact)
+			// Get the pattern (regex or literal match variants)
 			var pattern string
 			switch match := m.GetMatch().(type) {
 			case *policyv1.LogMatcher_Regex:
@@ -244,31 +255,47 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 			case *policyv1.LogMatcher_Exact:
 				// Escape for literal match
 				pattern = regexp.QuoteMeta(match.Exact)
+			case *policyv1.LogMatcher_StartsWith:
+				// Anchor at start
+				pattern = "^" + regexp.QuoteMeta(match.StartsWith)
+			case *policyv1.LogMatcher_EndsWith:
+				// Anchor at end
+				pattern = regexp.QuoteMeta(match.EndsWith) + "$"
+			case *policyv1.LogMatcher_Contains:
+				// No anchors, just escaped literal
+				pattern = regexp.QuoteMeta(match.Contains)
 			default:
 				continue
 			}
 
 			key := MatchKey{
-				Selector: selector,
-				Negated:  m.GetNegate(),
+				Selector:        selector,
+				Negated:         m.GetNegate(),
+				CaseInsensitive: m.GetCaseInsensitive(),
 			}
+			keyStr := makeMatchKeyString(key)
 
-			groups[key] = append(groups[key], patternEntry{
+			groups[keyStr] = append(groups[keyStr], patternEntry{
 				pattern:      pattern,
 				policyID:     id,
 				policyIndex:  idx,
 				matcherIndex: i,
 			})
+			groupKeys[keyStr] = key
 		}
 	}
 
 	// Compile each group
-	for key, entries := range groups {
-		db, err := c.compileGroup(entries)
+	for keyStr, entries := range groups {
+		key := groupKeys[keyStr]
+		db, err := c.compileGroup(entries, key.CaseInsensitive)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile patterns for %v: %w", key, err)
+			return nil, fmt.Errorf("failed to compile patterns for %v: %w", keyStr, err)
 		}
-		result.databases[key] = db
+		result.databases = append(result.databases, DatabaseEntry{
+			Key:      key,
+			Database: db,
+		})
 	}
 
 	return result, nil
@@ -281,9 +308,33 @@ type patternEntry struct {
 	matcherIndex int
 }
 
-func (c *Compiler) compileGroup(entries []patternEntry) (*CompiledDatabase, error) {
+// matchKeyString is used only during compilation for grouping patterns.
+// It creates a hashable string from a MatchKey for use as map keys.
+type matchKeyString string
+
+func makeMatchKeyString(k MatchKey) matchKeyString {
+	// Format: "field|scope|path[0].path[1]...|negated|case_insensitive"
+	var s strings.Builder
+	fmt.Fprintf(&s, "%d|%d|", k.Selector.Field, k.Selector.AttrScope)
+	for i, p := range k.Selector.AttrPath {
+		if i > 0 {
+			s.WriteString(".")
+		}
+		s.WriteString(p)
+	}
+	fmt.Fprintf(&s, "|%t|%t", k.Negated, k.CaseInsensitive)
+	return matchKeyString(s.String())
+}
+
+func (c *Compiler) compileGroup(entries []patternEntry, caseInsensitive bool) (*CompiledDatabase, error) {
 	patterns := make([]*hyperscan.Pattern, len(entries))
 	patternIndex := make([]PatternRef, len(entries))
+
+	// Build flags - always use SomLeftMost, add Caseless if case insensitive
+	flags := hyperscan.SomLeftMost
+	if caseInsensitive {
+		flags |= hyperscan.Caseless
+	}
 
 	for i, e := range entries {
 		// Validate the pattern is valid regex
@@ -291,7 +342,7 @@ func (c *Compiler) compileGroup(entries []patternEntry) (*CompiledDatabase, erro
 			return nil, fmt.Errorf("invalid regex %q: %w", e.pattern, err)
 		}
 
-		patterns[i] = hyperscan.NewPattern(e.pattern, hyperscan.SomLeftMost)
+		patterns[i] = hyperscan.NewPattern(e.pattern, flags)
 		patterns[i].Id = i
 
 		patternIndex[i] = PatternRef{

@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"hash/fnv"
 	"sync"
 
 	"github.com/usetero/policy-go/internal/engine"
@@ -67,7 +68,7 @@ func NewPolicyEngine() *PolicyEngine {
 // getFieldValue extracts a field value from a LogMatchable using the internal FieldSelector.
 func getFieldValue(record LogMatchable, selector engine.FieldSelector) []byte {
 	if selector.IsAttribute() {
-		return record.GetAttribute(AttrScope(selector.AttrScope), selector.AttrName)
+		return record.GetAttribute(AttrScope(selector.AttrScope), selector.AttrPath)
 	}
 	return record.GetField(policyv1.LogField(selector.Field))
 }
@@ -124,7 +125,10 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 	}
 
 	// Process Hyperscan databases
-	for key, db := range matchers.Databases() {
+	for _, entry := range matchers.Databases() {
+		key := entry.Key
+		db := entry.Database
+
 		value := getFieldValue(record, key.Selector)
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified
@@ -203,10 +207,10 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 	}
 
 	// Apply the keep action
-	return e.applyKeepAction(bestPolicy)
+	return e.applyKeepAction(bestPolicy, record)
 }
 
-func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy) EvaluateResult {
+func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy, record LogMatchable) EvaluateResult {
 	switch policy.Keep.Action {
 	case KeepAll:
 		return ResultKeep
@@ -218,12 +222,17 @@ func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy) EvaluateRe
 		return ResultDrop
 
 	case KeepSample:
-		// TODO: Implement proper sampling with hash-based determinism
-		// For now, just use the percentage as a simple probability
+		// Hash-based deterministic sampling
+		// If a sample key is configured, use it for consistent sampling
+		// Otherwise, sample randomly based on percentage
+		shouldKeep := e.shouldSample(policy, record)
 		if policy.Stats != nil {
 			policy.Stats.RecordSample()
 		}
-		return ResultSample
+		if shouldKeep {
+			return ResultKeep
+		}
+		return ResultDrop
 
 	case KeepRatePerSecond, KeepRatePerMinute:
 		// TODO: Implement rate limiting
@@ -235,4 +244,41 @@ func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy) EvaluateRe
 	default:
 		return ResultKeep
 	}
+}
+
+// shouldSample determines if a record should be kept based on the sampling configuration.
+// If a sample key is configured, it uses hash-based deterministic sampling for consistency.
+// Otherwise, it uses the hash of the entire record for pseudo-random sampling.
+func (e *PolicyEngine) shouldSample(policy *engine.CompiledPolicy, record LogMatchable) bool {
+	percentage := policy.Keep.Value
+	if percentage >= 100 {
+		return true
+	}
+	if percentage <= 0 {
+		return false
+	}
+
+	// Get the value to hash for sampling
+	var hashInput []byte
+	if policy.SampleKey != nil {
+		// Use the configured sample key field
+		hashInput = getFieldValue(record, *policy.SampleKey)
+	}
+
+	// If no sample key or the field is empty, we can't do consistent sampling
+	// Fall back to not sampling (treat as keep all for this record)
+	if len(hashInput) == 0 {
+		return true
+	}
+
+	// Hash the value and determine if it falls within the sample percentage
+	h := fnv.New64a()
+	h.Write(hashInput)
+	hashValue := h.Sum64()
+
+	// Map the hash to a percentage (0-100)
+	// Use modulo to get a value in range [0, 10000) for 0.01% precision
+	hashPercentage := float64(hashValue%10000) / 100.0
+
+	return hashPercentage < percentage
 }

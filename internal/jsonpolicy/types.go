@@ -18,25 +18,75 @@ type Policy struct {
 
 // Log represents log policy configuration.
 type Log struct {
-	Match []LogMatcher `json:"match"`
-	Keep  KeepValue    `json:"keep"`
+	Match     []LogMatcher `json:"match"`
+	Keep      KeepValue    `json:"keep"`
+	SampleKey *SampleKey   `json:"sample_key,omitempty"`
+}
+
+// AttributePath represents an attribute path that can be specified in multiple ways.
+// It handles unmarshaling from:
+// 1. Canonical form: {"path": ["http", "method"]}
+// 2. Shorthand array: ["http", "method"]
+// 3. Shorthand string (single segment): "user_id"
+type AttributePath struct {
+	Path []string
+}
+
+// UnmarshalJSON implements custom unmarshaling for AttributePath.
+func (a *AttributePath) UnmarshalJSON(data []byte) error {
+	// Try canonical form first: {"path": [...]}
+	var canonical struct {
+		Path []string `json:"path"`
+	}
+	if err := json.Unmarshal(data, &canonical); err == nil && len(canonical.Path) > 0 {
+		a.Path = canonical.Path
+		return nil
+	}
+
+	// Try shorthand array: [...]
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err == nil && len(arr) > 0 {
+		a.Path = arr
+		return nil
+	}
+
+	// Try shorthand string: "name"
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil && str != "" {
+		a.Path = []string{str}
+		return nil
+	}
+
+	return NewParseError("attribute_path", "must be object with path, array, or string")
 }
 
 // LogMatcher represents a single matcher for logs.
 type LogMatcher struct {
-	// One of these field selectors will be set
-	LogField          string `json:"log_field,omitempty"`
-	LogAttribute      string `json:"log_attribute,omitempty"`
-	ResourceAttribute string `json:"resource_attribute,omitempty"`
-	ScopeAttribute    string `json:"scope_attribute,omitempty"`
+	// Field selectors - use AttributePath for flexible input
+	LogField          string         `json:"log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
 
-	// One of these match conditions will be set
-	Regex  string `json:"regex,omitempty"`
-	Exact  string `json:"exact,omitempty"`
-	Exists *bool  `json:"exists,omitempty"`
+	// Match conditions
+	Regex      string `json:"regex,omitempty"`
+	Exact      string `json:"exact,omitempty"`
+	Exists     *bool  `json:"exists,omitempty"`
+	StartsWith string `json:"starts_with,omitempty"`
+	EndsWith   string `json:"ends_with,omitempty"`
+	Contains   string `json:"contains,omitempty"`
 
-	// Negated inverts the match condition
-	Negated bool `json:"negated,omitempty"`
+	// Flags
+	Negated         bool `json:"negated,omitempty"`
+	CaseInsensitive bool `json:"case_insensitive,omitempty"`
+}
+
+// SampleKey represents the field to use for consistent sampling.
+type SampleKey struct {
+	LogField          string         `json:"log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
 }
 
 // KeepValue handles the polymorphic "keep" field which can be:

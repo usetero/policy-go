@@ -1,7 +1,9 @@
 // Package engine contains the policy evaluation engine implementation.
 package engine
 
-import policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
+import (
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
+)
 
 // AttrScope identifies the scope for attribute lookups.
 type AttrScope int
@@ -27,57 +29,14 @@ type FieldSelector struct {
 	Field int32
 	// AttrScope specifies where to look for the attribute.
 	AttrScope AttrScope
-	// AttrName is the attribute name for attribute lookups.
-	AttrName string
+	// AttrPath is the attribute path for attribute lookups.
+	// Supports nested access (e.g., ["http", "request", "method"]).
+	AttrPath []string
 }
 
 // IsAttribute returns true if this selector is for an attribute lookup.
 func (s FieldSelector) IsAttribute() bool {
-	return s.AttrName != ""
-}
-
-// LogFieldSelector represents the field to match against in a log record.
-// This is a normalized representation of the proto's oneof field.
-// Deprecated: Use FieldSelector instead.
-type LogFieldSelector struct {
-	// For simple log fields (body, severity_text, etc.)
-	LogField policyv1.LogField
-	// For log record attributes
-	LogAttribute string
-	// For resource attributes
-	ResourceAttribute string
-	// For scope attributes
-	ScopeAttribute string
-}
-
-// ToFieldSelector converts a LogFieldSelector to the generic FieldSelector.
-func (s LogFieldSelector) ToFieldSelector() FieldSelector {
-	if s.LogAttribute != "" {
-		return FieldSelector{AttrScope: AttrScopeRecord, AttrName: s.LogAttribute}
-	}
-	if s.ResourceAttribute != "" {
-		return FieldSelector{AttrScope: AttrScopeResource, AttrName: s.ResourceAttribute}
-	}
-	if s.ScopeAttribute != "" {
-		return FieldSelector{AttrScope: AttrScopeScope, AttrName: s.ScopeAttribute}
-	}
-	return FieldSelector{Field: int32(s.LogField)}
-}
-
-// LogFieldSelectorFromMatcher extracts a LogFieldSelector from a proto LogMatcher.
-func LogFieldSelectorFromMatcher(m *policyv1.LogMatcher) LogFieldSelector {
-	switch f := m.GetField().(type) {
-	case *policyv1.LogMatcher_LogField:
-		return LogFieldSelector{LogField: f.LogField}
-	case *policyv1.LogMatcher_LogAttribute:
-		return LogFieldSelector{LogAttribute: f.LogAttribute}
-	case *policyv1.LogMatcher_ResourceAttribute:
-		return LogFieldSelector{ResourceAttribute: f.ResourceAttribute}
-	case *policyv1.LogMatcher_ScopeAttribute:
-		return LogFieldSelector{ScopeAttribute: f.ScopeAttribute}
-	default:
-		return LogFieldSelector{}
-	}
+	return len(s.AttrPath) > 0
 }
 
 // FieldSelectorFromLogMatcher extracts a FieldSelector from a proto LogMatcher.
@@ -86,19 +45,42 @@ func FieldSelectorFromLogMatcher(m *policyv1.LogMatcher) FieldSelector {
 	case *policyv1.LogMatcher_LogField:
 		return FieldSelector{Field: int32(f.LogField)}
 	case *policyv1.LogMatcher_LogAttribute:
-		return FieldSelector{AttrScope: AttrScopeRecord, AttrName: f.LogAttribute}
+		return FieldSelector{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
 	case *policyv1.LogMatcher_ResourceAttribute:
-		return FieldSelector{AttrScope: AttrScopeResource, AttrName: f.ResourceAttribute}
+		return FieldSelector{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
 	case *policyv1.LogMatcher_ScopeAttribute:
-		return FieldSelector{AttrScope: AttrScopeScope, AttrName: f.ScopeAttribute}
+		return FieldSelector{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
 	default:
 		return FieldSelector{}
 	}
 }
 
-// MatchKey identifies a group of patterns that share the same field selector and negation.
+// FieldSelectorFromLogSampleKey extracts a FieldSelector from a proto LogSampleKey.
+func FieldSelectorFromLogSampleKey(sk *policyv1.LogSampleKey) FieldSelector {
+	switch f := sk.GetField().(type) {
+	case *policyv1.LogSampleKey_LogField:
+		return FieldSelector{Field: int32(f.LogField)}
+	case *policyv1.LogSampleKey_LogAttribute:
+		return FieldSelector{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+	case *policyv1.LogSampleKey_ResourceAttribute:
+		return FieldSelector{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+	case *policyv1.LogSampleKey_ScopeAttribute:
+		return FieldSelector{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+	default:
+		return FieldSelector{}
+	}
+}
+
+// MatchKey identifies a group of patterns that share the same field selector, negation, and case sensitivity.
 // Patterns are grouped by MatchKey for efficient Hyperscan compilation.
 type MatchKey struct {
-	Selector FieldSelector
-	Negated  bool
+	Selector        FieldSelector
+	Negated         bool
+	CaseInsensitive bool
+}
+
+// DatabaseEntry pairs a MatchKey with its compiled database.
+type DatabaseEntry struct {
+	Key      MatchKey
+	Database *CompiledDatabase
 }

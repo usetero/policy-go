@@ -95,15 +95,27 @@ func (p *Parser) convertLogTarget(log *Log) (*policyv1.LogTarget, error) {
 		return nil, err
 	}
 
-	return &policyv1.LogTarget{
+	target := &policyv1.LogTarget{
 		Match: matchers,
 		Keep:  keep,
-	}, nil
+	}
+
+	// Parse sample_key if present
+	if log.SampleKey != nil {
+		sk, err := p.convertSampleKey(log.SampleKey)
+		if err != nil {
+			return nil, err
+		}
+		target.SampleKey = sk
+	}
+
+	return target, nil
 }
 
 func (p *Parser) convertLogMatcher(m LogMatcher) (*policyv1.LogMatcher, error) {
 	matcher := &policyv1.LogMatcher{
-		Negate: m.Negated,
+		Negate:          m.Negated,
+		CaseInsensitive: m.CaseInsensitive,
 	}
 
 	// Set field selector
@@ -111,7 +123,7 @@ func (p *Parser) convertLogMatcher(m LogMatcher) (*policyv1.LogMatcher, error) {
 		return nil, err
 	}
 
-	// Set match type
+	// Set match type (exactly one must be set)
 	if m.Exists != nil {
 		matcher.Match = &policyv1.LogMatcher_Exists{Exists: *m.Exists}
 	} else if m.Exact != "" {
@@ -122,8 +134,14 @@ func (p *Parser) convertLogMatcher(m LogMatcher) (*policyv1.LogMatcher, error) {
 			return nil, fmt.Errorf("invalid regex: %w", err)
 		}
 		matcher.Match = &policyv1.LogMatcher_Regex{Regex: m.Regex}
+	} else if m.StartsWith != "" {
+		matcher.Match = &policyv1.LogMatcher_StartsWith{StartsWith: m.StartsWith}
+	} else if m.EndsWith != "" {
+		matcher.Match = &policyv1.LogMatcher_EndsWith{EndsWith: m.EndsWith}
+	} else if m.Contains != "" {
+		matcher.Match = &policyv1.LogMatcher_Contains{Contains: m.Contains}
 	} else {
-		return nil, NewParseError("matcher", "must have regex, exact, or exists")
+		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, or contains)")
 	}
 
 	return matcher, nil
@@ -135,13 +153,13 @@ func (p *Parser) setFieldSelector(matcher *policyv1.LogMatcher, m LogMatcher) er
 	if m.LogField != "" {
 		count++
 	}
-	if m.LogAttribute != "" {
+	if m.LogAttribute != nil {
 		count++
 	}
-	if m.ResourceAttribute != "" {
+	if m.ResourceAttribute != nil {
 		count++
 	}
-	if m.ScopeAttribute != "" {
+	if m.ScopeAttribute != nil {
 		count++
 	}
 
@@ -161,22 +179,85 @@ func (p *Parser) setFieldSelector(matcher *policyv1.LogMatcher, m LogMatcher) er
 		return nil
 	}
 
-	if m.LogAttribute != "" {
-		matcher.Field = &policyv1.LogMatcher_LogAttribute{LogAttribute: m.LogAttribute}
+	if m.LogAttribute != nil {
+		matcher.Field = &policyv1.LogMatcher_LogAttribute{
+			LogAttribute: &policyv1.AttributePath{Path: m.LogAttribute.Path},
+		}
 		return nil
 	}
 
-	if m.ResourceAttribute != "" {
-		matcher.Field = &policyv1.LogMatcher_ResourceAttribute{ResourceAttribute: m.ResourceAttribute}
+	if m.ResourceAttribute != nil {
+		matcher.Field = &policyv1.LogMatcher_ResourceAttribute{
+			ResourceAttribute: &policyv1.AttributePath{Path: m.ResourceAttribute.Path},
+		}
 		return nil
 	}
 
-	if m.ScopeAttribute != "" {
-		matcher.Field = &policyv1.LogMatcher_ScopeAttribute{ScopeAttribute: m.ScopeAttribute}
+	if m.ScopeAttribute != nil {
+		matcher.Field = &policyv1.LogMatcher_ScopeAttribute{
+			ScopeAttribute: &policyv1.AttributePath{Path: m.ScopeAttribute.Path},
+		}
 		return nil
 	}
 
 	return NewParseError("matcher", "no field selector")
+}
+
+func (p *Parser) convertSampleKey(sk *SampleKey) (*policyv1.LogSampleKey, error) {
+	result := &policyv1.LogSampleKey{}
+
+	count := 0
+	if sk.LogField != "" {
+		count++
+	}
+	if sk.LogAttribute != nil {
+		count++
+	}
+	if sk.ResourceAttribute != nil {
+		count++
+	}
+	if sk.ScopeAttribute != nil {
+		count++
+	}
+
+	if count == 0 {
+		return nil, NewParseError("sample_key", "must specify a field type")
+	}
+	if count > 1 {
+		return nil, NewParseError("sample_key", "must specify only one field type")
+	}
+
+	if sk.LogField != "" {
+		field, ok := parseLogField(sk.LogField)
+		if !ok {
+			return nil, NewParseError("sample_key.log_field", fmt.Sprintf("unknown field: %s", sk.LogField))
+		}
+		result.Field = &policyv1.LogSampleKey_LogField{LogField: field}
+		return result, nil
+	}
+
+	if sk.LogAttribute != nil {
+		result.Field = &policyv1.LogSampleKey_LogAttribute{
+			LogAttribute: &policyv1.AttributePath{Path: sk.LogAttribute.Path},
+		}
+		return result, nil
+	}
+
+	if sk.ResourceAttribute != nil {
+		result.Field = &policyv1.LogSampleKey_ResourceAttribute{
+			ResourceAttribute: &policyv1.AttributePath{Path: sk.ResourceAttribute.Path},
+		}
+		return result, nil
+	}
+
+	if sk.ScopeAttribute != nil {
+		result.Field = &policyv1.LogSampleKey_ScopeAttribute{
+			ScopeAttribute: &policyv1.AttributePath{Path: sk.ScopeAttribute.Path},
+		}
+		return result, nil
+	}
+
+	return nil, NewParseError("sample_key", "no field selector")
 }
 
 func parseLogField(s string) (policyv1.LogField, bool) {
@@ -202,13 +283,19 @@ func parseLogField(s string) (policyv1.LogField, bool) {
 
 func (p *Parser) convertKeep(k KeepValue) (string, error) {
 	if k.StringValue != nil {
-		switch *k.StringValue {
+		s := *k.StringValue
+		switch s {
 		case "all", "":
 			return "all", nil
 		case "none":
 			return "none", nil
 		default:
-			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", *k.StringValue))
+			// Check if it's a percentage string like "50%"
+			if len(s) > 0 && s[len(s)-1] == '%' {
+				// Pass through percentage strings as-is for the engine to parse
+				return s, nil
+			}
+			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", s))
 		}
 	}
 

@@ -9,14 +9,35 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
+
+// staticProvider is a simple provider for testing that returns static policies.
+type staticProvider struct {
+	policies []*policyv1.Policy
+}
+
+func newStaticProvider(policies []*policyv1.Policy) *staticProvider {
+	return &staticProvider{policies: policies}
+}
+
+func (p *staticProvider) Load() ([]*policyv1.Policy, error) {
+	return p.policies, nil
+}
+
+func (p *staticProvider) Subscribe(callback PolicyCallback) error {
+	callback(p.policies)
+	return nil
+}
+
+func (p *staticProvider) SetStatsCollector(collector StatsCollector) {}
 
 func TestFileProviderLoad(t *testing.T) {
 	provider := NewFileProvider(filepath.Join("testdata", "policies.json"))
 	policies, err := provider.Load()
 	require.NoError(t, err)
 
-	// We have 7 log policies in the test file
+	// We have 12 log policies in the test file (7 original + 5 v1.2.0 feature demos)
 	logPolicies := 0
 	for _, p := range policies {
 		if p.GetLog() != nil {
@@ -24,7 +45,7 @@ func TestFileProviderLoad(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 7, logPolicies, "expected 7 log policies")
+	assert.Equal(t, 12, logPolicies, "expected 12 log policies")
 
 	// Check first policy
 	var found *Policy
@@ -152,8 +173,8 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 	nginxLog := &SimpleLogRecord{
 		Body:         []byte("GET /api/health 200"),
 		SeverityText: []byte("INFO"),
-		LogAttributes: map[string][]byte{
-			"ddsource": []byte("nginx"),
+		LogAttributes: map[string]any{
+			"ddsource": "nginx",
 		},
 	}
 
@@ -177,8 +198,8 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 	edgeLog := &SimpleLogRecord{
 		Body:         []byte("processing request"),
 		SeverityText: []byte("INFO"),
-		ResourceAttributes: map[string][]byte{
-			"service.name": []byte("api-edge"),
+		ResourceAttributes: map[string]any{
+			"service.name": "api-edge",
 		},
 	}
 
@@ -473,4 +494,241 @@ func TestFileProviderWithoutPolling(t *testing.T) {
 
 	// Stop should be safe to call even without polling
 	provider.Stop()
+}
+
+func TestSamplingWithSampleKey(t *testing.T) {
+	// Create a policy with 50% sampling using trace_id as the sample key
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-policy",
+			Name: "Sample Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "test"},
+						},
+					},
+					Keep: "50%",
+					SampleKey: &policyv1.LogSampleKey{
+						Field: &policyv1.LogSampleKey_LogField{LogField: policyv1.LogField_LOG_FIELD_TRACE_ID},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	engine := NewPolicyEngine()
+
+	// Test that the same trace_id always produces the same result (deterministic)
+	traceID1 := []byte("trace-id-abc123")
+	traceID2 := []byte("trace-id-xyz789")
+
+	record1 := &SimpleLogRecord{
+		Body:    []byte("test message"),
+		TraceID: traceID1,
+	}
+	record2 := &SimpleLogRecord{
+		Body:    []byte("test message"),
+		TraceID: traceID2,
+	}
+
+	// Run multiple times to verify determinism
+	result1a := engine.Evaluate(snapshot, record1)
+	result1b := engine.Evaluate(snapshot, record1)
+	result1c := engine.Evaluate(snapshot, record1)
+
+	result2a := engine.Evaluate(snapshot, record2)
+	result2b := engine.Evaluate(snapshot, record2)
+	result2c := engine.Evaluate(snapshot, record2)
+
+	// Same trace_id should always produce the same result
+	assert.Equal(t, result1a, result1b, "same trace_id should produce consistent result")
+	assert.Equal(t, result1b, result1c, "same trace_id should produce consistent result")
+	assert.Equal(t, result2a, result2b, "same trace_id should produce consistent result")
+	assert.Equal(t, result2b, result2c, "same trace_id should produce consistent result")
+}
+
+func TestSamplingDistribution(t *testing.T) {
+	// Test that sampling roughly follows the expected distribution
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-policy",
+			Name: "Sample Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "test"},
+						},
+					},
+					Keep: "50%",
+					SampleKey: &policyv1.LogSampleKey{
+						Field: &policyv1.LogSampleKey_LogAttribute{
+							LogAttribute: &policyv1.AttributePath{Path: []string{"request_id"}},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	engine := NewPolicyEngine()
+
+	// Test with many different request IDs
+	kept := 0
+	dropped := 0
+	total := 1000
+
+	for i := 0; i < total; i++ {
+		record := &SimpleLogRecord{
+			Body: []byte("test message"),
+			LogAttributes: map[string]any{
+				"request_id": string(rune('a'+i%26)) + string(rune('0'+i%10)) + string(rune(i)),
+			},
+		}
+		result := engine.Evaluate(snapshot, record)
+		if result == ResultKeep {
+			kept++
+		} else if result == ResultDrop {
+			dropped++
+		}
+	}
+
+	// With 50% sampling, we expect roughly 50% kept
+	// Allow 15% tolerance for statistical variation
+	keepRate := float64(kept) / float64(total) * 100
+	assert.InDelta(t, 50.0, keepRate, 15.0, "sampling rate should be roughly 50%% (got %.1f%%)", keepRate)
+}
+
+func TestSamplingWithoutSampleKey(t *testing.T) {
+	// When no sample key is configured but field is empty, should keep
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-policy",
+			Name: "Sample Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "test"},
+						},
+					},
+					Keep: "50%",
+					SampleKey: &policyv1.LogSampleKey{
+						Field: &policyv1.LogSampleKey_LogField{LogField: policyv1.LogField_LOG_FIELD_TRACE_ID},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	engine := NewPolicyEngine()
+
+	// Record without trace_id - should be kept (fallback behavior)
+	record := &SimpleLogRecord{
+		Body: []byte("test message"),
+		// No TraceID set
+	}
+
+	result := engine.Evaluate(snapshot, record)
+	assert.Equal(t, ResultKeep, result, "record without sample key value should be kept")
+}
+
+func TestSampling100Percent(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-policy",
+			Name: "Sample Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "test"},
+						},
+					},
+					Keep: "100%",
+					SampleKey: &policyv1.LogSampleKey{
+						Field: &policyv1.LogSampleKey_LogField{LogField: policyv1.LogField_LOG_FIELD_TRACE_ID},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	engine := NewPolicyEngine()
+
+	// All records should be kept with 100% sampling
+	for i := 0; i < 100; i++ {
+		record := &SimpleLogRecord{
+			Body:    []byte("test message"),
+			TraceID: []byte("trace-" + string(rune('a'+i))),
+		}
+		result := engine.Evaluate(snapshot, record)
+		assert.Equal(t, ResultKeep, result, "100%% sampling should keep all records")
+	}
+}
+
+func TestSampling0Percent(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-policy",
+			Name: "Sample Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "test"},
+						},
+					},
+					Keep: "0%",
+					SampleKey: &policyv1.LogSampleKey{
+						Field: &policyv1.LogSampleKey_LogField{LogField: policyv1.LogField_LOG_FIELD_TRACE_ID},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	snapshot := registry.Snapshot()
+	engine := NewPolicyEngine()
+
+	// All records should be dropped with 0% sampling
+	for i := 0; i < 100; i++ {
+		record := &SimpleLogRecord{
+			Body:    []byte("test message"),
+			TraceID: []byte("trace-" + string(rune('a'+i))),
+		}
+		result := engine.Evaluate(snapshot, record)
+		assert.Equal(t, ResultDrop, result, "0%% sampling should drop all records")
+	}
 }

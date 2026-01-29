@@ -98,7 +98,7 @@ func TestCompilerCompileEmpty(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	assert.Empty(t, compiled.Databases())
+	assert.Equal(t, 0, len(compiled.Databases()))
 	assert.Empty(t, compiled.ExistenceChecks())
 	assert.Empty(t, compiled.Policies())
 }
@@ -138,7 +138,7 @@ func TestCompilerCompileSinglePolicy(t *testing.T) {
 	assert.Equal(t, KeepNone, policy.Keep.Action)
 
 	// Check database was created
-	assert.Len(t, compiled.Databases(), 1)
+	assert.Equal(t, 1, len(compiled.Databases()))
 }
 
 func TestCompilerCompileMultipleMatchers(t *testing.T) {
@@ -178,7 +178,7 @@ func TestCompilerCompileMultipleMatchers(t *testing.T) {
 	assert.Equal(t, 2, policy.MatcherCount)
 
 	// Should have 2 databases (one per field selector)
-	assert.Len(t, compiled.Databases(), 2)
+	assert.Equal(t, 2, len(compiled.Databases()))
 }
 
 func TestCompilerCompileNegatedMatcher(t *testing.T) {
@@ -211,8 +211,8 @@ func TestCompilerCompileNegatedMatcher(t *testing.T) {
 	defer compiled.Close()
 
 	// Check database key has Negated = true
-	for key := range compiled.Databases() {
-		assert.True(t, key.Negated, "expected database key to have Negated = true")
+	for _, entry := range compiled.Databases() {
+		assert.True(t, entry.Key.Negated, "expected database key to have Negated = true")
 	}
 }
 
@@ -230,7 +230,7 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 				Log: &policyv1.LogTarget{
 					Match: []*policyv1.LogMatcher{
 						{
-							Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: "trace_id"},
+							Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: []string{"trace_id"}}},
 							Match: &policyv1.LogMatcher_Exists{Exists: true},
 						},
 					},
@@ -245,7 +245,7 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have no databases (existence checks don't use Hyperscan)
-	assert.Empty(t, compiled.Databases())
+	assert.Equal(t, 0, len(compiled.Databases()))
 
 	// Should have 1 existence check
 	require.Len(t, compiled.ExistenceChecks(), 1)
@@ -253,7 +253,7 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	check := compiled.ExistenceChecks()[0]
 	assert.Equal(t, "exists-check", check.PolicyID)
 	assert.True(t, check.MustExist)
-	assert.Equal(t, "trace_id", check.Selector.AttrName)
+	assert.Equal(t, []string{"trace_id"}, check.Selector.AttrPath)
 	assert.Equal(t, AttrScopeRecord, check.Selector.AttrScope)
 }
 
@@ -286,16 +286,16 @@ func TestCompilerCompileExactMatch(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have 1 database
-	assert.Len(t, compiled.Databases(), 1)
+	assert.Equal(t, 1, len(compiled.Databases()))
 
 	// Scan for exact match (dots should be escaped)
-	for _, db := range compiled.Databases() {
-		matched, err := db.Scan([]byte("hello.world"))
+	for _, entry := range compiled.Databases() {
+		matched, err := entry.Database.Scan([]byte("hello.world"))
 		require.NoError(t, err)
 		assert.True(t, matched[0], "expected exact match")
 
 		// Should not match with different character
-		matched, err = db.Scan([]byte("helloXworld"))
+		matched, err = entry.Database.Scan([]byte("helloXworld"))
 		require.NoError(t, err)
 		assert.False(t, matched[0], "should not match")
 	}
@@ -355,12 +355,8 @@ func TestCompiledDatabaseScan(t *testing.T) {
 	defer compiled.Close()
 
 	// Find the database
-	var db *CompiledDatabase
-	for _, d := range compiled.Databases() {
-		db = d
-		break
-	}
-	require.NotNil(t, db)
+	require.NotEmpty(t, compiled.Databases())
+	db := compiled.Databases()[0].Database
 
 	tests := []struct {
 		name     string
@@ -426,11 +422,8 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	var db *CompiledDatabase
-	for _, d := range compiled.Databases() {
-		db = d
-		break
-	}
+	require.NotEmpty(t, compiled.Databases())
+	db := compiled.Databases()[0].Database
 
 	// Run concurrent scans
 	done := make(chan bool)
@@ -519,5 +512,385 @@ func TestPolicyCount(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		policy := compiled.PolicyByIndex(i)
 		assert.Equal(t, i, policy.Index)
+	}
+}
+
+func TestCompilerStartsWith(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"starts-with-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "starts-with-policy",
+			Name: "Starts With Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_StartsWith{StartsWith: "ERROR:"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	require.Equal(t, 1, len(compiled.Databases()))
+	db := compiled.Databases()[0].Database
+
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+	}{
+		{"matches at start", "ERROR: something went wrong", true},
+		{"does not match in middle", "something ERROR: went wrong", false},
+		{"does not match at end", "something went wrong ERROR:", false},
+		{"does not match partial", "ERR: something", false},
+		{"does not match case different", "error: something", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := db.Scan([]byte(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
+			db.ReleaseMatched(matched)
+		})
+	}
+}
+
+func TestCompilerEndsWith(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"ends-with-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "ends-with-policy",
+			Name: "Ends With Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_EndsWith{EndsWith: "-prod"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	require.Equal(t, 1, len(compiled.Databases()))
+	db := compiled.Databases()[0].Database
+
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+	}{
+		{"matches at end", "api-service-prod", true},
+		{"does not match at start", "-prod-api-service", false},
+		{"does not match in middle", "api-prod-service", false},
+		{"does not match partial", "api-service-pro", false},
+		{"does not match case different", "api-service-PROD", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := db.Scan([]byte(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
+			db.ReleaseMatched(matched)
+		})
+	}
+}
+
+func TestCompilerContains(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"contains-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "contains-policy",
+			Name: "Contains Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "timeout"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	require.Equal(t, 1, len(compiled.Databases()))
+	db := compiled.Databases()[0].Database
+
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+	}{
+		{"matches at start", "timeout occurred", true},
+		{"matches in middle", "connection timeout error", true},
+		{"matches at end", "got a timeout", true},
+		{"does not match partial", "time out", false},
+		{"does not match case different", "TIMEOUT occurred", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := db.Scan([]byte(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
+			db.ReleaseMatched(matched)
+		})
+	}
+}
+
+func TestCompilerCaseInsensitive(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"case-insensitive-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "case-insensitive-policy",
+			Name: "Case Insensitive Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field:           &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match:           &policyv1.LogMatcher_Contains{Contains: "error"},
+							CaseInsensitive: true,
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	require.Equal(t, 1, len(compiled.Databases()))
+	db := compiled.Databases()[0].Database
+
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+	}{
+		{"matches lowercase", "an error occurred", true},
+		{"matches uppercase", "an ERROR occurred", true},
+		{"matches mixed case", "an Error occurred", true},
+		{"matches all caps", "ERROR", true},
+		{"does not match different word", "warning occurred", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := db.Scan([]byte(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
+			db.ReleaseMatched(matched)
+		})
+	}
+}
+
+func TestCompilerCaseInsensitiveStartsWith(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"ci-starts-with-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "ci-starts-with-policy",
+			Name: "Case Insensitive Starts With Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field:           &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match:           &policyv1.LogMatcher_StartsWith{StartsWith: "warn:"},
+							CaseInsensitive: true,
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	require.Equal(t, 1, len(compiled.Databases()))
+	db := compiled.Databases()[0].Database
+
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+	}{
+		{"matches lowercase", "warn: something happened", true},
+		{"matches uppercase", "WARN: something happened", true},
+		{"matches mixed case", "Warn: something happened", true},
+		{"does not match in middle", "something WARN: happened", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := db.Scan([]byte(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
+			db.ReleaseMatched(matched)
+		})
+	}
+}
+
+func TestCompilerCaseSensitiveAndInsensitiveSeparateDatabases(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"case-sensitive":   {},
+		"case-insensitive": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "case-sensitive",
+			Name: "Case Sensitive Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field:           &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match:           &policyv1.LogMatcher_Contains{Contains: "error"},
+							CaseInsensitive: false,
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+		{
+			Id:   "case-insensitive",
+			Name: "Case Insensitive Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field:           &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match:           &policyv1.LogMatcher_Contains{Contains: "error"},
+							CaseInsensitive: true,
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	// Should have 2 databases - one case sensitive, one case insensitive
+	assert.Equal(t, 2, len(compiled.Databases()))
+
+	// Verify they have different CaseInsensitive flags
+	var foundCaseSensitive, foundCaseInsensitive bool
+	for _, entry := range compiled.Databases() {
+		if entry.Key.CaseInsensitive {
+			foundCaseInsensitive = true
+		} else {
+			foundCaseSensitive = true
+		}
+	}
+	assert.True(t, foundCaseSensitive, "expected case-sensitive database")
+	assert.True(t, foundCaseInsensitive, "expected case-insensitive database")
+}
+
+func TestCompilerSpecialCharactersEscaped(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"special-chars": {},
+	}
+
+	// Test that special regex characters are properly escaped in literal matchers
+	policies := []*policyv1.Policy{
+		{
+			Id:   "special-chars",
+			Name: "Special Characters Policy",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "[error]"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	require.Equal(t, 1, len(compiled.Databases()))
+	db := compiled.Databases()[0].Database
+
+	tests := []struct {
+		name    string
+		input   string
+		matches bool
+	}{
+		{"matches literal brackets", "log [error] message", true},
+		{"does not match regex interpretation", "log error message", false},
+		{"does not match partial", "log [erro] message", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, err := db.Scan([]byte(tt.input))
+			require.NoError(t, err)
+			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
+			db.ReleaseMatched(matched)
+		})
 	}
 }
