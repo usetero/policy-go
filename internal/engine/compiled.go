@@ -2,8 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"regexp"
-	"strings"
 	"sync"
 
 	"github.com/flier/gohs/hyperscan"
@@ -95,8 +93,8 @@ func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
 }
 
 // ExistenceCheck represents a field existence check that can't be compiled to Hyperscan.
-type ExistenceCheck struct {
-	Selector    FieldSelector
+type ExistenceCheck[T FieldType] struct {
+	Selector    FieldSelector[T]
 	MustExist   bool
 	PolicyID    string
 	PolicyIndex int // Dense index for array-based tracking
@@ -104,34 +102,28 @@ type ExistenceCheck struct {
 }
 
 // CompiledPolicy holds the compiled representation of a policy for evaluation.
-type CompiledPolicy struct {
+type CompiledPolicy[T FieldType] struct {
 	ID           string
 	Index        int // Dense index for array-based tracking (0 to N-1)
 	Keep         Keep
 	MatcherCount int
-	SampleKey    *FieldSelector // Optional field to use for consistent sampling
+	SampleKey    *FieldSelector[T] // Optional field to use for consistent sampling
 	Stats        *PolicyStats
 }
 
 // CompiledMatchers holds all compiled pattern databases for policy evaluation.
-type CompiledMatchers struct {
-	databases       []DatabaseEntry
-	existenceChecks []ExistenceCheck
-	policies        map[string]*CompiledPolicy
-	policyList      []*CompiledPolicy // Index-ordered list for fast lookup
-}
-
-// NewCompiledMatchers creates a new empty CompiledMatchers.
-func NewCompiledMatchers() *CompiledMatchers {
-	return &CompiledMatchers{
-		databases:       make([]DatabaseEntry, 0),
-		existenceChecks: make([]ExistenceCheck, 0),
-		policies:        make(map[string]*CompiledPolicy),
-	}
+type CompiledMatchers[T FieldType] struct {
+	databases       []DatabaseEntry[T]
+	existenceChecks []ExistenceCheck[T]
+	policies        map[string]*CompiledPolicy[T]
+	policyList      []*CompiledPolicy[T] // Index-ordered list for fast lookup
 }
 
 // Close releases all resources.
-func (c *CompiledMatchers) Close() error {
+func (c *CompiledMatchers[T]) Close() error {
+	if c == nil {
+		return nil
+	}
 	for _, entry := range c.databases {
 		if err := entry.Database.Close(); err != nil {
 			return err
@@ -141,34 +133,55 @@ func (c *CompiledMatchers) Close() error {
 }
 
 // Databases returns the compiled databases.
-func (c *CompiledMatchers) Databases() []DatabaseEntry {
+func (c *CompiledMatchers[T]) Databases() []DatabaseEntry[T] {
 	return c.databases
 }
 
 // ExistenceChecks returns the existence checks.
-func (c *CompiledMatchers) ExistenceChecks() []ExistenceCheck {
+func (c *CompiledMatchers[T]) ExistenceChecks() []ExistenceCheck[T] {
 	return c.existenceChecks
 }
 
 // Policies returns the compiled policies.
-func (c *CompiledMatchers) Policies() map[string]*CompiledPolicy {
+func (c *CompiledMatchers[T]) Policies() map[string]*CompiledPolicy[T] {
 	return c.policies
 }
 
 // GetPolicy returns a compiled policy by ID.
-func (c *CompiledMatchers) GetPolicy(id string) (*CompiledPolicy, bool) {
+func (c *CompiledMatchers[T]) GetPolicy(id string) (*CompiledPolicy[T], bool) {
 	p, ok := c.policies[id]
 	return p, ok
 }
 
 // PolicyCount returns the number of compiled policies.
-func (c *CompiledMatchers) PolicyCount() int {
+func (c *CompiledMatchers[T]) PolicyCount() int {
 	return len(c.policyList)
 }
 
 // PolicyByIndex returns a compiled policy by its dense index.
-func (c *CompiledMatchers) PolicyByIndex(index int) *CompiledPolicy {
+func (c *CompiledMatchers[T]) PolicyByIndex(index int) *CompiledPolicy[T] {
 	return c.policyList[index]
+}
+
+// CompileResult contains compiled matchers for all telemetry types.
+type CompileResult struct {
+	Logs    *CompiledMatchers[LogField]
+	Metrics *CompiledMatchers[MetricField]
+	Traces  *CompiledMatchers[TraceField]
+}
+
+// Close releases all resources.
+func (r *CompileResult) Close() error {
+	if err := r.Logs.Close(); err != nil {
+		return err
+	}
+	if err := r.Metrics.Close(); err != nil {
+		return err
+	}
+	if err := r.Traces.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Compiler compiles policies into Hyperscan databases.
@@ -179,193 +192,196 @@ func NewCompiler() *Compiler {
 	return &Compiler{}
 }
 
-// Compile compiles a set of proto policies into CompiledMatchers.
-func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompiledMatchers, error) {
-	result := NewCompiledMatchers()
-
-	// Group patterns by MatchKey (using string key for map)
-	groups := make(map[matchKeyString][]patternEntry)
-	groupKeys := make(map[matchKeyString]MatchKey)
-
-	// First pass: assign dense indices to log policies
-	policyIndex := make(map[string]int)
-	for _, p := range policies {
-		if p.GetLog() == nil {
-			continue
-		}
-		policyIndex[p.GetId()] = len(result.policyList)
-		result.policyList = append(result.policyList, nil) // placeholder
-	}
+// Compile compiles a set of proto policies into CompileResult with separate
+// CompiledMatchers for logs, metrics, and traces.
+func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompileResult, error) {
+	logBuilder := newMatchersBuilder[LogField]()
+	metricBuilder := newMatchersBuilder[MetricField]()
+	traceBuilder := newMatchersBuilder[TraceField]()
 
 	for _, p := range policies {
-		log := p.GetLog()
-		if log == nil {
-			continue
-		}
-
 		id := p.GetId()
-		idx := policyIndex[id]
+		policyStats := stats[id]
 
-		// Parse keep string
-		keep, err := ParseKeep(log.GetKeep())
-		if err != nil {
-			return nil, fmt.Errorf("policy %s: %w", id, err)
-		}
+		// Process log target
+		if log := p.GetLog(); log != nil {
+			idx := logBuilder.reservePolicy(id)
 
-		// Extract sample key if present
-		var sampleKey *FieldSelector
-		if log.GetSampleKey() != nil {
-			sk := FieldSelectorFromLogSampleKey(log.GetSampleKey())
-			sampleKey = &sk
-		}
-
-		// Create compiled policy
-		compiled := &CompiledPolicy{
-			ID:           id,
-			Index:        idx,
-			Keep:         keep,
-			MatcherCount: len(log.GetMatch()),
-			SampleKey:    sampleKey,
-			Stats:        stats[id],
-		}
-		result.policies[id] = compiled
-		result.policyList[idx] = compiled
-
-		// Process matchers
-		for i, m := range log.GetMatch() {
-			selector := FieldSelectorFromLogMatcher(m)
-
-			// Check if this is an existence check
-			if _, ok := m.GetMatch().(*policyv1.LogMatcher_Exists); ok {
-				result.existenceChecks = append(result.existenceChecks, ExistenceCheck{
-					Selector:    selector,
-					MustExist:   m.GetExists(),
-					PolicyID:    id,
-					PolicyIndex: idx,
-					MatchIndex:  i,
-				})
-				continue
+			keep, err := ParseKeep(log.GetKeep())
+			if err != nil {
+				return nil, fmt.Errorf("policy %s: %w", id, err)
 			}
 
-			// Get the pattern (regex or literal match variants)
-			var pattern string
-			switch match := m.GetMatch().(type) {
-			case *policyv1.LogMatcher_Regex:
-				pattern = match.Regex
-			case *policyv1.LogMatcher_Exact:
-				// Escape for literal match
-				pattern = regexp.QuoteMeta(match.Exact)
-			case *policyv1.LogMatcher_StartsWith:
-				// Anchor at start
-				pattern = "^" + regexp.QuoteMeta(match.StartsWith)
-			case *policyv1.LogMatcher_EndsWith:
-				// Anchor at end
-				pattern = regexp.QuoteMeta(match.EndsWith) + "$"
-			case *policyv1.LogMatcher_Contains:
-				// No anchors, just escaped literal
-				pattern = regexp.QuoteMeta(match.Contains)
-			default:
-				continue
+			var sampleKey *FieldSelector[LogField]
+			if log.GetSampleKey() != nil {
+				sk := FieldSelectorFromLogSampleKey(log.GetSampleKey())
+				sampleKey = &sk
 			}
 
-			key := MatchKey{
-				Selector:        selector,
-				Negated:         m.GetNegate(),
-				CaseInsensitive: m.GetCaseInsensitive(),
+			for i, m := range log.GetMatch() {
+				selector := FieldSelectorFromLogMatcher(m)
+				pattern, isExistence, mustExist := extractMatchPattern(m)
+				logBuilder.addMatcher(selector, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
-			keyStr := makeMatchKeyString(key)
 
-			groups[keyStr] = append(groups[keyStr], patternEntry{
-				pattern:      pattern,
-				policyID:     id,
-				policyIndex:  idx,
-				matcherIndex: i,
-			})
-			groupKeys[keyStr] = key
+			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats)
+		}
+
+		// Process metric target
+		if metric := p.GetMetric(); metric != nil {
+			idx := metricBuilder.reservePolicy(id)
+
+			// Metrics use a simple bool keep for now
+			keep := Keep{Action: KeepAll}
+			if !metric.GetKeep() {
+				keep = Keep{Action: KeepNone}
+			}
+
+			for i, m := range metric.GetMatch() {
+				selector := FieldSelectorFromMetricMatcher(m)
+				pattern, isExistence, mustExist := extractMetricMatchPattern(m)
+				metricBuilder.addMatcher(selector, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+			}
+
+			metricBuilder.finalizePolicy(id, idx, keep, len(metric.GetMatch()), nil, policyStats)
+		}
+
+		// Process trace target
+		if trace := p.GetTrace(); trace != nil {
+			idx := traceBuilder.reservePolicy(id)
+
+			// Traces have a TraceSamplingConfig - parse it
+			keep, err := parseTraceSamplingConfig(trace.GetKeep())
+			if err != nil {
+				return nil, fmt.Errorf("policy %s: %w", id, err)
+			}
+
+			for i, m := range trace.GetMatch() {
+				selector := FieldSelectorFromTraceMatcher(m)
+				pattern, isExistence, mustExist := extractTraceMatchPattern(m)
+				traceBuilder.addMatcher(selector, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+			}
+
+			traceBuilder.finalizePolicy(id, idx, keep, len(trace.GetMatch()), nil, policyStats)
 		}
 	}
 
-	// Compile each group
-	for keyStr, entries := range groups {
-		key := groupKeys[keyStr]
-		db, err := c.compileGroup(entries, key.CaseInsensitive)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile patterns for %v: %w", keyStr, err)
-		}
-		result.databases = append(result.databases, DatabaseEntry{
-			Key:      key,
-			Database: db,
-		})
-	}
-
-	return result, nil
-}
-
-type patternEntry struct {
-	pattern      string
-	policyID     string
-	policyIndex  int
-	matcherIndex int
-}
-
-// matchKeyString is used only during compilation for grouping patterns.
-// It creates a hashable string from a MatchKey for use as map keys.
-type matchKeyString string
-
-func makeMatchKeyString(k MatchKey) matchKeyString {
-	// Format: "field|scope|path[0].path[1]...|negated|case_insensitive"
-	var s strings.Builder
-	fmt.Fprintf(&s, "%d|%d|", k.Selector.Field, k.Selector.AttrScope)
-	for i, p := range k.Selector.AttrPath {
-		if i > 0 {
-			s.WriteString(".")
-		}
-		s.WriteString(p)
-	}
-	fmt.Fprintf(&s, "|%t|%t", k.Negated, k.CaseInsensitive)
-	return matchKeyString(s.String())
-}
-
-func (c *Compiler) compileGroup(entries []patternEntry, caseInsensitive bool) (*CompiledDatabase, error) {
-	patterns := make([]*hyperscan.Pattern, len(entries))
-	patternIndex := make([]PatternRef, len(entries))
-
-	// Build flags - always use SomLeftMost, add Caseless if case insensitive
-	flags := hyperscan.SomLeftMost
-	if caseInsensitive {
-		flags |= hyperscan.Caseless
-	}
-
-	for i, e := range entries {
-		// Validate the pattern is valid regex
-		if _, err := regexp.Compile(e.pattern); err != nil {
-			return nil, fmt.Errorf("invalid regex %q: %w", e.pattern, err)
-		}
-
-		patterns[i] = hyperscan.NewPattern(e.pattern, flags)
-		patterns[i].Id = i
-
-		patternIndex[i] = PatternRef{
-			PolicyID:     e.policyID,
-			PolicyIndex:  e.policyIndex,
-			MatcherIndex: e.matcherIndex,
-		}
-	}
-
-	db, err := hyperscan.NewBlockDatabase(patterns...)
+	logs, err := logBuilder.build()
 	if err != nil {
-		return nil, fmt.Errorf("failed to compile hyperscan database: %w", err)
+		return nil, fmt.Errorf("compiling log policies: %w", err)
 	}
 
-	scratch, err := hyperscan.NewScratch(db)
+	metrics, err := metricBuilder.build()
 	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to allocate scratch: %w", err)
+		logs.Close()
+		return nil, fmt.Errorf("compiling metric policies: %w", err)
 	}
 
-	return &CompiledDatabase{
-		db:           db,
-		scratch:      scratch,
-		patternIndex: patternIndex,
+	traces, err := traceBuilder.build()
+	if err != nil {
+		logs.Close()
+		metrics.Close()
+		return nil, fmt.Errorf("compiling trace policies: %w", err)
+	}
+
+	return &CompileResult{
+		Logs:    logs,
+		Metrics: metrics,
+		Traces:  traces,
 	}, nil
+}
+
+// extractMatchPattern extracts the pattern string from a LogMatcher.
+// Returns (pattern, isExistence, mustExist).
+func extractMatchPattern(m *policyv1.LogMatcher) (string, bool, bool) {
+	switch match := m.GetMatch().(type) {
+	case *policyv1.LogMatcher_Regex:
+		return match.Regex, false, false
+	case *policyv1.LogMatcher_Exact:
+		return escapeRegex(match.Exact), false, false
+	case *policyv1.LogMatcher_StartsWith:
+		return "^" + escapeRegex(match.StartsWith), false, false
+	case *policyv1.LogMatcher_EndsWith:
+		return escapeRegex(match.EndsWith) + "$", false, false
+	case *policyv1.LogMatcher_Contains:
+		return escapeRegex(match.Contains), false, false
+	case *policyv1.LogMatcher_Exists:
+		return "", true, match.Exists
+	default:
+		return "", false, false
+	}
+}
+
+// extractMetricMatchPattern extracts the pattern string from a MetricMatcher.
+func extractMetricMatchPattern(m *policyv1.MetricMatcher) (string, bool, bool) {
+	switch match := m.GetMatch().(type) {
+	case *policyv1.MetricMatcher_Regex:
+		return match.Regex, false, false
+	case *policyv1.MetricMatcher_Exact:
+		return escapeRegex(match.Exact), false, false
+	case *policyv1.MetricMatcher_StartsWith:
+		return "^" + escapeRegex(match.StartsWith), false, false
+	case *policyv1.MetricMatcher_EndsWith:
+		return escapeRegex(match.EndsWith) + "$", false, false
+	case *policyv1.MetricMatcher_Contains:
+		return escapeRegex(match.Contains), false, false
+	case *policyv1.MetricMatcher_Exists:
+		return "", true, match.Exists
+	default:
+		return "", false, false
+	}
+}
+
+// extractTraceMatchPattern extracts the pattern string from a TraceMatcher.
+func extractTraceMatchPattern(m *policyv1.TraceMatcher) (string, bool, bool) {
+	switch match := m.GetMatch().(type) {
+	case *policyv1.TraceMatcher_Regex:
+		return match.Regex, false, false
+	case *policyv1.TraceMatcher_Exact:
+		return escapeRegex(match.Exact), false, false
+	case *policyv1.TraceMatcher_StartsWith:
+		return "^" + escapeRegex(match.StartsWith), false, false
+	case *policyv1.TraceMatcher_EndsWith:
+		return escapeRegex(match.EndsWith) + "$", false, false
+	case *policyv1.TraceMatcher_Contains:
+		return escapeRegex(match.Contains), false, false
+	case *policyv1.TraceMatcher_Exists:
+		return "", true, match.Exists
+	default:
+		return "", false, false
+	}
+}
+
+// escapeRegex escapes special regex characters for literal matching.
+func escapeRegex(s string) string {
+	special := `\.+*?^$()[]{}|`
+	result := make([]byte, 0, len(s)*2)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		for j := 0; j < len(special); j++ {
+			if c == special[j] {
+				result = append(result, '\\')
+				break
+			}
+		}
+		result = append(result, c)
+	}
+	return string(result)
+}
+
+// parseTraceSamplingConfig converts a TraceSamplingConfig to a Keep.
+func parseTraceSamplingConfig(cfg *policyv1.TraceSamplingConfig) (Keep, error) {
+	if cfg == nil {
+		return Keep{Action: KeepAll}, nil
+	}
+
+	percentage := cfg.GetPercentage()
+	if percentage >= 100 {
+		return Keep{Action: KeepAll}, nil
+	}
+	if percentage <= 0 {
+		return Keep{Action: KeepNone}, nil
+	}
+
+	return Keep{Action: KeepSample, Value: float64(percentage)}, nil
 }

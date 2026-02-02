@@ -98,9 +98,9 @@ func TestCompilerCompileEmpty(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	assert.Equal(t, 0, len(compiled.Databases()))
-	assert.Empty(t, compiled.ExistenceChecks())
-	assert.Empty(t, compiled.Policies())
+	assert.Equal(t, 0, len(compiled.Logs.Databases()))
+	assert.Empty(t, compiled.Logs.ExistenceChecks())
+	assert.Empty(t, compiled.Logs.Policies())
 }
 
 func TestCompilerCompileSinglePolicy(t *testing.T) {
@@ -132,13 +132,13 @@ func TestCompilerCompileSinglePolicy(t *testing.T) {
 	defer compiled.Close()
 
 	// Check policy was compiled
-	policy, ok := compiled.GetPolicy("test-policy")
+	policy, ok := compiled.Logs.GetPolicy("test-policy")
 	require.True(t, ok, "expected to find test-policy")
 	assert.Equal(t, 1, policy.MatcherCount)
 	assert.Equal(t, KeepNone, policy.Keep.Action)
 
 	// Check database was created
-	assert.Equal(t, 1, len(compiled.Databases()))
+	assert.Equal(t, 1, len(compiled.Logs.Databases()))
 }
 
 func TestCompilerCompileMultipleMatchers(t *testing.T) {
@@ -173,12 +173,12 @@ func TestCompilerCompileMultipleMatchers(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	policy, ok := compiled.GetPolicy("multi-matcher")
+	policy, ok := compiled.Logs.GetPolicy("multi-matcher")
 	require.True(t, ok, "expected to find multi-matcher")
 	assert.Equal(t, 2, policy.MatcherCount)
 
 	// Should have 2 databases (one per field selector)
-	assert.Equal(t, 2, len(compiled.Databases()))
+	assert.Equal(t, 2, len(compiled.Logs.Databases()))
 }
 
 func TestCompilerCompileNegatedMatcher(t *testing.T) {
@@ -211,7 +211,7 @@ func TestCompilerCompileNegatedMatcher(t *testing.T) {
 	defer compiled.Close()
 
 	// Check database key has Negated = true
-	for _, entry := range compiled.Databases() {
+	for _, entry := range compiled.Logs.Databases() {
 		assert.True(t, entry.Key.Negated, "expected database key to have Negated = true")
 	}
 }
@@ -245,12 +245,12 @@ func TestCompilerCompileExistenceCheck(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have no databases (existence checks don't use Hyperscan)
-	assert.Equal(t, 0, len(compiled.Databases()))
+	assert.Equal(t, 0, len(compiled.Logs.Databases()))
 
 	// Should have 1 existence check
-	require.Len(t, compiled.ExistenceChecks(), 1)
+	require.Len(t, compiled.Logs.ExistenceChecks(), 1)
 
-	check := compiled.ExistenceChecks()[0]
+	check := compiled.Logs.ExistenceChecks()[0]
 	assert.Equal(t, "exists-check", check.PolicyID)
 	assert.True(t, check.MustExist)
 	assert.Equal(t, []string{"trace_id"}, check.Selector.AttrPath)
@@ -286,10 +286,10 @@ func TestCompilerCompileExactMatch(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have 1 database
-	assert.Equal(t, 1, len(compiled.Databases()))
+	assert.Equal(t, 1, len(compiled.Logs.Databases()))
 
 	// Scan for exact match (dots should be escaped)
-	for _, entry := range compiled.Databases() {
+	for _, entry := range compiled.Logs.Databases() {
 		matched, err := entry.Database.Scan([]byte("hello.world"))
 		require.NoError(t, err)
 		assert.True(t, matched[0], "expected exact match")
@@ -301,16 +301,26 @@ func TestCompilerCompileExactMatch(t *testing.T) {
 	}
 }
 
-func TestCompilerSkipsNonLogPolicies(t *testing.T) {
+func TestCompilerCompilesMetricPolicies(t *testing.T) {
 	compiler := NewCompiler()
-	stats := map[string]*PolicyStats{}
+	stats := map[string]*PolicyStats{
+		"metric-policy": {},
+	}
 
 	policies := []*policyv1.Policy{
 		{
 			Id:   "metric-policy",
 			Name: "Metric Policy",
 			Target: &policyv1.Policy_Metric{
-				Metric: &policyv1.MetricTarget{},
+				Metric: &policyv1.MetricTarget{
+					Match: []*policyv1.MetricMatcher{
+						{
+							Field: &policyv1.MetricMatcher_MetricField{MetricField: policyv1.MetricField_METRIC_FIELD_NAME},
+							Match: &policyv1.MetricMatcher_Regex{Regex: "cpu.*"},
+						},
+					},
+					Keep: true,
+				},
 			},
 		},
 	}
@@ -319,7 +329,13 @@ func TestCompilerSkipsNonLogPolicies(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	assert.Empty(t, compiled.Policies())
+	// Log policies should be empty
+	assert.Empty(t, compiled.Logs.Policies())
+
+	// Metric policies should have the policy
+	policy, ok := compiled.Metrics.GetPolicy("metric-policy")
+	require.True(t, ok, "expected to find metric-policy")
+	assert.Equal(t, 1, policy.MatcherCount)
 }
 
 func TestCompiledDatabaseScan(t *testing.T) {
@@ -355,8 +371,8 @@ func TestCompiledDatabaseScan(t *testing.T) {
 	defer compiled.Close()
 
 	// Find the database
-	require.NotEmpty(t, compiled.Databases())
-	db := compiled.Databases()[0].Database
+	require.NotEmpty(t, compiled.Logs.Databases())
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name     string
@@ -422,8 +438,8 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.NotEmpty(t, compiled.Databases())
-	db := compiled.Databases()[0].Database
+	require.NotEmpty(t, compiled.Logs.Databases())
+	db := compiled.Logs.Databases()[0].Database
 
 	// Run concurrent scans
 	done := make(chan bool)
@@ -443,12 +459,11 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	}
 }
 
-func TestNewCompiledMatchers(t *testing.T) {
-	cm := NewCompiledMatchers()
+func TestNewMatchersBuilder(t *testing.T) {
+	builder := newMatchersBuilder[LogField]()
 
-	assert.NotNil(t, cm.databases)
-	assert.NotNil(t, cm.existenceChecks)
-	assert.NotNil(t, cm.policies)
+	assert.NotNil(t, builder.groups)
+	assert.NotNil(t, builder.policies)
 }
 
 func TestPolicyCount(t *testing.T) {
@@ -506,11 +521,11 @@ func TestPolicyCount(t *testing.T) {
 	defer compiled.Close()
 
 	// Verify PolicyCount
-	assert.Equal(t, 3, compiled.PolicyCount())
+	assert.Equal(t, 3, compiled.Logs.PolicyCount())
 
 	// Verify PolicyByIndex returns correct policies
 	for i := 0; i < 3; i++ {
-		policy := compiled.PolicyByIndex(i)
+		policy := compiled.Logs.PolicyByIndex(i)
 		assert.Equal(t, i, policy.Index)
 	}
 }
@@ -543,8 +558,8 @@ func TestCompilerStartsWith(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Equal(t, 1, len(compiled.Databases()))
-	db := compiled.Databases()[0].Database
+	require.Equal(t, 1, len(compiled.Logs.Databases()))
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name    string
@@ -596,8 +611,8 @@ func TestCompilerEndsWith(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Equal(t, 1, len(compiled.Databases()))
-	db := compiled.Databases()[0].Database
+	require.Equal(t, 1, len(compiled.Logs.Databases()))
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name    string
@@ -649,8 +664,8 @@ func TestCompilerContains(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Equal(t, 1, len(compiled.Databases()))
-	db := compiled.Databases()[0].Database
+	require.Equal(t, 1, len(compiled.Logs.Databases()))
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name    string
@@ -703,8 +718,8 @@ func TestCompilerCaseInsensitive(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Equal(t, 1, len(compiled.Databases()))
-	db := compiled.Databases()[0].Database
+	require.Equal(t, 1, len(compiled.Logs.Databases()))
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name    string
@@ -757,8 +772,8 @@ func TestCompilerCaseInsensitiveStartsWith(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Equal(t, 1, len(compiled.Databases()))
-	db := compiled.Databases()[0].Database
+	require.Equal(t, 1, len(compiled.Logs.Databases()))
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name    string
@@ -828,11 +843,11 @@ func TestCompilerCaseSensitiveAndInsensitiveSeparateDatabases(t *testing.T) {
 	defer compiled.Close()
 
 	// Should have 2 databases - one case sensitive, one case insensitive
-	assert.Equal(t, 2, len(compiled.Databases()))
+	assert.Equal(t, 2, len(compiled.Logs.Databases()))
 
 	// Verify they have different CaseInsensitive flags
 	var foundCaseSensitive, foundCaseInsensitive bool
-	for _, entry := range compiled.Databases() {
+	for _, entry := range compiled.Logs.Databases() {
 		if entry.Key.CaseInsensitive {
 			foundCaseInsensitive = true
 		} else {
@@ -872,8 +887,8 @@ func TestCompilerSpecialCharactersEscaped(t *testing.T) {
 	require.NoError(t, err)
 	defer compiled.Close()
 
-	require.Equal(t, 1, len(compiled.Databases()))
-	db := compiled.Databases()[0].Database
+	require.Equal(t, 1, len(compiled.Logs.Databases()))
+	db := compiled.Logs.Databases()[0].Database
 
 	tests := []struct {
 		name    string
