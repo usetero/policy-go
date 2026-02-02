@@ -13,12 +13,6 @@ type (
 	LogTarget = policyv1.LogTarget
 	// LogMatcher is the proto log matcher type.
 	LogMatcher = policyv1.LogMatcher
-	// LogField is the proto log field enum.
-	LogField = policyv1.LogField
-	// MetricField is the proto metric field enum.
-	MetricField = policyv1.MetricField
-	// TraceField is the proto trace field enum.
-	TraceField = policyv1.TraceField
 )
 
 // LogField constants.

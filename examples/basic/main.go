@@ -8,7 +8,7 @@ import (
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// ExampleLogRecord implements policy.LogMatchable for demonstration.
+// ExampleLogRecord is a simple log record for demonstration.
 type ExampleLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
@@ -17,30 +17,32 @@ type ExampleLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-func (r *ExampleLogRecord) GetField(field policyv1.LogField) []byte {
-	switch field {
-	case policyv1.LogField_LOG_FIELD_BODY:
-		return r.Body
-	case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
-		return r.SeverityText
-	default:
-		return nil
+// ExampleLogMatcher is the LogMatchFunc implementation for ExampleLogRecord.
+func ExampleLogMatcher(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
+	if ref.IsField() {
+		switch ref.Field() {
+		case policyv1.LogField_LOG_FIELD_BODY:
+			return r.Body
+		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+			return r.SeverityText
+		default:
+			return nil
+		}
 	}
-}
 
-func (r *ExampleLogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+	// Attribute lookup
 	var attrs map[string]any
-	switch scope {
-	case policy.AttrScopeResource:
-		attrs = r.ResourceAttributes
-	case policy.AttrScopeScope:
-		attrs = r.ScopeAttributes
-	case policy.AttrScopeRecord:
+	switch {
+	case ref.IsRecordAttr():
 		attrs = r.LogAttributes
+	case ref.IsResourceAttr():
+		attrs = r.ResourceAttributes
+	case ref.IsScopeAttr():
+		attrs = r.ScopeAttributes
 	default:
 		return nil
 	}
-	return traversePath(attrs, path)
+	return traversePath(attrs, ref.Path())
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -98,11 +100,8 @@ func main() {
 	}
 	fmt.Println()
 
-	// Get a snapshot for evaluation
-	snapshot := registry.Snapshot()
-
 	// Create an engine for evaluation
-	eng := policy.NewPolicyEngine()
+	eng := policy.NewPolicyEngine(registry)
 
 	// Example log records to evaluate
 	examples := []struct {
@@ -202,7 +201,7 @@ func main() {
 	fmt.Println("Evaluating log records:")
 	fmt.Println("========================")
 	for _, ex := range examples {
-		result := eng.Evaluate(snapshot, ex.record)
+		result := policy.EvaluateLog(eng, ex.record, ExampleLogMatcher)
 		fmt.Printf("%-45s -> %s\n", ex.name, result)
 	}
 

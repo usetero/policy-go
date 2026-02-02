@@ -93,10 +93,7 @@ func TestEngineEvaluateDropDebugLogs(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that should be dropped (matches "drop-debug-logs" - body contains BOTH "debug" AND "trace")
 	// Note: multiple matchers in a policy are AND'd together
@@ -105,7 +102,7 @@ func TestEngineEvaluateDropDebugLogs(t *testing.T) {
 		SeverityText: []byte("INFO"),
 	}
 
-	result := engine.Evaluate(snapshot, debugTraceLog)
+	result := EvaluateLog(engine, debugTraceLog, SimpleLogMatcher)
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -116,10 +113,7 @@ func TestEngineEvaluateDropBySeverity(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that should be dropped (matches "drop-debug-level" - severity_text is DEBUG)
 	debugLog := &SimpleLogRecord{
@@ -127,7 +121,7 @@ func TestEngineEvaluateDropBySeverity(t *testing.T) {
 		SeverityText: []byte("DEBUG"),
 	}
 
-	result := engine.Evaluate(snapshot, debugLog)
+	result := EvaluateLog(engine, debugLog, SimpleLogMatcher)
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -138,10 +132,7 @@ func TestEngineEvaluateNoMatch(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that doesn't match any policy:
 	// - Contains "debug" so it fails the "keep-non-debug-non-trace" negated policy
@@ -153,7 +144,7 @@ func TestEngineEvaluateNoMatch(t *testing.T) {
 		SeverityText: []byte("INFO"),
 	}
 
-	result := engine.Evaluate(snapshot, debugOnlyLog)
+	result := EvaluateLog(engine, debugOnlyLog, SimpleLogMatcher)
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -164,10 +155,7 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that should be dropped (matches "drop-echo-logs" - log_attribute ddsource=nginx)
 	nginxLog := &SimpleLogRecord{
@@ -178,7 +166,7 @@ func TestEngineEvaluateDropByLogAttribute(t *testing.T) {
 		},
 	}
 
-	result := engine.Evaluate(snapshot, nginxLog)
+	result := EvaluateLog(engine, nginxLog, SimpleLogMatcher)
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -189,10 +177,7 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that should be dropped (matches "drop-edge-logs" - service.name ends with "edge")
 	edgeLog := &SimpleLogRecord{
@@ -203,7 +188,7 @@ func TestEngineEvaluateDropByResourceAttribute(t *testing.T) {
 		},
 	}
 
-	result := engine.Evaluate(snapshot, edgeLog)
+	result := EvaluateLog(engine, edgeLog, SimpleLogMatcher)
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -214,10 +199,7 @@ func TestEngineEvaluateAllNegatedMatchersPass(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that should match "keep-non-debug-non-trace" policy
 	// which has ALL negated matchers:
@@ -229,7 +211,7 @@ func TestEngineEvaluateAllNegatedMatchersPass(t *testing.T) {
 		SeverityText: []byte("INFO"),
 	}
 
-	result := engine.Evaluate(snapshot, normalLog)
+	result := EvaluateLog(engine, normalLog, SimpleLogMatcher)
 	assert.Equal(t, ResultKeep, result, "all negated matchers should pass")
 }
 
@@ -240,10 +222,7 @@ func TestEngineEvaluateAllNegatedMatchersFailOne(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that should NOT match "keep-non-debug-non-trace" policy
 	// because body contains "debug" (fails the negated matcher)
@@ -252,7 +231,7 @@ func TestEngineEvaluateAllNegatedMatchersFailOne(t *testing.T) {
 		SeverityText: []byte("INFO"),
 	}
 
-	result := engine.Evaluate(snapshot, debugLog)
+	result := EvaluateLog(engine, debugLog, SimpleLogMatcher)
 	// Should either be no match or match a different policy (like drop-debug-logs if it has trace too)
 	// Since this log only has "debug" but not "trace", it won't match drop-debug-logs either
 	// So it should be no match (the negated policy fails, no other policy matches)
@@ -266,10 +245,7 @@ func TestEngineEvaluateAllNegatedMatchersFailBoth(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test log that fails BOTH negated matchers:
 	// - body contains "debug" (fails negated)
@@ -279,7 +255,7 @@ func TestEngineEvaluateAllNegatedMatchersFailBoth(t *testing.T) {
 		SeverityText: []byte("TRACE"),
 	}
 
-	result := engine.Evaluate(snapshot, traceDebugLog)
+	result := EvaluateLog(engine, traceDebugLog, SimpleLogMatcher)
 	// Should NOT match the all-negated policy
 	assert.NotEqual(t, ResultKeep, result, "both negated matchers should fail")
 }
@@ -291,10 +267,7 @@ func TestStatsCollection(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	require.NotNil(t, snapshot)
-
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Evaluate a log that matches drop-debug-level (severity_text = DEBUG)
 	debugLog := &SimpleLogRecord{
@@ -302,7 +275,7 @@ func TestStatsCollection(t *testing.T) {
 		SeverityText: []byte("DEBUG"),
 	}
 
-	engine.Evaluate(snapshot, debugLog)
+	EvaluateLog(engine, debugLog, SimpleLogMatcher)
 
 	// Collect stats
 	stats := registry.CollectStats()
@@ -523,8 +496,7 @@ func TestSamplingWithSampleKey(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test that the same trace_id always produces the same result (deterministic)
 	traceID1 := []byte("trace-id-abc123")
@@ -540,13 +512,13 @@ func TestSamplingWithSampleKey(t *testing.T) {
 	}
 
 	// Run multiple times to verify determinism
-	result1a := engine.Evaluate(snapshot, record1)
-	result1b := engine.Evaluate(snapshot, record1)
-	result1c := engine.Evaluate(snapshot, record1)
+	result1a := EvaluateLog(engine, record1, SimpleLogMatcher)
+	result1b := EvaluateLog(engine, record1, SimpleLogMatcher)
+	result1c := EvaluateLog(engine, record1, SimpleLogMatcher)
 
-	result2a := engine.Evaluate(snapshot, record2)
-	result2b := engine.Evaluate(snapshot, record2)
-	result2c := engine.Evaluate(snapshot, record2)
+	result2a := EvaluateLog(engine, record2, SimpleLogMatcher)
+	result2b := EvaluateLog(engine, record2, SimpleLogMatcher)
+	result2c := EvaluateLog(engine, record2, SimpleLogMatcher)
 
 	// Same trace_id should always produce the same result
 	assert.Equal(t, result1a, result1b, "same trace_id should produce consistent result")
@@ -584,8 +556,7 @@ func TestSamplingDistribution(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Test with many different request IDs
 	kept := 0
@@ -599,7 +570,7 @@ func TestSamplingDistribution(t *testing.T) {
 				"request_id": string(rune('a'+i%26)) + string(rune('0'+i%10)) + string(rune(i)),
 			},
 		}
-		result := engine.Evaluate(snapshot, record)
+		result := EvaluateLog(engine, record, SimpleLogMatcher)
 		if result == ResultKeep {
 			kept++
 		} else if result == ResultDrop {
@@ -640,8 +611,7 @@ func TestSamplingWithoutSampleKey(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// Record without trace_id - should be kept (fallback behavior)
 	record := &SimpleLogRecord{
@@ -649,7 +619,7 @@ func TestSamplingWithoutSampleKey(t *testing.T) {
 		// No TraceID set
 	}
 
-	result := engine.Evaluate(snapshot, record)
+	result := EvaluateLog(engine, record, SimpleLogMatcher)
 	assert.Equal(t, ResultKeep, result, "record without sample key value should be kept")
 }
 
@@ -679,8 +649,7 @@ func TestSampling100Percent(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// All records should be kept with 100% sampling
 	for i := 0; i < 100; i++ {
@@ -688,7 +657,7 @@ func TestSampling100Percent(t *testing.T) {
 			Body:    []byte("test message"),
 			TraceID: []byte("trace-" + string(rune('a'+i))),
 		}
-		result := engine.Evaluate(snapshot, record)
+		result := EvaluateLog(engine, record, SimpleLogMatcher)
 		assert.Equal(t, ResultKeep, result, "100%% sampling should keep all records")
 	}
 }
@@ -719,8 +688,7 @@ func TestSampling0Percent(t *testing.T) {
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
 
-	snapshot := registry.Snapshot()
-	engine := NewPolicyEngine()
+	engine := NewPolicyEngine(registry)
 
 	// All records should be dropped with 0% sampling
 	for i := 0; i < 100; i++ {
@@ -728,7 +696,7 @@ func TestSampling0Percent(t *testing.T) {
 			Body:    []byte("test message"),
 			TraceID: []byte("trace-" + string(rune('a'+i))),
 		}
-		result := engine.Evaluate(snapshot, record)
+		result := EvaluateLog(engine, record, SimpleLogMatcher)
 		assert.Equal(t, ResultDrop, result, "0%% sampling should drop all records")
 	}
 }

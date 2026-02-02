@@ -58,24 +58,39 @@ func (r EvaluateResult) String() string {
 }
 
 // PolicyEngine evaluates telemetry against compiled policies.
-type PolicyEngine struct{}
-
-// NewPolicyEngine creates a new PolicyEngine.
-func NewPolicyEngine() *PolicyEngine {
-	return &PolicyEngine{}
+type PolicyEngine struct {
+	registry *PolicyRegistry
 }
 
-// getFieldValue extracts a field value from a LogMatchable using the internal FieldSelector.
-func getFieldValue(record LogMatchable, selector engine.FieldSelector) []byte {
+// NewPolicyEngine creates a new PolicyEngine with the given registry.
+func NewPolicyEngine(registry *PolicyRegistry) *PolicyEngine {
+	return &PolicyEngine{registry: registry}
+}
+
+// logFieldRefFromSelector converts an internal FieldSelector to a LogFieldRef.
+func logFieldRefFromSelector(selector engine.FieldSelector) LogFieldRef {
 	if selector.IsAttribute() {
-		return record.GetAttribute(AttrScope(selector.AttrScope), selector.AttrPath)
+		switch selector.AttrScope {
+		case engine.AttrScopeResource:
+			return LogResourceAttr(selector.AttrPath...)
+		case engine.AttrScopeScope:
+			return LogScopeAttr(selector.AttrPath...)
+		case engine.AttrScopeRecord:
+			return LogAttr(selector.AttrPath...)
+		default:
+			return LogFieldRef{}
+		}
 	}
-	return record.GetField(policyv1.LogField(selector.Field))
+	return LogField(policyv1.LogField(selector.Field))
 }
 
-// Evaluate checks a log record against the snapshot and returns the result.
+// EvaluateLog checks a log record against the current policies and returns the result.
 // This method uses index-based arrays instead of maps for better performance.
-func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) EvaluateResult {
+//
+// The match function is called to extract field values from the record.
+// Consumers provide this function to bridge their record type to the policy engine.
+func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T]) EvaluateResult {
+	snapshot := e.registry.Snapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
 	}
@@ -112,7 +127,8 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 			continue
 		}
 
-		value := getFieldValue(record, check.Selector)
+		ref := logFieldRefFromSelector(check.Selector)
+		value := match(record, ref)
 		exists := value != nil || len(value) > 0
 
 		if check.MustExist && !exists {
@@ -129,14 +145,15 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 		key := entry.Key
 		db := entry.Database
 
-		value := getFieldValue(record, key.Selector)
+		ref := logFieldRefFromSelector(key.Selector)
+		value := match(record, ref)
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified
 			// unless this is a negated match (which would succeed on absence)
 			if !key.Negated {
 				// Mark all policies using this database as disqualified
-				for _, ref := range db.PatternIndex() {
-					disqualified[ref.PolicyIndex] = true
+				for _, patternRef := range db.PatternIndex() {
+					disqualified[patternRef.PolicyIndex] = true
 				}
 			}
 			continue
@@ -149,22 +166,22 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 		}
 
 		// Update match counts based on results
-		for patternID, ref := range db.PatternIndex() {
-			if disqualified[ref.PolicyIndex] {
+		for patternID, patternRef := range db.PatternIndex() {
+			if disqualified[patternRef.PolicyIndex] {
 				continue
 			}
 
 			if key.Negated {
 				// Negated match - pattern should NOT match
 				if matched[patternID] {
-					disqualified[ref.PolicyIndex] = true
+					disqualified[patternRef.PolicyIndex] = true
 				} else {
-					matchCounts[ref.PolicyIndex]++
+					matchCounts[patternRef.PolicyIndex]++
 				}
 			} else {
 				// Normal match - pattern should match
 				if matched[patternID] {
-					matchCounts[ref.PolicyIndex]++
+					matchCounts[patternRef.PolicyIndex]++
 				}
 			}
 		}
@@ -207,10 +224,10 @@ func (e *PolicyEngine) Evaluate(snapshot *PolicySnapshot, record LogMatchable) E
 	}
 
 	// Apply the keep action
-	return e.applyKeepAction(bestPolicy, record)
+	return applyKeepActionLog(e, bestPolicy, record, match)
 }
 
-func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy, record LogMatchable) EvaluateResult {
+func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy, record T, match LogMatchFunc[T]) EvaluateResult {
 	switch policy.Keep.Action {
 	case KeepAll:
 		return ResultKeep
@@ -225,7 +242,7 @@ func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy, record Log
 		// Hash-based deterministic sampling
 		// If a sample key is configured, use it for consistent sampling
 		// Otherwise, sample randomly based on percentage
-		shouldKeep := e.shouldSample(policy, record)
+		shouldKeep := shouldSampleLog(e, policy, record, match)
 		if policy.Stats != nil {
 			policy.Stats.RecordSample()
 		}
@@ -246,10 +263,10 @@ func (e *PolicyEngine) applyKeepAction(policy *engine.CompiledPolicy, record Log
 	}
 }
 
-// shouldSample determines if a record should be kept based on the sampling configuration.
+// shouldSampleLog determines if a record should be kept based on the sampling configuration.
 // If a sample key is configured, it uses hash-based deterministic sampling for consistency.
 // Otherwise, it uses the hash of the entire record for pseudo-random sampling.
-func (e *PolicyEngine) shouldSample(policy *engine.CompiledPolicy, record LogMatchable) bool {
+func shouldSampleLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy, record T, match LogMatchFunc[T]) bool {
 	percentage := policy.Keep.Value
 	if percentage >= 100 {
 		return true
@@ -262,7 +279,8 @@ func (e *PolicyEngine) shouldSample(policy *engine.CompiledPolicy, record LogMat
 	var hashInput []byte
 	if policy.SampleKey != nil {
 		// Use the configured sample key field
-		hashInput = getFieldValue(record, *policy.SampleKey)
+		ref := logFieldRefFromSelector(*policy.SampleKey)
+		hashInput = match(record, ref)
 	}
 
 	// If no sample key or the field is empty, we can't do consistent sampling
