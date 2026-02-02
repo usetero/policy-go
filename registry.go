@@ -34,13 +34,15 @@ type providerEntry struct {
 // It recompiles the Hyperscan database when policies change
 // and produces read-only snapshots for evaluation.
 type PolicyRegistry struct {
-	mu          sync.RWMutex
-	nextId      atomic.Uint64
-	providers   map[ProviderId]*providerEntry
-	stats       map[string]*engine.PolicyStats
-	snapshot    *PolicySnapshot
-	compiler    *engine.Compiler
-	onRecompile func(*PolicySnapshot) // for testing
+	mu             sync.RWMutex
+	nextId         atomic.Uint64
+	providers      map[ProviderId]*providerEntry
+	stats          map[string]*engine.PolicyStats
+	logSnapshot    *LogSnapshot
+	metricSnapshot *MetricSnapshot
+	traceSnapshot  *TraceSnapshot
+	compiler       *engine.Compiler
+	onRecompile    func() // for testing
 }
 
 // NewPolicyRegistry creates a new PolicyRegistry.
@@ -80,14 +82,40 @@ func (r *PolicyRegistry) Unregister(handle ProviderHandle) {
 	r.recompileLocked()
 }
 
-// Snapshot returns the current read-only snapshot of compiled policies.
+// Snapshot returns the current read-only snapshot of compiled log policies.
+// Deprecated: Use LogSnapshot instead.
+func (r *PolicyRegistry) Snapshot() *LogSnapshot {
+	return r.LogSnapshot()
+}
+
+// LogSnapshot returns the current read-only snapshot of compiled log policies.
 // The snapshot is safe for concurrent use and remains valid even after
 // new policies are loaded (the registry maintains the old snapshot until
 // all references are released via garbage collection).
-func (r *PolicyRegistry) Snapshot() *PolicySnapshot {
+func (r *PolicyRegistry) LogSnapshot() *LogSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.snapshot
+	return r.logSnapshot
+}
+
+// MetricSnapshot returns the current read-only snapshot of compiled metric policies.
+// The snapshot is safe for concurrent use and remains valid even after
+// new policies are loaded (the registry maintains the old snapshot until
+// all references are released via garbage collection).
+func (r *PolicyRegistry) MetricSnapshot() *MetricSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.metricSnapshot
+}
+
+// TraceSnapshot returns the current read-only snapshot of compiled trace policies.
+// The snapshot is safe for concurrent use and remains valid even after
+// new policies are loaded (the registry maintains the old snapshot until
+// all references are released via garbage collection).
+func (r *PolicyRegistry) TraceSnapshot() *TraceSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.traceSnapshot
 }
 
 // CollectStats returns immutable snapshots of stats for all policies.
@@ -105,7 +133,7 @@ func (r *PolicyRegistry) CollectStats() []PolicyStatsSnapshot {
 
 // SetOnRecompile sets a callback that is invoked after recompilation.
 // Used for testing to know when policies have been updated.
-func (r *PolicyRegistry) SetOnRecompile(fn func(*PolicySnapshot)) {
+func (r *PolicyRegistry) SetOnRecompile(fn func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onRecompile = fn
@@ -121,7 +149,7 @@ func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*policyv1.Po
 	r.recompileLocked()
 }
 
-// recompileLocked recompiles the policies and updates the snapshot.
+// recompileLocked recompiles the policies and updates the snapshots.
 // INVARIANT: A lock MUST be acquired.
 func (r *PolicyRegistry) recompileLocked() {
 	// Collect all policies from all providers
@@ -138,18 +166,20 @@ func (r *PolicyRegistry) recompileLocked() {
 	}
 
 	// Compile
-	compiled, err := r.compiler.Compile(allPolicies, r.stats)
+	result, err := r.compiler.Compile(allPolicies, r.stats)
 	if err != nil {
 		// TODO: Log error or expose it somehow
 		return
 	}
 
-	// Create new snapshot
+	// Create new snapshots
 	// Note: Old snapshots remain valid - Hyperscan resources are cleaned up
 	// by Go's garbage collector via finalizers set by the gohs library.
-	r.snapshot = newPolicySnapshot(compiled, r.stats)
+	r.logSnapshot = newPolicySnapshot(result.Logs, r.stats)
+	r.metricSnapshot = newPolicySnapshot(result.Metrics, r.stats)
+	r.traceSnapshot = newPolicySnapshot(result.Traces, r.stats)
 
 	if r.onRecompile != nil {
-		r.onRecompile(r.snapshot)
+		r.onRecompile()
 	}
 }

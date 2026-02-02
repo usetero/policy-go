@@ -6,10 +6,9 @@ import (
 	"testing"
 
 	"github.com/usetero/policy-go"
-	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// BenchLogRecord implements policy.LogMatchable for benchmarking.
+// BenchLogRecord is a log record for benchmarking.
 type BenchLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
@@ -18,30 +17,32 @@ type BenchLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-func (r *BenchLogRecord) GetField(field policyv1.LogField) []byte {
-	switch field {
-	case policyv1.LogField_LOG_FIELD_BODY:
-		return r.Body
-	case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
-		return r.SeverityText
-	default:
-		return nil
+// BenchLogMatcher is the LogMatchFunc implementation for BenchLogRecord.
+func BenchLogMatcher(r *BenchLogRecord, ref policy.LogFieldRef) []byte {
+	if ref.IsField() {
+		switch ref.Field {
+		case policy.LogFieldBody:
+			return r.Body
+		case policy.LogFieldSeverityText:
+			return r.SeverityText
+		default:
+			return nil
+		}
 	}
-}
 
-func (r *BenchLogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+	// Attribute lookup
 	var attrs map[string]any
-	switch scope {
-	case policy.AttrScopeResource:
-		attrs = r.ResourceAttributes
-	case policy.AttrScopeScope:
-		attrs = r.ScopeAttributes
-	case policy.AttrScopeRecord:
+	switch {
+	case ref.IsRecordAttr():
 		attrs = r.LogAttributes
+	case ref.IsResourceAttr():
+		attrs = r.ResourceAttributes
+	case ref.IsScopeAttr():
+		attrs = r.ScopeAttributes
 	default:
 		return nil
 	}
-	return traversePath(attrs, path)
+	return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -70,7 +71,7 @@ func traversePath(m map[string]any, path []string) []byte {
 }
 
 // setupBenchmark creates a registry with policies loaded from testdata.
-func setupBenchmark(b *testing.B) (*policy.PolicyRegistry, *policy.PolicySnapshot, *policy.PolicyEngine) {
+func setupBenchmark(b *testing.B) (*policy.PolicyRegistry, *policy.PolicyEngine) {
 	b.Helper()
 
 	registry := policy.NewPolicyRegistry()
@@ -81,19 +82,14 @@ func setupBenchmark(b *testing.B) (*policy.PolicyRegistry, *policy.PolicySnapsho
 		b.Fatalf("Failed to register provider: %v", err)
 	}
 
-	snapshot := registry.Snapshot()
-	if snapshot == nil {
-		b.Fatal("Snapshot() returned nil")
-	}
+	engine := policy.NewPolicyEngine(registry)
 
-	engine := policy.NewPolicyEngine()
-
-	return registry, snapshot, engine
+	return registry, engine
 }
 
 // BenchmarkEvaluateNoMatch benchmarks evaluation when no policy matches.
 func BenchmarkEvaluateNoMatch(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	record := &BenchLogRecord{
 		Body:         []byte("normal application log message"),
@@ -104,13 +100,13 @@ func BenchmarkEvaluateNoMatch(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
 
 // BenchmarkEvaluateMatchBody benchmarks evaluation matching on body field.
 func BenchmarkEvaluateMatchBody(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	// Matches "drop-debug-logs" policy (body contains "debug" AND "trace")
 	record := &BenchLogRecord{
@@ -122,13 +118,13 @@ func BenchmarkEvaluateMatchBody(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
 
 // BenchmarkEvaluateMatchSeverity benchmarks evaluation matching on severity_text.
 func BenchmarkEvaluateMatchSeverity(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	// Matches "drop-debug-level" policy (severity_text = DEBUG)
 	record := &BenchLogRecord{
@@ -140,13 +136,13 @@ func BenchmarkEvaluateMatchSeverity(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
 
 // BenchmarkEvaluateMatchLogAttribute benchmarks evaluation matching on log attribute.
 func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	// Matches "drop-echo-logs" policy (ddsource = nginx)
 	record := &BenchLogRecord{
@@ -161,13 +157,13 @@ func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
 
 // BenchmarkEvaluateMatchResourceAttribute benchmarks evaluation matching on resource attribute.
 func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	// Matches "drop-edge-logs" policy (service.name ends with "edge")
 	record := &BenchLogRecord{
@@ -182,13 +178,13 @@ func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
 
 // BenchmarkEvaluateParallel benchmarks parallel evaluation.
 func BenchmarkEvaluateParallel(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	record := &BenchLogRecord{
 		Body:         []byte("this is a debug trace message"),
@@ -200,7 +196,7 @@ func BenchmarkEvaluateParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			engine.Evaluate(snapshot, record)
+			policy.EvaluateLog(engine, record, BenchLogMatcher)
 		}
 	})
 }
@@ -244,7 +240,7 @@ func BenchmarkLoadPolicies(b *testing.B) {
 
 // BenchmarkEvaluateMixedWorkload benchmarks a mixed workload of different log types.
 func BenchmarkEvaluateMixedWorkload(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	records := []*BenchLogRecord{
 		// No match
@@ -264,14 +260,15 @@ func BenchmarkEvaluateMixedWorkload(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for _, record := range records {
-			engine.Evaluate(snapshot, record)
+			policy.EvaluateLog(engine, record, BenchLogMatcher)
 		}
 	}
 }
 
 // BenchmarkSnapshotGetPolicy benchmarks snapshot policy lookup.
 func BenchmarkSnapshotGetPolicy(b *testing.B) {
-	_, snapshot, _ := setupBenchmark(b)
+	registry, _ := setupBenchmark(b)
+	snapshot := registry.Snapshot()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -283,7 +280,7 @@ func BenchmarkSnapshotGetPolicy(b *testing.B) {
 
 // BenchmarkStatsCollection benchmarks stats collection.
 func BenchmarkStatsCollection(b *testing.B) {
-	registry, snapshot, engine := setupBenchmark(b)
+	registry, engine := setupBenchmark(b)
 
 	// Generate some hits first
 	record := &BenchLogRecord{
@@ -291,7 +288,7 @@ func BenchmarkStatsCollection(b *testing.B) {
 		SeverityText: []byte("INFO"),
 	}
 	for i := 0; i < 1000; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 
 	b.ResetTimer()
@@ -304,7 +301,7 @@ func BenchmarkStatsCollection(b *testing.B) {
 
 // BenchmarkEvaluateLongBody benchmarks evaluation with a long body.
 func BenchmarkEvaluateLongBody(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	// Create a long body with the pattern at the end
 	longBody := make([]byte, 10000)
@@ -322,13 +319,13 @@ func BenchmarkEvaluateLongBody(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
 
 // BenchmarkEvaluateWithManyAttributes benchmarks evaluation with many attributes.
 func BenchmarkEvaluateWithManyAttributes(b *testing.B) {
-	_, snapshot, engine := setupBenchmark(b)
+	_, engine := setupBenchmark(b)
 
 	// Create a record with many attributes
 	logAttrs := make(map[string]any)
@@ -351,6 +348,6 @@ func BenchmarkEvaluateWithManyAttributes(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		engine.Evaluate(snapshot, record)
+		policy.EvaluateLog(engine, record, BenchLogMatcher)
 	}
 }
