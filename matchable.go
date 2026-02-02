@@ -1,9 +1,5 @@
 package policy
 
-import (
-	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
-)
-
 // SimpleLogRecord is a simple implementation for testing that works with LogMatchFunc.
 // Attribute maps support nested structures via map[string]any values.
 type SimpleLogRecord struct {
@@ -20,16 +16,16 @@ type SimpleLogRecord struct {
 // SimpleLogMatcher is a LogMatchFunc implementation for SimpleLogRecord.
 func SimpleLogMatcher(r *SimpleLogRecord, ref LogFieldRef) []byte {
 	if ref.IsField() {
-		switch ref.Field() {
-		case policyv1.LogField_LOG_FIELD_BODY:
+		switch ref.Field {
+		case LogFieldBody:
 			return r.Body
-		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+		case LogFieldSeverityText:
 			return r.SeverityText
-		case policyv1.LogField_LOG_FIELD_TRACE_ID:
+		case LogFieldTraceID:
 			return r.TraceID
-		case policyv1.LogField_LOG_FIELD_SPAN_ID:
+		case LogFieldSpanID:
 			return r.SpanID
-		case policyv1.LogField_LOG_FIELD_EVENT_NAME:
+		case LogFieldEventName:
 			return r.EventName
 		default:
 			return nil
@@ -48,7 +44,7 @@ func SimpleLogMatcher(r *SimpleLogRecord, ref LogFieldRef) []byte {
 	default:
 		return nil
 	}
-	return traversePath(attrs, ref.Path())
+	return traversePath(attrs, ref.AttrPath)
 }
 
 // traversePath navigates through nested maps following the path segments.

@@ -94,7 +94,7 @@ func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
 
 // ExistenceCheck represents a field existence check that can't be compiled to Hyperscan.
 type ExistenceCheck[T FieldType] struct {
-	Selector    FieldSelector[T]
+	Ref         FieldRef[T]
 	MustExist   bool
 	PolicyID    string
 	PolicyIndex int // Dense index for array-based tracking
@@ -107,7 +107,7 @@ type CompiledPolicy[T FieldType] struct {
 	Index        int // Dense index for array-based tracking (0 to N-1)
 	Keep         Keep
 	MatcherCount int
-	SampleKey    *FieldSelector[T] // Optional field to use for consistent sampling
+	SampleKey    *FieldRef[T] // Optional field to use for consistent sampling
 	Stats        *PolicyStats
 }
 
@@ -212,16 +212,16 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				return nil, fmt.Errorf("policy %s: %w", id, err)
 			}
 
-			var sampleKey *FieldSelector[LogField]
+			var sampleKey *LogFieldRef
 			if log.GetSampleKey() != nil {
-				sk := FieldSelectorFromLogSampleKey(log.GetSampleKey())
+				sk := FieldRefFromLogSampleKey(log.GetSampleKey())
 				sampleKey = &sk
 			}
 
 			for i, m := range log.GetMatch() {
-				selector := FieldSelectorFromLogMatcher(m)
+				ref := FieldRefFromLogMatcher(m)
 				pattern, isExistence, mustExist := extractMatchPattern(m)
-				logBuilder.addMatcher(selector, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+				logBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
 			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats)
@@ -238,9 +238,9 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 			}
 
 			for i, m := range metric.GetMatch() {
-				selector := FieldSelectorFromMetricMatcher(m)
+				ref := FieldRefFromMetricMatcher(m)
 				pattern, isExistence, mustExist := extractMetricMatchPattern(m)
-				metricBuilder.addMatcher(selector, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+				metricBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
 			metricBuilder.finalizePolicy(id, idx, keep, len(metric.GetMatch()), nil, policyStats)
@@ -257,9 +257,9 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 			}
 
 			for i, m := range trace.GetMatch() {
-				selector := FieldSelectorFromTraceMatcher(m)
+				ref := FieldRefFromTraceMatcher(m)
 				pattern, isExistence, mustExist := extractTraceMatchPattern(m)
-				traceBuilder.addMatcher(selector, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+				traceBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
 			traceBuilder.finalizePolicy(id, idx, keep, len(trace.GetMatch()), nil, policyStats)

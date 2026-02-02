@@ -15,18 +15,6 @@ type (
 	LogMatcher = policyv1.LogMatcher
 )
 
-// LogField constants.
-const (
-	LogFieldUnspecified       = policyv1.LogField_LOG_FIELD_UNSPECIFIED
-	LogFieldBody              = policyv1.LogField_LOG_FIELD_BODY
-	LogFieldSeverityText      = policyv1.LogField_LOG_FIELD_SEVERITY_TEXT
-	LogFieldTraceID           = policyv1.LogField_LOG_FIELD_TRACE_ID
-	LogFieldSpanID            = policyv1.LogField_LOG_FIELD_SPAN_ID
-	LogFieldEventName         = policyv1.LogField_LOG_FIELD_EVENT_NAME
-	LogFieldResourceSchemaURL = policyv1.LogField_LOG_FIELD_RESOURCE_SCHEMA_URL
-	LogFieldScopeSchemaURL    = policyv1.LogField_LOG_FIELD_SCOPE_SCHEMA_URL
-)
-
 // Re-export engine types.
 type (
 	KeepAction = engine.KeepAction

@@ -40,11 +40,11 @@ func (b *matchersBuilder[T]) reservePolicy(policyID string) int {
 	return idx
 }
 
-// addMatcher adds a matcher from the visitor to the builder.
-func (b *matchersBuilder[T]) addMatcher(selector FieldSelector[T], pattern string, isExistence bool, mustExist bool, negated bool, caseInsensitive bool, policyID string, policyIndex int, matcherIndex int) {
+// addMatcher adds a matcher to the builder.
+func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExistence bool, mustExist bool, negated bool, caseInsensitive bool, policyID string, policyIndex int, matcherIndex int) {
 	if isExistence {
 		b.existenceChecks = append(b.existenceChecks, ExistenceCheck[T]{
-			Selector:    selector,
+			Ref:         ref,
 			MustExist:   mustExist,
 			PolicyID:    policyID,
 			PolicyIndex: policyIndex,
@@ -58,7 +58,7 @@ func (b *matchersBuilder[T]) addMatcher(selector FieldSelector[T], pattern strin
 	}
 
 	key := MatchKey[T]{
-		Selector:        selector,
+		Ref:             ref,
 		Negated:         negated,
 		CaseInsensitive: caseInsensitive,
 	}
@@ -74,7 +74,7 @@ func (b *matchersBuilder[T]) addMatcher(selector FieldSelector[T], pattern strin
 }
 
 // finalizePolicy completes the policy with its keep action and other metadata.
-func (b *matchersBuilder[T]) finalizePolicy(policyID string, policyIndex int, keep Keep, matcherCount int, sampleKey *FieldSelector[T], stats *PolicyStats) {
+func (b *matchersBuilder[T]) finalizePolicy(policyID string, policyIndex int, keep Keep, matcherCount int, sampleKey *FieldRef[T], stats *PolicyStats) {
 	compiled := &CompiledPolicy[T]{
 		ID:           policyID,
 		Index:        policyIndex,
@@ -125,8 +125,8 @@ type matchKeyString string
 
 func makeMatchKeyString[T FieldType](k MatchKey[T]) matchKeyString {
 	var s strings.Builder
-	fmt.Fprintf(&s, "%d|%d|", k.Selector.Field, k.Selector.AttrScope)
-	for i, p := range k.Selector.AttrPath {
+	fmt.Fprintf(&s, "%d|%d|", k.Ref.Field, k.Ref.AttrScope)
+	for i, p := range k.Ref.AttrPath {
 		if i > 0 {
 			s.WriteString(".")
 		}

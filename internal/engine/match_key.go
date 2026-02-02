@@ -75,9 +75,11 @@ type FieldType interface {
 	LogField | MetricField | TraceField
 }
 
-// FieldSelector represents a field selector for a specific telemetry type.
+// FieldRef represents a reference to a field or attribute for a specific telemetry type.
 // It can represent either a specific field (by enum value) or an attribute lookup.
-type FieldSelector[T FieldType] struct {
+// This is the unified type used both internally for compilation and externally
+// by consumers implementing match functions.
+type FieldRef[T FieldType] struct {
 	// Field is the field enum value.
 	Field T
 	// AttrScope specifies where to look for the attribute.
@@ -87,10 +89,196 @@ type FieldSelector[T FieldType] struct {
 	AttrPath []string
 }
 
-// IsAttribute returns true if this selector is for an attribute lookup.
-func (s FieldSelector[T]) IsAttribute() bool {
-	return len(s.AttrPath) > 0
+// IsAttribute returns true if this is for an attribute lookup.
+func (r FieldRef[T]) IsAttribute() bool {
+	return len(r.AttrPath) > 0
 }
+
+// IsField returns true if this is a direct field reference (not an attribute).
+func (r FieldRef[T]) IsField() bool {
+	return !r.IsAttribute()
+}
+
+// IsResourceAttr returns true if this is a resource attribute reference.
+func (r FieldRef[T]) IsResourceAttr() bool {
+	return r.AttrScope == AttrScopeResource && len(r.AttrPath) > 0
+}
+
+// IsScopeAttr returns true if this is a scope attribute reference.
+func (r FieldRef[T]) IsScopeAttr() bool {
+	return r.AttrScope == AttrScopeScope && len(r.AttrPath) > 0
+}
+
+// IsRecordAttr returns true if this is a record-level attribute reference.
+func (r FieldRef[T]) IsRecordAttr() bool {
+	return r.AttrScope == AttrScopeRecord && len(r.AttrPath) > 0
+}
+
+// IsEventAttr returns true if this is an event attribute reference (traces only).
+func (r FieldRef[T]) IsEventAttr() bool {
+	return r.AttrScope == AttrScopeEvent && len(r.AttrPath) > 0
+}
+
+// Type aliases for convenience
+type LogFieldRef = FieldRef[LogField]
+type MetricFieldRef = FieldRef[MetricField]
+type TraceFieldRef = FieldRef[TraceField]
+
+// ============================================================================
+// LOG FIELD CONSTRUCTORS
+// ============================================================================
+
+// LogBody creates a reference to the log body field.
+func LogBody() LogFieldRef {
+	return LogFieldRef{Field: LogFieldBody}
+}
+
+// LogSeverityText creates a reference to the log severity text field.
+func LogSeverityText() LogFieldRef {
+	return LogFieldRef{Field: LogFieldSeverityText}
+}
+
+// LogTraceID creates a reference to the log trace ID field.
+func LogTraceID() LogFieldRef {
+	return LogFieldRef{Field: LogFieldTraceID}
+}
+
+// LogSpanID creates a reference to the log span ID field.
+func LogSpanID() LogFieldRef {
+	return LogFieldRef{Field: LogFieldSpanID}
+}
+
+// LogAttr creates a reference to a log record attribute.
+func LogAttr(path ...string) LogFieldRef {
+	return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: path}
+}
+
+// LogResourceAttr creates a reference to a resource attribute on a log record.
+func LogResourceAttr(path ...string) LogFieldRef {
+	return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: path}
+}
+
+// LogScopeAttr creates a reference to a scope attribute on a log record.
+func LogScopeAttr(path ...string) LogFieldRef {
+	return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: path}
+}
+
+// ============================================================================
+// METRIC FIELD CONSTRUCTORS
+// ============================================================================
+
+// MetricName creates a reference to the metric name field.
+func MetricName() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldName}
+}
+
+// MetricDescription creates a reference to the metric description field.
+func MetricDescription() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldDescription}
+}
+
+// MetricUnit creates a reference to the metric unit field.
+func MetricUnit() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldUnit}
+}
+
+// MetricType creates a reference to the metric type field.
+func MetricType() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldType}
+}
+
+// MetricAggregationTemporality creates a reference to the aggregation temporality field.
+func MetricAggregationTemporality() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldAggregationTemporality}
+}
+
+// DatapointAttr creates a reference to a datapoint attribute.
+func DatapointAttr(path ...string) MetricFieldRef {
+	return MetricFieldRef{AttrScope: AttrScopeRecord, AttrPath: path}
+}
+
+// MetricResourceAttr creates a reference to a resource attribute on a metric.
+func MetricResourceAttr(path ...string) MetricFieldRef {
+	return MetricFieldRef{AttrScope: AttrScopeResource, AttrPath: path}
+}
+
+// MetricScopeAttr creates a reference to a scope attribute on a metric.
+func MetricScopeAttr(path ...string) MetricFieldRef {
+	return MetricFieldRef{AttrScope: AttrScopeScope, AttrPath: path}
+}
+
+// ============================================================================
+// TRACE FIELD CONSTRUCTORS
+// ============================================================================
+
+// SpanName creates a reference to the span name field.
+func SpanName() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldName}
+}
+
+// SpanTraceID creates a reference to the span trace ID field.
+func SpanTraceID() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldTraceID}
+}
+
+// SpanSpanID creates a reference to the span ID field.
+func SpanSpanID() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldSpanID}
+}
+
+// SpanParentSpanID creates a reference to the parent span ID field.
+func SpanParentSpanID() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldParentSpanID}
+}
+
+// SpanTraceState creates a reference to the trace state field.
+func SpanTraceState() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldTraceState}
+}
+
+// SpanKind creates a reference to the span kind field.
+func SpanKind() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldKind}
+}
+
+// SpanStatus creates a reference to the span status field.
+func SpanStatus() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldStatus}
+}
+
+// SpanEventName creates a reference to span event names.
+func SpanEventName() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldEventName}
+}
+
+// SpanLinkTraceID creates a reference to span link trace IDs.
+func SpanLinkTraceID() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldLinkTraceID}
+}
+
+// SpanAttr creates a reference to a span attribute.
+func SpanAttr(path ...string) TraceFieldRef {
+	return TraceFieldRef{AttrScope: AttrScopeRecord, AttrPath: path}
+}
+
+// TraceResourceAttr creates a reference to a resource attribute on a span.
+func TraceResourceAttr(path ...string) TraceFieldRef {
+	return TraceFieldRef{AttrScope: AttrScopeResource, AttrPath: path}
+}
+
+// TraceScopeAttr creates a reference to a scope attribute on a span.
+func TraceScopeAttr(path ...string) TraceFieldRef {
+	return TraceFieldRef{AttrScope: AttrScopeScope, AttrPath: path}
+}
+
+// SpanEventAttr creates a reference to a span event attribute.
+func SpanEventAttr(path ...string) TraceFieldRef {
+	return TraceFieldRef{AttrScope: AttrScopeEvent, AttrPath: path}
+}
+
+// ============================================================================
+// PROTO CONVERSION (internal use)
+// ============================================================================
 
 // logFieldFromProto converts a proto LogField to our internal LogField.
 func logFieldFromProto(f policyv1.LogField) LogField {
@@ -156,88 +344,92 @@ func traceFieldFromProto(f policyv1.TraceField) TraceField {
 	}
 }
 
-// FieldSelectorFromLogMatcher extracts a FieldSelector from a proto LogMatcher.
-func FieldSelectorFromLogMatcher(m *policyv1.LogMatcher) FieldSelector[LogField] {
+// FieldRefFromLogMatcher extracts a FieldRef from a proto LogMatcher.
+func FieldRefFromLogMatcher(m *policyv1.LogMatcher) LogFieldRef {
 	switch f := m.GetField().(type) {
 	case *policyv1.LogMatcher_LogField:
-		return FieldSelector[LogField]{Field: logFieldFromProto(f.LogField)}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
 	case *policyv1.LogMatcher_LogAttribute:
-		return FieldSelector[LogField]{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
 	case *policyv1.LogMatcher_ResourceAttribute:
-		return FieldSelector[LogField]{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
 	case *policyv1.LogMatcher_ScopeAttribute:
-		return FieldSelector[LogField]{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
 	default:
-		return FieldSelector[LogField]{}
+		return LogFieldRef{}
 	}
 }
 
-// FieldSelectorFromLogSampleKey extracts a FieldSelector from a proto LogSampleKey.
-func FieldSelectorFromLogSampleKey(sk *policyv1.LogSampleKey) FieldSelector[LogField] {
+// FieldRefFromLogSampleKey extracts a FieldRef from a proto LogSampleKey.
+func FieldRefFromLogSampleKey(sk *policyv1.LogSampleKey) LogFieldRef {
 	switch f := sk.GetField().(type) {
 	case *policyv1.LogSampleKey_LogField:
-		return FieldSelector[LogField]{Field: logFieldFromProto(f.LogField)}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
 	case *policyv1.LogSampleKey_LogAttribute:
-		return FieldSelector[LogField]{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
 	case *policyv1.LogSampleKey_ResourceAttribute:
-		return FieldSelector[LogField]{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
 	case *policyv1.LogSampleKey_ScopeAttribute:
-		return FieldSelector[LogField]{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
 	default:
-		return FieldSelector[LogField]{}
+		return LogFieldRef{}
 	}
 }
 
-// FieldSelectorFromMetricMatcher extracts a FieldSelector from a proto MetricMatcher.
-func FieldSelectorFromMetricMatcher(m *policyv1.MetricMatcher) FieldSelector[MetricField] {
+// FieldRefFromMetricMatcher extracts a FieldRef from a proto MetricMatcher.
+func FieldRefFromMetricMatcher(m *policyv1.MetricMatcher) MetricFieldRef {
 	switch f := m.GetField().(type) {
 	case *policyv1.MetricMatcher_MetricField:
-		return FieldSelector[MetricField]{Field: metricFieldFromProto(f.MetricField)}
+		return MetricFieldRef{Field: metricFieldFromProto(f.MetricField)}
 	case *policyv1.MetricMatcher_DatapointAttribute:
-		return FieldSelector[MetricField]{AttrScope: AttrScopeRecord, AttrPath: f.DatapointAttribute.GetPath()}
+		return MetricFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.DatapointAttribute.GetPath()}
 	case *policyv1.MetricMatcher_ResourceAttribute:
-		return FieldSelector[MetricField]{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		return MetricFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
 	case *policyv1.MetricMatcher_ScopeAttribute:
-		return FieldSelector[MetricField]{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		return MetricFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
 	case *policyv1.MetricMatcher_MetricType:
-		return FieldSelector[MetricField]{Field: MetricFieldType}
+		return MetricFieldRef{Field: MetricFieldType}
 	case *policyv1.MetricMatcher_AggregationTemporality:
-		return FieldSelector[MetricField]{Field: MetricFieldAggregationTemporality}
+		return MetricFieldRef{Field: MetricFieldAggregationTemporality}
 	default:
-		return FieldSelector[MetricField]{}
+		return MetricFieldRef{}
 	}
 }
 
-// FieldSelectorFromTraceMatcher extracts a FieldSelector from a proto TraceMatcher.
-func FieldSelectorFromTraceMatcher(m *policyv1.TraceMatcher) FieldSelector[TraceField] {
+// FieldRefFromTraceMatcher extracts a FieldRef from a proto TraceMatcher.
+func FieldRefFromTraceMatcher(m *policyv1.TraceMatcher) TraceFieldRef {
 	switch f := m.GetField().(type) {
 	case *policyv1.TraceMatcher_TraceField:
-		return FieldSelector[TraceField]{Field: traceFieldFromProto(f.TraceField)}
+		return TraceFieldRef{Field: traceFieldFromProto(f.TraceField)}
 	case *policyv1.TraceMatcher_SpanAttribute:
-		return FieldSelector[TraceField]{AttrScope: AttrScopeRecord, AttrPath: f.SpanAttribute.GetPath()}
+		return TraceFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.SpanAttribute.GetPath()}
 	case *policyv1.TraceMatcher_ResourceAttribute:
-		return FieldSelector[TraceField]{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		return TraceFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
 	case *policyv1.TraceMatcher_ScopeAttribute:
-		return FieldSelector[TraceField]{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		return TraceFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
 	case *policyv1.TraceMatcher_EventName:
-		return FieldSelector[TraceField]{Field: TraceFieldEventName}
+		return TraceFieldRef{Field: TraceFieldEventName}
 	case *policyv1.TraceMatcher_EventAttribute:
-		return FieldSelector[TraceField]{AttrScope: AttrScopeEvent, AttrPath: f.EventAttribute.GetPath()}
+		return TraceFieldRef{AttrScope: AttrScopeEvent, AttrPath: f.EventAttribute.GetPath()}
 	case *policyv1.TraceMatcher_LinkTraceId:
-		return FieldSelector[TraceField]{Field: TraceFieldLinkTraceID}
+		return TraceFieldRef{Field: TraceFieldLinkTraceID}
 	case *policyv1.TraceMatcher_SpanKind:
-		return FieldSelector[TraceField]{Field: TraceFieldKind}
+		return TraceFieldRef{Field: TraceFieldKind}
 	case *policyv1.TraceMatcher_SpanStatus:
-		return FieldSelector[TraceField]{Field: TraceFieldStatus}
+		return TraceFieldRef{Field: TraceFieldStatus}
 	default:
-		return FieldSelector[TraceField]{}
+		return TraceFieldRef{}
 	}
 }
 
-// MatchKey identifies a group of patterns that share the same field selector, negation, and case sensitivity.
+// ============================================================================
+// MATCH KEY (internal use for compilation)
+// ============================================================================
+
+// MatchKey identifies a group of patterns that share the same field ref, negation, and case sensitivity.
 // Patterns are grouped by MatchKey for efficient Hyperscan compilation.
 type MatchKey[T FieldType] struct {
-	Selector        FieldSelector[T]
+	Ref             FieldRef[T]
 	Negated         bool
 	CaseInsensitive bool
 }

@@ -1,348 +1,178 @@
 package policy
 
 import (
-	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
+	"github.com/usetero/policy-go/internal/engine"
 )
 
-// ============================================================================
-// LOG FIELD REFERENCES
-// ============================================================================
+// Re-export field types from engine package for public use.
+type (
+	// AttrScope identifies the scope for attribute lookups.
+	AttrScope = engine.AttrScope
 
-// logFieldRefKind identifies the type of log field reference.
-type logFieldRefKind int
+	// LogField represents a log-specific field.
+	LogField = engine.LogField
 
+	// MetricField represents a metric-specific field.
+	MetricField = engine.MetricField
+
+	// TraceField represents a trace/span-specific field.
+	TraceField = engine.TraceField
+
+	// FieldRef represents a reference to a field or attribute.
+	// Use the constructor functions to create references.
+	FieldRef[T engine.FieldType] = engine.FieldRef[T]
+
+	// LogFieldRef is a field reference for log records.
+	LogFieldRef = engine.LogFieldRef
+
+	// MetricFieldRef is a field reference for metrics.
+	MetricFieldRef = engine.MetricFieldRef
+
+	// TraceFieldRef is a field reference for traces/spans.
+	TraceFieldRef = engine.TraceFieldRef
+)
+
+// Re-export AttrScope constants.
 const (
-	logFieldRefField logFieldRefKind = iota
-	logFieldRefRecordAttr
-	logFieldRefResourceAttr
-	logFieldRefScopeAttr
+	AttrScopeResource = engine.AttrScopeResource
+	AttrScopeScope    = engine.AttrScopeScope
+	AttrScopeRecord   = engine.AttrScopeRecord
+	AttrScopeEvent    = engine.AttrScopeEvent
 )
 
-// LogFieldRef represents a reference to a field or attribute in a log record.
-// Use the constructor functions (LogField, LogAttr, LogResourceAttr, LogScopeAttr)
-// to create valid references.
-type LogFieldRef struct {
-	kind     logFieldRefKind
-	field    policyv1.LogField
-	attrPath []string
-}
+// Re-export LogField constants.
+const (
+	LogFieldBody              = engine.LogFieldBody
+	LogFieldSeverityText      = engine.LogFieldSeverityText
+	LogFieldTraceID           = engine.LogFieldTraceID
+	LogFieldSpanID            = engine.LogFieldSpanID
+	LogFieldEventName         = engine.LogFieldEventName
+	LogFieldResourceSchemaURL = engine.LogFieldResourceSchemaURL
+	LogFieldScopeSchemaURL    = engine.LogFieldScopeSchemaURL
+)
 
-// LogField creates a reference to a log field (body, severity_text, trace_id, etc.)
-func LogField(f policyv1.LogField) LogFieldRef {
-	return LogFieldRef{kind: logFieldRefField, field: f}
-}
+// Re-export MetricField constants.
+const (
+	MetricFieldName                   = engine.MetricFieldName
+	MetricFieldDescription            = engine.MetricFieldDescription
+	MetricFieldUnit                   = engine.MetricFieldUnit
+	MetricFieldResourceSchemaURL      = engine.MetricFieldResourceSchemaURL
+	MetricFieldScopeSchemaURL         = engine.MetricFieldScopeSchemaURL
+	MetricFieldScopeName              = engine.MetricFieldScopeName
+	MetricFieldScopeVersion           = engine.MetricFieldScopeVersion
+	MetricFieldType                   = engine.MetricFieldType
+	MetricFieldAggregationTemporality = engine.MetricFieldAggregationTemporality
+)
+
+// Re-export TraceField constants.
+const (
+	TraceFieldName              = engine.TraceFieldName
+	TraceFieldTraceID           = engine.TraceFieldTraceID
+	TraceFieldSpanID            = engine.TraceFieldSpanID
+	TraceFieldParentSpanID      = engine.TraceFieldParentSpanID
+	TraceFieldTraceState        = engine.TraceFieldTraceState
+	TraceFieldResourceSchemaURL = engine.TraceFieldResourceSchemaURL
+	TraceFieldKind              = engine.TraceFieldKind
+	TraceFieldStatus            = engine.TraceFieldStatus
+	TraceFieldEventName         = engine.TraceFieldEventName
+	TraceFieldLinkTraceID       = engine.TraceFieldLinkTraceID
+)
+
+// ============================================================================
+// LOG FIELD CONSTRUCTORS
+// ============================================================================
+
+// LogBody creates a reference to the log body field.
+var LogBody = engine.LogBody
+
+// LogSeverityText creates a reference to the log severity text field.
+var LogSeverityText = engine.LogSeverityText
+
+// LogTraceID creates a reference to the log trace ID field.
+var LogTraceID = engine.LogTraceID
+
+// LogSpanID creates a reference to the log span ID field.
+var LogSpanID = engine.LogSpanID
 
 // LogAttr creates a reference to a log record attribute.
-func LogAttr(path ...string) LogFieldRef {
-	return LogFieldRef{kind: logFieldRefRecordAttr, attrPath: path}
-}
+var LogAttr = engine.LogAttr
 
 // LogResourceAttr creates a reference to a resource attribute on a log record.
-func LogResourceAttr(path ...string) LogFieldRef {
-	return LogFieldRef{kind: logFieldRefResourceAttr, attrPath: path}
-}
+var LogResourceAttr = engine.LogResourceAttr
 
 // LogScopeAttr creates a reference to a scope attribute on a log record.
-func LogScopeAttr(path ...string) LogFieldRef {
-	return LogFieldRef{kind: logFieldRefScopeAttr, attrPath: path}
-}
-
-// IsField returns true if this is a direct field reference (not an attribute).
-func (r LogFieldRef) IsField() bool {
-	return r.kind == logFieldRefField
-}
-
-// IsAttr returns true if this is an attribute reference.
-func (r LogFieldRef) IsAttr() bool {
-	return r.kind != logFieldRefField
-}
-
-// Field returns the log field enum value. Only valid when IsField() is true.
-func (r LogFieldRef) Field() policyv1.LogField {
-	return r.field
-}
-
-// Path returns the attribute path. Only valid when IsAttr() is true.
-func (r LogFieldRef) Path() []string {
-	return r.attrPath
-}
-
-// IsRecordAttr returns true if this is a log record attribute reference.
-func (r LogFieldRef) IsRecordAttr() bool {
-	return r.kind == logFieldRefRecordAttr
-}
-
-// IsResourceAttr returns true if this is a resource attribute reference.
-func (r LogFieldRef) IsResourceAttr() bool {
-	return r.kind == logFieldRefResourceAttr
-}
-
-// IsScopeAttr returns true if this is a scope attribute reference.
-func (r LogFieldRef) IsScopeAttr() bool {
-	return r.kind == logFieldRefScopeAttr
-}
+var LogScopeAttr = engine.LogScopeAttr
 
 // ============================================================================
-// METRIC FIELD REFERENCES
+// METRIC FIELD CONSTRUCTORS
 // ============================================================================
 
-// metricFieldRefKind identifies the type of metric field reference.
-type metricFieldRefKind int
+// MetricName creates a reference to the metric name field.
+var MetricName = engine.MetricName
 
-const (
-	metricFieldRefField metricFieldRefKind = iota
-	metricFieldRefDatapointAttr
-	metricFieldRefResourceAttr
-	metricFieldRefScopeAttr
-	metricFieldRefMetricType
-	metricFieldRefAggTemporality
-)
+// MetricDescription creates a reference to the metric description field.
+var MetricDescription = engine.MetricDescription
 
-// MetricFieldRef represents a reference to a field or attribute in a metric.
-// Use the constructor functions to create valid references.
-type MetricFieldRef struct {
-	kind     metricFieldRefKind
-	field    policyv1.MetricField
-	attrPath []string
-	// Special fields for metric-specific matchers
-	metricType policyv1.MetricType
-	aggTemp    policyv1.AggregationTemporality
-}
+// MetricUnit creates a reference to the metric unit field.
+var MetricUnit = engine.MetricUnit
 
-// MetricField creates a reference to a metric field (name, description, unit, etc.)
-func MetricField(f policyv1.MetricField) MetricFieldRef {
-	return MetricFieldRef{kind: metricFieldRefField, field: f}
-}
+// MetricType creates a reference to the metric type field.
+var MetricType = engine.MetricType
+
+// MetricAggregationTemporality creates a reference to the aggregation temporality field.
+var MetricAggregationTemporality = engine.MetricAggregationTemporality
 
 // DatapointAttr creates a reference to a datapoint attribute.
-func DatapointAttr(path ...string) MetricFieldRef {
-	return MetricFieldRef{kind: metricFieldRefDatapointAttr, attrPath: path}
-}
+var DatapointAttr = engine.DatapointAttr
 
 // MetricResourceAttr creates a reference to a resource attribute on a metric.
-func MetricResourceAttr(path ...string) MetricFieldRef {
-	return MetricFieldRef{kind: metricFieldRefResourceAttr, attrPath: path}
-}
+var MetricResourceAttr = engine.MetricResourceAttr
 
 // MetricScopeAttr creates a reference to a scope attribute on a metric.
-func MetricScopeAttr(path ...string) MetricFieldRef {
-	return MetricFieldRef{kind: metricFieldRefScopeAttr, attrPath: path}
-}
-
-// MetricTypeRef creates a reference to match on metric type (gauge, sum, histogram, etc.)
-func MetricTypeRef(t policyv1.MetricType) MetricFieldRef {
-	return MetricFieldRef{kind: metricFieldRefMetricType, metricType: t}
-}
-
-// AggTemporalityRef creates a reference to match on aggregation temporality.
-func AggTemporalityRef(t policyv1.AggregationTemporality) MetricFieldRef {
-	return MetricFieldRef{kind: metricFieldRefAggTemporality, aggTemp: t}
-}
-
-// IsField returns true if this is a direct field reference (not an attribute or special field).
-func (r MetricFieldRef) IsField() bool {
-	return r.kind == metricFieldRefField
-}
-
-// IsAttr returns true if this is an attribute reference.
-func (r MetricFieldRef) IsAttr() bool {
-	return r.kind == metricFieldRefDatapointAttr ||
-		r.kind == metricFieldRefResourceAttr ||
-		r.kind == metricFieldRefScopeAttr
-}
-
-// Field returns the metric field enum value. Only valid when IsField() is true.
-func (r MetricFieldRef) Field() policyv1.MetricField {
-	return r.field
-}
-
-// Path returns the attribute path. Only valid when IsAttr() is true.
-func (r MetricFieldRef) Path() []string {
-	return r.attrPath
-}
-
-// IsDatapointAttr returns true if this is a datapoint attribute reference.
-func (r MetricFieldRef) IsDatapointAttr() bool {
-	return r.kind == metricFieldRefDatapointAttr
-}
-
-// IsResourceAttr returns true if this is a resource attribute reference.
-func (r MetricFieldRef) IsResourceAttr() bool {
-	return r.kind == metricFieldRefResourceAttr
-}
-
-// IsScopeAttr returns true if this is a scope attribute reference.
-func (r MetricFieldRef) IsScopeAttr() bool {
-	return r.kind == metricFieldRefScopeAttr
-}
-
-// IsMetricType returns true if this is a metric type reference.
-func (r MetricFieldRef) IsMetricType() bool {
-	return r.kind == metricFieldRefMetricType
-}
-
-// MetricType returns the metric type. Only valid when IsMetricType() is true.
-func (r MetricFieldRef) MetricType() policyv1.MetricType {
-	return r.metricType
-}
-
-// IsAggTemporality returns true if this is an aggregation temporality reference.
-func (r MetricFieldRef) IsAggTemporality() bool {
-	return r.kind == metricFieldRefAggTemporality
-}
-
-// AggTemporality returns the aggregation temporality. Only valid when IsAggTemporality() is true.
-func (r MetricFieldRef) AggTemporality() policyv1.AggregationTemporality {
-	return r.aggTemp
-}
+var MetricScopeAttr = engine.MetricScopeAttr
 
 // ============================================================================
-// TRACE FIELD REFERENCES
+// TRACE FIELD CONSTRUCTORS
 // ============================================================================
 
-// traceFieldRefKind identifies the type of trace field reference.
-type traceFieldRefKind int
+// SpanName creates a reference to the span name field.
+var SpanName = engine.SpanName
 
-const (
-	traceFieldRefField traceFieldRefKind = iota
-	traceFieldRefSpanAttr
-	traceFieldRefResourceAttr
-	traceFieldRefScopeAttr
-	traceFieldRefEventName
-	traceFieldRefEventAttr
-	traceFieldRefLinkTraceID
-	traceFieldRefSpanKind
-	traceFieldRefSpanStatus
-)
+// SpanTraceID creates a reference to the span trace ID field.
+var SpanTraceID = engine.SpanTraceID
 
-// TraceFieldRef represents a reference to a field or attribute in a span.
-// Use the constructor functions to create valid references.
-type TraceFieldRef struct {
-	kind     traceFieldRefKind
-	field    policyv1.TraceField
-	attrPath []string
-	// Special fields for trace-specific matchers
-	spanKind   policyv1.SpanKind
-	spanStatus policyv1.SpanStatusCode
-}
+// SpanSpanID creates a reference to the span ID field.
+var SpanSpanID = engine.SpanSpanID
 
-// TraceField creates a reference to a trace field (name, trace_id, span_id, etc.)
-func TraceField(f policyv1.TraceField) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefField, field: f}
-}
+// SpanParentSpanID creates a reference to the parent span ID field.
+var SpanParentSpanID = engine.SpanParentSpanID
+
+// SpanTraceState creates a reference to the trace state field.
+var SpanTraceState = engine.SpanTraceState
+
+// SpanKind creates a reference to the span kind field.
+var SpanKind = engine.SpanKind
+
+// SpanStatus creates a reference to the span status field.
+var SpanStatus = engine.SpanStatus
+
+// SpanEventName creates a reference to span event names.
+var SpanEventName = engine.SpanEventName
+
+// SpanLinkTraceID creates a reference to span link trace IDs.
+var SpanLinkTraceID = engine.SpanLinkTraceID
 
 // SpanAttr creates a reference to a span attribute.
-func SpanAttr(path ...string) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefSpanAttr, attrPath: path}
-}
+var SpanAttr = engine.SpanAttr
 
 // TraceResourceAttr creates a reference to a resource attribute on a span.
-func TraceResourceAttr(path ...string) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefResourceAttr, attrPath: path}
-}
+var TraceResourceAttr = engine.TraceResourceAttr
 
 // TraceScopeAttr creates a reference to a scope attribute on a span.
-func TraceScopeAttr(path ...string) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefScopeAttr, attrPath: path}
-}
+var TraceScopeAttr = engine.TraceScopeAttr
 
-// EventName creates a reference to a span event name.
-func EventName() TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefEventName}
-}
-
-// EventAttr creates a reference to a span event attribute.
-func EventAttr(path ...string) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefEventAttr, attrPath: path}
-}
-
-// LinkTraceID creates a reference to a span link's trace ID.
-func LinkTraceID() TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefLinkTraceID}
-}
-
-// SpanKindRef creates a reference to match on span kind.
-func SpanKindRef(k policyv1.SpanKind) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefSpanKind, spanKind: k}
-}
-
-// SpanStatusRef creates a reference to match on span status code.
-func SpanStatusRef(s policyv1.SpanStatusCode) TraceFieldRef {
-	return TraceFieldRef{kind: traceFieldRefSpanStatus, spanStatus: s}
-}
-
-// IsField returns true if this is a direct field reference (not an attribute or special field).
-func (r TraceFieldRef) IsField() bool {
-	return r.kind == traceFieldRefField
-}
-
-// IsAttr returns true if this is an attribute reference.
-func (r TraceFieldRef) IsAttr() bool {
-	return r.kind == traceFieldRefSpanAttr ||
-		r.kind == traceFieldRefResourceAttr ||
-		r.kind == traceFieldRefScopeAttr ||
-		r.kind == traceFieldRefEventAttr
-}
-
-// Field returns the trace field enum value. Only valid when IsField() is true.
-func (r TraceFieldRef) Field() policyv1.TraceField {
-	return r.field
-}
-
-// Path returns the attribute path. Only valid when IsAttr() is true.
-func (r TraceFieldRef) Path() []string {
-	return r.attrPath
-}
-
-// IsSpanAttr returns true if this is a span attribute reference.
-func (r TraceFieldRef) IsSpanAttr() bool {
-	return r.kind == traceFieldRefSpanAttr
-}
-
-// IsResourceAttr returns true if this is a resource attribute reference.
-func (r TraceFieldRef) IsResourceAttr() bool {
-	return r.kind == traceFieldRefResourceAttr
-}
-
-// IsScopeAttr returns true if this is a scope attribute reference.
-func (r TraceFieldRef) IsScopeAttr() bool {
-	return r.kind == traceFieldRefScopeAttr
-}
-
-// IsEventName returns true if this is a span event name reference.
-func (r TraceFieldRef) IsEventName() bool {
-	return r.kind == traceFieldRefEventName
-}
-
-// IsEventAttr returns true if this is a span event attribute reference.
-func (r TraceFieldRef) IsEventAttr() bool {
-	return r.kind == traceFieldRefEventAttr
-}
-
-// IsLinkTraceID returns true if this is a span link trace ID reference.
-func (r TraceFieldRef) IsLinkTraceID() bool {
-	return r.kind == traceFieldRefLinkTraceID
-}
-
-// IsSpanKind returns true if this is a span kind reference.
-func (r TraceFieldRef) IsSpanKind() bool {
-	return r.kind == traceFieldRefSpanKind
-}
-
-// SpanKind returns the span kind. Only valid when IsSpanKind() is true.
-func (r TraceFieldRef) SpanKind() policyv1.SpanKind {
-	return r.spanKind
-}
-
-// IsSpanStatus returns true if this is a span status reference.
-func (r TraceFieldRef) IsSpanStatus() bool {
-	return r.kind == traceFieldRefSpanStatus
-}
-
-// SpanStatus returns the span status code. Only valid when IsSpanStatus() is true.
-func (r TraceFieldRef) SpanStatus() policyv1.SpanStatusCode {
-	return r.spanStatus
-}
+// SpanEventAttr creates a reference to a span event attribute.
+var SpanEventAttr = engine.SpanEventAttr
 
 // ============================================================================
 // MATCH FUNCTIONS

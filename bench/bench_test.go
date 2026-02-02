@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/usetero/policy-go"
-	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // BenchLogRecord is a log record for benchmarking.
@@ -21,10 +20,10 @@ type BenchLogRecord struct {
 // BenchLogMatcher is the LogMatchFunc implementation for BenchLogRecord.
 func BenchLogMatcher(r *BenchLogRecord, ref policy.LogFieldRef) []byte {
 	if ref.IsField() {
-		switch ref.Field() {
-		case policyv1.LogField_LOG_FIELD_BODY:
+		switch ref.Field {
+		case policy.LogFieldBody:
 			return r.Body
-		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+		case policy.LogFieldSeverityText:
 			return r.SeverityText
 		default:
 			return nil
@@ -43,7 +42,7 @@ func BenchLogMatcher(r *BenchLogRecord, ref policy.LogFieldRef) []byte {
 	default:
 		return nil
 	}
-	return traversePath(attrs, ref.Path())
+	return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {

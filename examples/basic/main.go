@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"github.com/usetero/policy-go"
-	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // ExampleLogRecord is a simple log record for demonstration.
@@ -20,10 +19,10 @@ type ExampleLogRecord struct {
 // ExampleLogMatcher is the LogMatchFunc implementation for ExampleLogRecord.
 func ExampleLogMatcher(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
 	if ref.IsField() {
-		switch ref.Field() {
-		case policyv1.LogField_LOG_FIELD_BODY:
+		switch ref.Field {
+		case policy.LogFieldBody:
 			return r.Body
-		case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
+		case policy.LogFieldSeverityText:
 			return r.SeverityText
 		default:
 			return nil
@@ -42,7 +41,7 @@ func ExampleLogMatcher(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
 	default:
 		return nil
 	}
-	return traversePath(attrs, ref.Path())
+	return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {
