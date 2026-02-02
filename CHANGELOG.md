@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/usetero/policy-go/compare/v1.1.0...v1.2.0) (2026-02-02)
+
+
+### Features
+
+* add span and metric support to policy go ([#13](https://github.com/usetero/policy-go/issues/13)) ([4f71f1f](https://github.com/usetero/policy-go/commit/4f71f1f139abee4de06d95d8b0afb3a9a80ab4f1))
+
 ## [1.1.0](https://github.com/usetero/policy-go/compare/v1.0.2...v1.1.0) (2026-01-30)
 
 
