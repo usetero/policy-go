@@ -8,12 +8,16 @@ matching and designed for hot-reload support.
 
 - **High-Performance Matching**: Uses Intel Hyperscan for vectorized regex
   evaluation
+- **Multi-Telemetry Support**: Evaluate logs, metrics, and traces with type-safe
+  APIs
 - **Hot Reload**: File-based policy providers support automatic reloading on
   change
 - **Thread-Safe**: Immutable snapshots for concurrent evaluation
 - **Extensible**: Provider interface for custom policy sources (file, HTTP,
   gRPC)
 - **Statistics**: Per-policy hit/drop/sample counters with atomic operations
+- **Rate Limiting**: Lock-free per-policy rate limiting with configurable
+  windows
 - **AND Semantics**: Multiple matchers in a policy are AND'd together
 
 ## Installation
@@ -50,10 +54,9 @@ import (
     "time"
 
     "github.com/usetero/policy-go"
-    policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
-// Implement the LogMatchable interface for your log records
+// Define your log record type
 type LogRecord struct {
     Body               []byte
     SeverityText       []byte
@@ -62,31 +65,33 @@ type LogRecord struct {
     ResourceAttributes map[string]any
 }
 
-func (r *LogRecord) GetField(field policyv1.LogField) []byte {
-    switch field {
-    case policyv1.LogField_LOG_FIELD_BODY:
-        return r.Body
-    case policyv1.LogField_LOG_FIELD_SEVERITY_TEXT:
-        return r.SeverityText
-    case policyv1.LogField_LOG_FIELD_TRACE_ID:
-        return r.TraceID
-    default:
-        return nil
+// Implement a match function to extract field values
+func matchLog(r *LogRecord, ref policy.LogFieldRef) []byte {
+    // Handle field lookups
+    if ref.IsField() {
+        switch ref.Field {
+        case policy.LogFieldBody:
+            return r.Body
+        case policy.LogFieldSeverityText:
+            return r.SeverityText
+        case policy.LogFieldTraceID:
+            return r.TraceID
+        default:
+            return nil
+        }
     }
-}
 
-func (r *LogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
+    // Handle attribute lookups
     var attrs map[string]any
-    switch scope {
-    case policy.AttrScopeResource:
+    switch {
+    case ref.IsResourceAttr():
         attrs = r.ResourceAttributes
-    case policy.AttrScopeRecord:
+    case ref.IsRecordAttr():
         attrs = r.LogAttributes
     default:
         return nil
     }
-    // Traverse the path for nested attribute access
-    return traversePath(attrs, path)
+    return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -98,11 +103,11 @@ func traversePath(m map[string]any, path []string) []byte {
         return nil
     }
     if len(path) == 1 {
-        if s, ok := val.(string); ok {
-            return []byte(s)
-        }
-        if b, ok := val.([]byte); ok {
-            return b
+        switch v := val.(type) {
+        case string:
+            return []byte(v)
+        case []byte:
+            return v
         }
         return nil
     }
@@ -132,11 +137,8 @@ func main() {
     }
     defer handle.Unregister()
 
-    // Get a snapshot for evaluation
-    snapshot := registry.Snapshot()
-
     // Create an engine
-    engine := policy.NewPolicyEngine()
+    engine := policy.NewPolicyEngine(registry)
 
     // Evaluate a log record
     record := &LogRecord{
@@ -149,7 +151,7 @@ func main() {
         },
     }
 
-    result := engine.Evaluate(snapshot, record)
+    result := policy.EvaluateLog(engine, record, matchLog)
     fmt.Printf("Result: %s\n", result) // "drop" if matched by policy
 }
 ```
@@ -169,98 +171,113 @@ registry := policy.NewPolicyRegistry()
 handle, _ := registry.Register(fileProvider)
 handle, _ := registry.Register(httpProvider)
 
-// Get snapshot for evaluation (thread-safe, immutable)
-snapshot := registry.Snapshot()
-
 // Collect stats
 stats := registry.CollectStats()
 ```
 
-### PolicySnapshot
-
-Snapshots are immutable, read-only views of compiled policies. They're safe for
-concurrent use across goroutines. The registry manages snapshot lifecycle
-automatically.
-
-```go
-snapshot := registry.Snapshot()
-
-// Safe to use from multiple goroutines
-go func() {
-    // snapshot is immutable and safe to share
-    result := engine.Evaluate(snapshot, record)
-}()
-```
-
 ### PolicyEngine
 
-The engine evaluates records against a snapshot. It's designed to minimize
-allocations in the hot path.
+The engine evaluates telemetry against compiled policies. It holds a reference
+to the registry and automatically uses the latest snapshot for each evaluation.
 
 ```go
-engine := policy.NewPolicyEngine()
+engine := policy.NewPolicyEngine(registry)
 
-result := engine.Evaluate(snapshot, record)
+// Evaluate logs
+result := policy.EvaluateLog(engine, logRecord, matchLogFunc)
+
+// Evaluate metrics
+result := policy.EvaluateMetric(engine, metricRecord, matchMetricFunc)
+
+// Evaluate traces/spans
+result := policy.EvaluateTrace(engine, spanRecord, matchTraceFunc)
+
 switch result {
 case policy.ResultNoMatch:
     // No policy matched - pass through
 case policy.ResultKeep:
-    // Matched a keep policy
+    // Matched a keep policy (or under rate limit)
 case policy.ResultDrop:
-    // Matched a drop policy
+    // Matched a drop policy (or over rate limit)
 case policy.ResultSample:
-    // Sampled (kept or dropped based on percentage)
+    // Sampled (for metrics without sample key)
 }
 ```
 
-### Matchable Interface
+### Match Functions
 
-Implement the `Matchable` interface for your telemetry types:
+Instead of implementing an interface, you provide a match function that extracts
+field values from your telemetry types. This allows maximum flexibility in how
+you represent your data.
 
 ```go
-type Matchable[F FieldEnum] interface {
-    // GetField returns the value of the specified field.
-    // Returns nil if the field doesn't exist.
-    GetField(field F) []byte
+// LogMatchFunc extracts values from log records
+type LogMatchFunc[T any] func(record T, ref LogFieldRef) []byte
 
-    // GetAttribute returns the value of an attribute at the specified scope and path.
-    // Path is a slice of strings representing nested access (e.g., ["http", "method"]).
-    // Returns nil if the attribute doesn't exist.
-    GetAttribute(scope AttrScope, path []string) []byte
-}
+// MetricMatchFunc extracts values from metrics
+type MetricMatchFunc[T any] func(record T, ref MetricFieldRef) []byte
+
+// TraceMatchFunc extracts values from spans
+type TraceMatchFunc[T any] func(record T, ref TraceFieldRef) []byte
 ```
 
-For logs, use `LogMatchable` (alias for `Matchable[policyv1.LogField]`):
+Example match function for logs:
 
 ```go
-type LogRecord struct {
-    Body          []byte
-    LogAttributes map[string]any
-}
+func matchLog(r *MyLogRecord, ref policy.LogFieldRef) []byte {
+    // Handle field lookups
+    if ref.IsField() {
+        switch ref.Field {
+        case policy.LogFieldBody:
+            return r.Body
+        case policy.LogFieldSeverityText:
+            return r.SeverityText
+        default:
+            return nil
+        }
+    }
 
-func (r *LogRecord) GetField(field policyv1.LogField) []byte {
-    switch field {
-    case policyv1.LogField_LOG_FIELD_BODY:
-        return r.Body
+    // Handle attribute lookups
+    var attrs map[string]any
+    switch {
+    case ref.IsResourceAttr():
+        attrs = r.ResourceAttributes
+    case ref.IsRecordAttr():
+        attrs = r.LogAttributes
+    case ref.IsScopeAttr():
+        attrs = r.ScopeAttributes
     default:
         return nil
     }
-}
-
-func (r *LogRecord) GetAttribute(scope policy.AttrScope, path []string) []byte {
-    if scope != policy.AttrScopeRecord {
-        return nil
-    }
-    // Traverse nested path in LogAttributes
-    return traversePath(r.LogAttributes, path)
+    return traversePath(attrs, ref.AttrPath)
 }
 ```
 
-Attribute scopes:
+### Field References
 
-- `AttrScopeResource`: Resource-level attributes
+Field references (`LogFieldRef`, `MetricFieldRef`, `TraceFieldRef`) describe
+what value to extract. Use helper methods to determine the reference type:
+
+```go
+ref.IsField()        // Is this a direct field (body, name, etc.)?
+ref.IsResourceAttr() // Is this a resource attribute?
+ref.IsRecordAttr()   // Is this a record/span/datapoint attribute?
+ref.IsScopeAttr()    // Is this a scope attribute?
+ref.IsEventAttr()    // Is this an event attribute? (traces only)
+ref.IsLinkAttr()     // Is this a link attribute? (traces only)
+
+ref.Field            // The field enum value
+ref.AttrPath         // The attribute path (e.g., ["http", "method"])
+```
+
+### Attribute Scopes
+
+- `AttrScopeResource`: Resource-level attributes (service.name, etc.)
 - `AttrScopeScope`: Instrumentation scope attributes
-- `AttrScopeRecord`: Record-level attributes (log attributes, span attributes)
+- `AttrScopeRecord`: Record-level attributes (log attributes, span attributes,
+  datapoint attributes)
+- `AttrScopeEvent`: Span event attributes (traces only)
+- `AttrScopeLink`: Span link attributes (traces only)
 
 ## Configuration
 
@@ -307,6 +324,8 @@ defer policy.UnregisterAll(providers)
 Policies are defined in JSON format following the
 [Tero Policy Specification](https://buf.build/tero/policy):
 
+### Log Policies
+
 ```json
 {
   "policies": [
@@ -328,22 +347,68 @@ Policies are defined in JSON format following the
         "match": [{ "log_attribute": "ddsource", "exact": "nginx" }],
         "keep": "none"
       }
+    }
+  ]
+}
+```
+
+### Metric Policies
+
+```json
+{
+  "policies": [
+    {
+      "id": "drop-internal-metrics",
+      "name": "Drop internal metrics",
+      "metric": {
+        "match": [{ "metric_field": "name", "starts_with": "internal." }],
+        "keep": false
+      }
     },
     {
-      "id": "drop-edge-service",
-      "name": "Drop logs from edge services",
-      "log": {
-        "match": [
-          { "resource_attribute": "service.name", "regex": "^.*edge$" }
-        ],
-        "keep": "none"
+      "id": "drop-histogram-metrics",
+      "name": "Drop histogram type metrics",
+      "metric": {
+        "match": [{ "metric_field": "type", "exact": "histogram" }],
+        "keep": false
       }
     }
   ]
 }
 ```
 
+### Trace Policies
+
+```json
+{
+  "policies": [
+    {
+      "id": "sample-traces",
+      "name": "Sample 10% of traces",
+      "trace": {
+        "match": [{ "span_field": "kind", "exact": "server" }],
+        "keep": { "percentage": 10 }
+      }
+    },
+    {
+      "id": "drop-health-checks",
+      "name": "Drop health check spans",
+      "trace": {
+        "match": [{ "span_field": "name", "exact": "/health" }],
+        "keep": { "percentage": 0 }
+      }
+    }
+  ]
+}
+```
+
+Trace sampling uses OTel-compliant consistent probability sampling. The same
+trace ID always produces the same sampling decision, ensuring all spans in a
+trace are kept or dropped together.
+
 ### Matcher Types
+
+#### Log Matchers
 
 | Field                | Description                                                    |
 | -------------------- | -------------------------------------------------------------- |
@@ -351,6 +416,28 @@ Policies are defined in JSON format following the
 | `log_attribute`      | Match on log record attributes                                 |
 | `resource_attribute` | Match on resource attributes                                   |
 | `scope_attribute`    | Match on scope attributes                                      |
+
+#### Metric Matchers
+
+| Field                 | Description                                          |
+| --------------------- | ---------------------------------------------------- |
+| `metric_field`        | Match on metric fields: `name`, `type`, `unit`, etc. |
+| `datapoint_attribute` | Match on datapoint attributes                        |
+| `resource_attribute`  | Match on resource attributes                         |
+| `scope_attribute`     | Match on scope attributes                            |
+
+#### Trace Matchers
+
+| Field                | Description                                          |
+| -------------------- | ---------------------------------------------------- |
+| `span_field`         | Match on span fields: `name`, `kind`, `status`, etc. |
+| `span_attribute`     | Match on span attributes                             |
+| `resource_attribute` | Match on resource attributes                         |
+| `scope_attribute`    | Match on scope attributes                            |
+| `event_name`         | Match on span event names                            |
+| `event_attribute`    | Match on span event attributes                       |
+| `link_trace_id`      | Match on span link trace IDs                         |
+| `link_attribute`     | Match on span link attributes                        |
 
 #### Nested Attribute Access
 
@@ -516,11 +603,9 @@ zero-allocation evaluation:
 
 ### Telemetry Type Support
 
-Currently only log policies are fully implemented:
-
 - [x] Log policies (`log` field)
-- [ ] Metric policies (`metric` field)
-- [ ] Trace policies (`trace` field)
+- [x] Metric policies (`metric` field)
+- [x] Trace policies (`trace` field) with OTel-compliant consistent sampling
 
 ### Provider Support
 
