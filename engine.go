@@ -577,10 +577,10 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T]) Eval
 		return ResultNoMatch
 	}
 
-	return applyKeepActionTrace(bestPolicy)
+	return applyKeepActionTrace(bestPolicy, span, match)
 }
 
-func applyKeepActionTrace(policy *engine.CompiledPolicy[engine.TraceField]) EvaluateResult {
+func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) EvaluateResult {
 	switch policy.Keep.Action {
 	case KeepAll:
 		return ResultKeep
@@ -592,14 +592,18 @@ func applyKeepActionTrace(policy *engine.CompiledPolicy[engine.TraceField]) Eval
 		return ResultDrop
 
 	case KeepSample:
-		// Trace sampling typically uses trace ID for consistency
-		// The caller should implement their own sampling logic based on trace ID
+		// Hash-based deterministic sampling using trace ID
+		shouldKeep := shouldSampleTrace(policy, span, match)
 		if policy.Stats != nil {
 			policy.Stats.RecordSample()
 		}
-		return ResultSample
+		if shouldKeep {
+			return ResultKeep
+		}
+		return ResultDrop
 
 	case KeepRatePerSecond, KeepRatePerMinute:
+		// TODO: Implement rate limiting
 		if policy.Stats != nil {
 			policy.Stats.RecordRateLimited()
 		}
@@ -608,4 +612,37 @@ func applyKeepActionTrace(policy *engine.CompiledPolicy[engine.TraceField]) Eval
 	default:
 		return ResultKeep
 	}
+}
+
+// shouldSampleTrace determines if a span should be kept based on the sampling configuration.
+// It uses hash-based deterministic sampling on the trace ID for consistency across spans
+// in the same trace. If no trace ID is available, falls back to keeping the span.
+func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) bool {
+	percentage := policy.Keep.Value
+	if percentage >= 100 {
+		return true
+	}
+	if percentage <= 0 {
+		return false
+	}
+
+	// Use trace ID as the sampling key for consistent sampling across spans in the same trace
+	traceIDRef := engine.SpanTraceID()
+	traceID := match(span, traceIDRef)
+
+	// If no trace ID is available, keep the span (fail open for observability)
+	if len(traceID) == 0 {
+		return true
+	}
+
+	// Hash the trace ID and determine if it falls within the sample percentage
+	h := fnv.New64a()
+	h.Write(traceID)
+	hashValue := h.Sum64()
+
+	// Map the hash to a percentage (0-100)
+	// Use modulo to get a value in range [0, 10000) for 0.01% precision
+	hashPercentage := float64(hashValue%10000) / 100.0
+
+	return hashPercentage < percentage
 }
