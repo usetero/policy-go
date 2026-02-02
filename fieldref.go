@@ -38,6 +38,7 @@ const (
 	AttrScopeScope    = engine.AttrScopeScope
 	AttrScopeRecord   = engine.AttrScopeRecord
 	AttrScopeEvent    = engine.AttrScopeEvent
+	AttrScopeLink     = engine.AttrScopeLink
 )
 
 // Re-export LogField constants.
@@ -72,6 +73,9 @@ const (
 	TraceFieldParentSpanID      = engine.TraceFieldParentSpanID
 	TraceFieldTraceState        = engine.TraceFieldTraceState
 	TraceFieldResourceSchemaURL = engine.TraceFieldResourceSchemaURL
+	TraceFieldScopeSchemaURL    = engine.TraceFieldScopeSchemaURL
+	TraceFieldScopeName         = engine.TraceFieldScopeName
+	TraceFieldScopeVersion      = engine.TraceFieldScopeVersion
 	TraceFieldKind              = engine.TraceFieldKind
 	TraceFieldStatus            = engine.TraceFieldStatus
 	TraceFieldEventName         = engine.TraceFieldEventName
@@ -173,6 +177,18 @@ var TraceScopeAttr = engine.TraceScopeAttr
 
 // SpanEventAttr creates a reference to a span event attribute.
 var SpanEventAttr = engine.SpanEventAttr
+
+// SpanLinkAttr creates a reference to a span link attribute.
+var SpanLinkAttr = engine.SpanLinkAttr
+
+// TraceScopeSchemaURL creates a reference to the scope schema URL field.
+var TraceScopeSchemaURL = engine.TraceScopeSchemaURL
+
+// TraceScopeName creates a reference to the scope name field.
+var TraceScopeName = engine.TraceScopeName
+
+// TraceScopeVersion creates a reference to the scope version field.
+var TraceScopeVersion = engine.TraceScopeVersion
 
 // ============================================================================
 // MATCH FUNCTIONS

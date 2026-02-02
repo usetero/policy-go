@@ -63,6 +63,9 @@ const (
 	TraceFieldParentSpanID
 	TraceFieldTraceState
 	TraceFieldResourceSchemaURL
+	TraceFieldScopeSchemaURL
+	TraceFieldScopeName
+	TraceFieldScopeVersion
 	// Special fields for trace-specific matchers
 	TraceFieldKind
 	TraceFieldStatus
@@ -114,9 +117,18 @@ func (r FieldRef[T]) IsRecordAttr() bool {
 	return r.AttrScope == AttrScopeRecord && len(r.AttrPath) > 0
 }
 
-// IsEventAttr returns true if this is an event attribute reference (traces only).
+// IsEventAttr returns true if this is an event attribute reference.
+// Only meaningful for TraceFieldRef; always returns false for other types
+// since only trace constructors can set AttrScopeEvent.
 func (r FieldRef[T]) IsEventAttr() bool {
 	return r.AttrScope == AttrScopeEvent && len(r.AttrPath) > 0
+}
+
+// IsLinkAttr returns true if this is a link attribute reference.
+// Only meaningful for TraceFieldRef; always returns false for other types
+// since only trace constructors can set AttrScopeLink.
+func (r FieldRef[T]) IsLinkAttr() bool {
+	return r.AttrScope == AttrScopeLink && len(r.AttrPath) > 0
 }
 
 // Type aliases for convenience
@@ -276,6 +288,26 @@ func SpanEventAttr(path ...string) TraceFieldRef {
 	return TraceFieldRef{AttrScope: AttrScopeEvent, AttrPath: path}
 }
 
+// SpanLinkAttr creates a reference to a span link attribute.
+func SpanLinkAttr(path ...string) TraceFieldRef {
+	return TraceFieldRef{AttrScope: AttrScopeLink, AttrPath: path}
+}
+
+// TraceScopeSchemaURL creates a reference to the scope schema URL field.
+func TraceScopeSchemaURL() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldScopeSchemaURL}
+}
+
+// TraceScopeName creates a reference to the scope name field.
+func TraceScopeName() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldScopeName}
+}
+
+// TraceScopeVersion creates a reference to the scope version field.
+func TraceScopeVersion() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldScopeVersion}
+}
+
 // ============================================================================
 // PROTO CONVERSION (internal use)
 // ============================================================================
@@ -339,6 +371,12 @@ func traceFieldFromProto(f policyv1.TraceField) TraceField {
 		return TraceFieldTraceState
 	case policyv1.TraceField_TRACE_FIELD_RESOURCE_SCHEMA_URL:
 		return TraceFieldResourceSchemaURL
+	case policyv1.TraceField_TRACE_FIELD_SCOPE_SCHEMA_URL:
+		return TraceFieldScopeSchemaURL
+	case policyv1.TraceField_TRACE_FIELD_SCOPE_NAME:
+		return TraceFieldScopeName
+	case policyv1.TraceField_TRACE_FIELD_SCOPE_VERSION:
+		return TraceFieldScopeVersion
 	default:
 		return TraceFieldUnspecified
 	}
