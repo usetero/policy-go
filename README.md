@@ -386,11 +386,13 @@ optimized using Hyperscan and are more efficient than equivalent regex patterns.
 
 ### Keep Actions
 
-| Action   | Description               |
-| -------- | ------------------------- |
-| `"all"`  | Keep all matching records |
-| `"none"` | Drop all matching records |
-| `"N%"`   | Sample at N%              |
+| Action   | Description                        |
+| -------- | ---------------------------------- |
+| `"all"`  | Keep all matching records          |
+| `"none"` | Drop all matching records          |
+| `"N%"`   | Sample at N% (probabilistic)       |
+| `"N/s"`  | Rate limit to N records per second |
+| `"N/m"`  | Rate limit to N records per minute |
 
 ### Sampling with Sample Key
 
@@ -423,6 +425,35 @@ When a sample key is configured:
 - Records with the same key value always get the same keep/drop decision
 - This ensures consistent sampling across distributed systems
 - If the sample key field is empty/missing, the record is kept by default
+
+### Rate Limiting
+
+Rate limiting allows you to cap the number of records kept per time window:
+
+```json
+{
+  "id": "rate-limit-noisy-service",
+  "name": "Rate limit logs from noisy service to 100/s",
+  "log": {
+    "match": [
+      { "resource_attribute": "service.name", "exact": "noisy-service" }
+    ],
+    "keep": "100/s"
+  }
+}
+```
+
+Rate limiting features:
+
+- **Lock-free implementation**: Uses atomic operations for thread-safe access
+  without mutexes
+- **Per-policy rate limiters**: Each policy with rate limiting gets its own
+  limiter
+- **Automatic window reset**: Windows reset inline on first request after expiry
+- **Two time windows**: Use `/s` for per-second or `/m` for per-minute limits
+
+When the rate limit is exceeded, records are dropped (`ResultDrop`). When under
+the limit, records are kept (`ResultKeep`).
 
 ### AND Semantics
 
@@ -503,7 +534,7 @@ Currently only log policies are fully implemented:
 - [x] Optimized literal matchers (`starts_with`, `ends_with`, `contains`)
 - [x] Case-insensitive matching via Hyperscan flags
 - [x] Sampling with hash-based determinism via `sample_key`
-- [ ] Rate limiting support (currently stubbed)
+- [x] Rate limiting support (`N/s`, `N/m`) with lock-free implementation
 - [ ] Transform actions (keep with modifications)
 - [ ] Policy validation CLI tool
 - [ ] Prometheus metrics exporter for stats
