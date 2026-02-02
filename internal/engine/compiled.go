@@ -108,6 +108,7 @@ type CompiledPolicy[T FieldType] struct {
 	Keep         Keep
 	MatcherCount int
 	SampleKey    *FieldRef[T] // Optional field to use for consistent sampling
+	RateLimiter  *RateLimiter // Rate limiter for KeepRatePerSecond/KeepRatePerMinute
 	Stats        *PolicyStats
 }
 

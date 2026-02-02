@@ -1607,12 +1607,19 @@ func TestEvaluateTraceSamplingDistribution(t *testing.T) {
 	engine := NewPolicyEngine(registry)
 
 	// Test with many different trace IDs
+	// Use proper 32-char hex trace IDs to simulate real W3C trace IDs
+	// The last 56 bits (14 hex chars) are used for randomness per OTel spec
+	// We need to generate values that span the full 56-bit range
 	kept := 0
 	dropped := 0
 	total := 1000
 
 	for i := 0; i < total; i++ {
-		traceID := []byte(fmt.Sprintf("trace-%d-%c%c", i, 'a'+i%26, '0'+i%10))
+		// Generate trace IDs with randomness distributed across the full 56-bit range
+		// Multiply by a large prime to spread values across the range
+		randomness := uint64(i) * 72057594037927 // ~2^56 / 1000 to spread evenly
+		// W3C trace IDs are 32 hex chars (128 bits). Last 14 hex chars (56 bits) are used for randomness.
+		traceID := []byte(fmt.Sprintf("%018x%014x", uint64(0), randomness))
 		span := &SimpleSpanRecord{
 			Name:    []byte("GET /api/users"),
 			TraceID: traceID,
@@ -1735,11 +1742,113 @@ func TestEvaluateTraceSampling0Percent(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		span := &SimpleSpanRecord{
 			Name:    []byte("GET /api/users"),
-			TraceID: []byte(fmt.Sprintf("trace-%d", i)),
+			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
 		result := EvaluateTrace(engine, span, SimpleSpanMatcher)
 		assert.Equal(t, ResultDrop, result, "0%% sampling should drop all spans")
 	}
+}
+
+func TestEvaluateTraceSamplingWithTracestateRandomness(t *testing.T) {
+	// Test that explicit randomness in tracestate (rv sub-key) is used for sampling
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-traces",
+			Name: "Sample Traces at 50%",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 50},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Test with explicit rv in tracestate
+	// rv value of 0x80000000000000 is exactly at 50% threshold, should be kept (R >= T)
+	// rv value of 0x7fffffffffffff is just below 50% threshold, should be dropped
+	spanKept := &SimpleSpanRecord{
+		Name:       []byte("GET /api/users"),
+		TraceID:    []byte("00000000000000000000000000000001"), // TraceID doesn't matter when rv is present
+		TraceState: []byte("ot=rv:80000000000000"),             // Exactly at 50% threshold
+	}
+
+	spanDropped := &SimpleSpanRecord{
+		Name:       []byte("GET /api/users"),
+		TraceID:    []byte("00000000000000000000000000000002"),
+		TraceState: []byte("ot=rv:7fffffffffffff"), // Just below 50% threshold
+	}
+
+	resultKept := EvaluateTrace(engine, spanKept, SimpleSpanMatcher)
+	resultDropped := EvaluateTrace(engine, spanDropped, SimpleSpanMatcher)
+
+	assert.Equal(t, ResultKeep, resultKept, "span with rv at threshold should be kept")
+	assert.Equal(t, ResultDrop, resultDropped, "span with rv below threshold should be dropped")
+}
+
+func TestEvaluateTraceSamplingConsistentAcrossSpans(t *testing.T) {
+	// Test that all spans with the same trace ID are sampled consistently
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "sample-traces",
+			Name: "Sample Traces at 50%",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 50},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Create multiple spans from the same trace
+	traceID := []byte("0123456789abcdef0123456789abcdef")
+
+	span1 := &SimpleSpanRecord{
+		Name:    []byte("GET /api/users"),
+		TraceID: traceID,
+		SpanID:  []byte("span-1"),
+	}
+	span2 := &SimpleSpanRecord{
+		Name:    []byte("POST /api/orders"),
+		TraceID: traceID,
+		SpanID:  []byte("span-2"),
+	}
+	span3 := &SimpleSpanRecord{
+		Name:    []byte("GET /api/products"),
+		TraceID: traceID,
+		SpanID:  []byte("span-3"),
+	}
+
+	// All spans from the same trace should have the same sampling decision
+	result1 := EvaluateTrace(engine, span1, SimpleSpanMatcher)
+	result2 := EvaluateTrace(engine, span2, SimpleSpanMatcher)
+	result3 := EvaluateTrace(engine, span3, SimpleSpanMatcher)
+
+	assert.Equal(t, result1, result2, "spans from same trace should have same sampling decision")
+	assert.Equal(t, result2, result3, "spans from same trace should have same sampling decision")
 }
 
 // ============================================================================
@@ -1747,7 +1856,7 @@ func TestEvaluateTraceSampling0Percent(t *testing.T) {
 // ============================================================================
 
 func TestLogRateLimitingPerSecond(t *testing.T) {
-	// Test that rate limiting returns ResultRateLimit
+	// Test that rate limiting per second keeps requests under limit and drops when over
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
@@ -1761,7 +1870,7 @@ func TestLogRateLimitingPerSecond(t *testing.T) {
 							Match: &policyv1.LogMatcher_Contains{Contains: "noisy"},
 						},
 					},
-					Keep: "100/s",
+					Keep: "3/s",
 				},
 			},
 		},
@@ -1776,12 +1885,19 @@ func TestLogRateLimitingPerSecond(t *testing.T) {
 		Body: []byte("noisy log message"),
 	}
 
+	// First 3 requests should be kept (under limit)
+	for i := 0; i < 3; i++ {
+		result := EvaluateLog(engine, record, SimpleLogMatcher)
+		assert.Equal(t, ResultKeep, result, "request %d should be kept (under rate limit)", i+1)
+	}
+
+	// 4th request should be dropped (over limit)
 	result := EvaluateLog(engine, record, SimpleLogMatcher)
-	assert.Equal(t, ResultRateLimit, result, "rate limited log should return ResultRateLimit")
+	assert.Equal(t, ResultDrop, result, "request 4 should be dropped (over rate limit)")
 }
 
 func TestLogRateLimitingPerMinute(t *testing.T) {
-	// Test that rate limiting per minute returns ResultRateLimit
+	// Test that rate limiting per minute keeps requests under limit and drops when over
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
@@ -1795,7 +1911,7 @@ func TestLogRateLimitingPerMinute(t *testing.T) {
 							Match: &policyv1.LogMatcher_Contains{Contains: "verbose"},
 						},
 					},
-					Keep: "1000/m",
+					Keep: "5/m",
 				},
 			},
 		},
@@ -1810,6 +1926,13 @@ func TestLogRateLimitingPerMinute(t *testing.T) {
 		Body: []byte("verbose log message"),
 	}
 
+	// First 5 requests should be kept (under limit)
+	for i := 0; i < 5; i++ {
+		result := EvaluateLog(engine, record, SimpleLogMatcher)
+		assert.Equal(t, ResultKeep, result, "request %d should be kept (under rate limit)", i+1)
+	}
+
+	// 6th request should be dropped (over limit)
 	result := EvaluateLog(engine, record, SimpleLogMatcher)
-	assert.Equal(t, ResultRateLimit, result, "rate limited log per minute should return ResultRateLimit")
+	assert.Equal(t, ResultDrop, result, "request 6 should be dropped (over rate limit)")
 }

@@ -75,12 +75,22 @@ func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExist
 
 // finalizePolicy completes the policy with its keep action and other metadata.
 func (b *matchersBuilder[T]) finalizePolicy(policyID string, policyIndex int, keep Keep, matcherCount int, sampleKey *FieldRef[T], stats *PolicyStats) {
+	// Create rate limiter if needed
+	var rateLimiter *RateLimiter
+	switch keep.Action {
+	case KeepRatePerSecond:
+		rateLimiter = NewRateLimiterPerSecond(uint32(keep.Value))
+	case KeepRatePerMinute:
+		rateLimiter = NewRateLimiterPerMinute(uint32(keep.Value))
+	}
+
 	compiled := &CompiledPolicy[T]{
 		ID:           policyID,
 		Index:        policyIndex,
 		Keep:         keep,
 		MatcherCount: matcherCount,
 		SampleKey:    sampleKey,
+		RateLimiter:  rateLimiter,
 		Stats:        stats,
 	}
 	b.policies[policyID] = compiled
