@@ -313,8 +313,60 @@ func extractMatchPattern(m *policyv1.LogMatcher) (string, bool, bool) {
 	}
 }
 
+// metricTypeToString converts a MetricType enum to its lowercase string representation.
+func metricTypeToString(mt policyv1.MetricType) string {
+	switch mt {
+	case policyv1.MetricType_METRIC_TYPE_GAUGE:
+		return "gauge"
+	case policyv1.MetricType_METRIC_TYPE_SUM:
+		return "sum"
+	case policyv1.MetricType_METRIC_TYPE_HISTOGRAM:
+		return "histogram"
+	case policyv1.MetricType_METRIC_TYPE_EXPONENTIAL_HISTOGRAM:
+		return "exponential_histogram"
+	case policyv1.MetricType_METRIC_TYPE_SUMMARY:
+		return "summary"
+	default:
+		return ""
+	}
+}
+
+// aggregationTemporalityToString converts an AggregationTemporality enum to its lowercase string representation.
+func aggregationTemporalityToString(at policyv1.AggregationTemporality) string {
+	switch at {
+	case policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA:
+		return "delta"
+	case policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE:
+		return "cumulative"
+	default:
+		return ""
+	}
+}
+
 // extractMetricMatchPattern extracts the pattern string from a MetricMatcher.
+// For MetricType and AggregationTemporality fields, the enum value is converted to lowercase for matching.
 func extractMetricMatchPattern(m *policyv1.MetricMatcher) (string, bool, bool) {
+	// Special handling for MetricType - convert enum to lowercase string for matching
+	if mt, ok := m.GetField().(*policyv1.MetricMatcher_MetricType); ok {
+		if mt.MetricType != policyv1.MetricType_METRIC_TYPE_UNSPECIFIED {
+			typeStr := metricTypeToString(mt.MetricType)
+			if typeStr != "" {
+				return "^" + escapeRegex(typeStr) + "$", false, false
+			}
+		}
+	}
+
+	// Special handling for AggregationTemporality - convert enum to lowercase string for matching
+	if at, ok := m.GetField().(*policyv1.MetricMatcher_AggregationTemporality); ok {
+		if at.AggregationTemporality != policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED {
+			tempStr := aggregationTemporalityToString(at.AggregationTemporality)
+			if tempStr != "" {
+				return "^" + escapeRegex(tempStr) + "$", false, false
+			}
+		}
+	}
+
+	// Standard match patterns
 	switch match := m.GetMatch().(type) {
 	case *policyv1.MetricMatcher_Regex:
 		return match.Regex, false, false
@@ -333,8 +385,60 @@ func extractMetricMatchPattern(m *policyv1.MetricMatcher) (string, bool, bool) {
 	}
 }
 
+// spanKindToString converts a SpanKind enum to its lowercase string representation.
+func spanKindToString(sk policyv1.SpanKind) string {
+	switch sk {
+	case policyv1.SpanKind_SPAN_KIND_INTERNAL:
+		return "internal"
+	case policyv1.SpanKind_SPAN_KIND_SERVER:
+		return "server"
+	case policyv1.SpanKind_SPAN_KIND_CLIENT:
+		return "client"
+	case policyv1.SpanKind_SPAN_KIND_PRODUCER:
+		return "producer"
+	case policyv1.SpanKind_SPAN_KIND_CONSUMER:
+		return "consumer"
+	default:
+		return ""
+	}
+}
+
+// spanStatusToString converts a SpanStatusCode enum to its lowercase string representation.
+func spanStatusToString(ss policyv1.SpanStatusCode) string {
+	switch ss {
+	case policyv1.SpanStatusCode_SPAN_STATUS_CODE_OK:
+		return "ok"
+	case policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR:
+		return "error"
+	default:
+		return ""
+	}
+}
+
 // extractTraceMatchPattern extracts the pattern string from a TraceMatcher.
+// For SpanKind and SpanStatus fields, the enum value is converted to lowercase for matching.
 func extractTraceMatchPattern(m *policyv1.TraceMatcher) (string, bool, bool) {
+	// Special handling for SpanKind - convert enum to lowercase string for matching
+	if sk, ok := m.GetField().(*policyv1.TraceMatcher_SpanKind); ok {
+		if sk.SpanKind != policyv1.SpanKind_SPAN_KIND_UNSPECIFIED {
+			kindStr := spanKindToString(sk.SpanKind)
+			if kindStr != "" {
+				return "^" + escapeRegex(kindStr) + "$", false, false
+			}
+		}
+	}
+
+	// Special handling for SpanStatus - convert enum to lowercase string for matching
+	if ss, ok := m.GetField().(*policyv1.TraceMatcher_SpanStatus); ok {
+		if ss.SpanStatus != policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED {
+			statusStr := spanStatusToString(ss.SpanStatus)
+			if statusStr != "" {
+				return "^" + escapeRegex(statusStr) + "$", false, false
+			}
+		}
+	}
+
+	// Standard match patterns
 	switch match := m.GetMatch().(type) {
 	case *policyv1.TraceMatcher_Regex:
 		return match.Regex, false, false
