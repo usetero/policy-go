@@ -61,7 +61,7 @@ func TestCompilerTracePolicyWithSpanKind(t *testing.T) {
 					Match: []*policyv1.TraceMatcher{
 						{
 							Field: &policyv1.TraceMatcher_SpanKind{SpanKind: policyv1.SpanKind_SPAN_KIND_SERVER},
-							Match: &policyv1.TraceMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: &policyv1.TraceSamplingConfig{Percentage: 50},
@@ -78,11 +78,11 @@ func TestCompilerTracePolicyWithSpanKind(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 1, policy.MatcherCount)
 
-	// SpanKind with exists should be an existence check
-	require.Len(t, compiled.Traces.ExistenceChecks(), 1)
-	check := compiled.Traces.ExistenceChecks()[0]
-	assert.Equal(t, TraceFieldKind, check.Ref.Field)
-	assert.True(t, check.MustExist)
+	// SpanKind should generate a pattern match (exact match on enum string), not existence check
+	require.Equal(t, 1, len(compiled.Traces.Databases()))
+	entry := compiled.Traces.Databases()[0]
+	assert.Equal(t, TraceFieldKind, entry.Key.Ref.Field)
+	assert.Empty(t, compiled.Traces.ExistenceChecks())
 }
 
 func TestCompilerTracePolicyWithSpanStatus(t *testing.T) {
@@ -100,7 +100,7 @@ func TestCompilerTracePolicyWithSpanStatus(t *testing.T) {
 					Match: []*policyv1.TraceMatcher{
 						{
 							Field: &policyv1.TraceMatcher_SpanStatus{SpanStatus: policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR},
-							Match: &policyv1.TraceMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: &policyv1.TraceSamplingConfig{Percentage: 100},
@@ -117,9 +117,11 @@ func TestCompilerTracePolicyWithSpanStatus(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 1, policy.MatcherCount)
 
-	require.Len(t, compiled.Traces.ExistenceChecks(), 1)
-	check := compiled.Traces.ExistenceChecks()[0]
-	assert.Equal(t, TraceFieldStatus, check.Ref.Field)
+	// SpanStatus should generate a pattern match (exact match on enum string), not existence check
+	require.Equal(t, 1, len(compiled.Traces.Databases()))
+	entry := compiled.Traces.Databases()[0]
+	assert.Equal(t, TraceFieldStatus, entry.Key.Ref.Field)
+	assert.Empty(t, compiled.Traces.ExistenceChecks())
 }
 
 func TestCompilerTracePolicyWithEventName(t *testing.T) {
@@ -356,7 +358,7 @@ func TestCompilerTracePolicyMultipleMatchers(t *testing.T) {
 						},
 						{
 							Field: &policyv1.TraceMatcher_SpanKind{SpanKind: policyv1.SpanKind_SPAN_KIND_SERVER},
-							Match: &policyv1.TraceMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 						{
 							Field: &policyv1.TraceMatcher_ResourceAttribute{ResourceAttribute: &policyv1.AttributePath{Path: []string{"k8s.namespace"}}},
@@ -377,7 +379,7 @@ func TestCompilerTracePolicyMultipleMatchers(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 3, policy.MatcherCount)
 
-	// Should have 2 databases (span name and resource attr) and 1 existence check (span kind)
-	assert.Equal(t, 2, len(compiled.Traces.Databases()))
-	assert.Len(t, compiled.Traces.ExistenceChecks(), 1)
+	// Should have 3 databases (span name, span kind, and resource attr) and no existence checks
+	assert.Equal(t, 3, len(compiled.Traces.Databases()))
+	assert.Empty(t, compiled.Traces.ExistenceChecks())
 }

@@ -23,7 +23,7 @@ func TestCompilerMetricPolicyWithMetricType(t *testing.T) {
 					Match: []*policyv1.MetricMatcher{
 						{
 							Field: &policyv1.MetricMatcher_MetricType{MetricType: policyv1.MetricType_METRIC_TYPE_HISTOGRAM},
-							Match: &policyv1.MetricMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: false,
@@ -40,10 +40,11 @@ func TestCompilerMetricPolicyWithMetricType(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 1, policy.MatcherCount)
 
-	// MetricType with exists should be an existence check
-	require.Len(t, compiled.Metrics.ExistenceChecks(), 1)
-	check := compiled.Metrics.ExistenceChecks()[0]
-	assert.Equal(t, MetricFieldType, check.Ref.Field)
+	// MetricType should generate a pattern match (exact match on enum string), not existence check
+	require.Equal(t, 1, len(compiled.Metrics.Databases()))
+	entry := compiled.Metrics.Databases()[0]
+	assert.Equal(t, MetricFieldType, entry.Key.Ref.Field)
+	assert.Empty(t, compiled.Metrics.ExistenceChecks())
 }
 
 func TestCompilerMetricPolicyWithAggregationTemporality(t *testing.T) {
@@ -61,7 +62,7 @@ func TestCompilerMetricPolicyWithAggregationTemporality(t *testing.T) {
 					Match: []*policyv1.MetricMatcher{
 						{
 							Field: &policyv1.MetricMatcher_AggregationTemporality{AggregationTemporality: policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA},
-							Match: &policyv1.MetricMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: true,
@@ -78,9 +79,11 @@ func TestCompilerMetricPolicyWithAggregationTemporality(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 1, policy.MatcherCount)
 
-	require.Len(t, compiled.Metrics.ExistenceChecks(), 1)
-	check := compiled.Metrics.ExistenceChecks()[0]
-	assert.Equal(t, MetricFieldAggregationTemporality, check.Ref.Field)
+	// AggregationTemporality should generate a pattern match (exact match on enum string), not existence check
+	require.Equal(t, 1, len(compiled.Metrics.Databases()))
+	entry := compiled.Metrics.Databases()[0]
+	assert.Equal(t, MetricFieldAggregationTemporality, entry.Key.Ref.Field)
+	assert.Empty(t, compiled.Metrics.ExistenceChecks())
 }
 
 func TestCompilerMetricPolicyWithDatapointAttribute(t *testing.T) {
@@ -270,7 +273,7 @@ func TestCompilerMetricPolicyMultipleMatchers(t *testing.T) {
 						},
 						{
 							Field: &policyv1.MetricMatcher_MetricType{MetricType: policyv1.MetricType_METRIC_TYPE_GAUGE},
-							Match: &policyv1.MetricMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 						{
 							Field: &policyv1.MetricMatcher_ResourceAttribute{ResourceAttribute: &policyv1.AttributePath{Path: []string{"host.name"}}},
@@ -291,9 +294,9 @@ func TestCompilerMetricPolicyMultipleMatchers(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 3, policy.MatcherCount)
 
-	// Should have 1 database (metric name) and 2 existence checks (metric type and resource attr)
-	assert.Equal(t, 1, len(compiled.Metrics.Databases()))
-	assert.Len(t, compiled.Metrics.ExistenceChecks(), 2)
+	// Should have 2 databases (metric name and metric type) and 1 existence check (resource attr)
+	assert.Equal(t, 2, len(compiled.Metrics.Databases()))
+	assert.Len(t, compiled.Metrics.ExistenceChecks(), 1)
 }
 
 // ============================================================================

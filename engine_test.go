@@ -492,7 +492,7 @@ func TestEvaluateMetricByType(t *testing.T) {
 					Match: []*policyv1.MetricMatcher{
 						{
 							Field: &policyv1.MetricMatcher_MetricType{MetricType: policyv1.MetricType_METRIC_TYPE_HISTOGRAM},
-							Match: &policyv1.MetricMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: false,
@@ -528,7 +528,7 @@ func TestEvaluateMetricByAggregationTemporality(t *testing.T) {
 							Field: &policyv1.MetricMatcher_AggregationTemporality{
 								AggregationTemporality: policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
 							},
-							Match: &policyv1.MetricMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: false,
@@ -717,7 +717,7 @@ func TestEvaluateTraceBySpanKind(t *testing.T) {
 					Match: []*policyv1.TraceMatcher{
 						{
 							Field: &policyv1.TraceMatcher_SpanKind{SpanKind: policyv1.SpanKind_SPAN_KIND_CLIENT},
-							Match: &policyv1.TraceMatcher_Exists{Exists: true},
+							// Match field is ignored - enum value is used as exact match
 						},
 					},
 					Keep: &policyv1.TraceSamplingConfig{Percentage: 0},
