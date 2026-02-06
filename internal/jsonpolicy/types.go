@@ -18,9 +18,55 @@ type Policy struct {
 
 // Log represents log policy configuration.
 type Log struct {
-	Match     []LogMatcher `json:"match"`
-	Keep      KeepValue    `json:"keep"`
-	SampleKey *SampleKey   `json:"sample_key,omitempty"`
+	Match     []LogMatcher  `json:"match"`
+	Keep      KeepValue     `json:"keep"`
+	SampleKey *SampleKey    `json:"sample_key,omitempty"`
+	Transform *LogTransform `json:"transform,omitempty"`
+}
+
+// LogTransform defines modifications to apply to matched logs.
+type LogTransform struct {
+	Remove []LogRemove `json:"remove,omitempty"`
+	Redact []LogRedact `json:"redact,omitempty"`
+	Rename []LogRename `json:"rename,omitempty"`
+	Add    []LogAdd    `json:"add,omitempty"`
+}
+
+// LogRemove specifies a field to remove.
+type LogRemove struct {
+	LogField          string         `json:"log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
+}
+
+// LogRedact specifies a field to redact.
+type LogRedact struct {
+	LogField          string         `json:"log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
+	Replacement       string         `json:"replacement"`
+}
+
+// LogRename specifies a field to rename.
+type LogRename struct {
+	LogField          string         `json:"log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
+	To                string         `json:"to"`
+	Upsert            bool           `json:"upsert,omitempty"`
+}
+
+// LogAdd specifies a field to add.
+type LogAdd struct {
+	LogField          string         `json:"log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
+	Value             string         `json:"value"`
+	Upsert            bool           `json:"upsert,omitempty"`
 }
 
 // AttributePath represents an attribute path that can be specified in multiple ways.

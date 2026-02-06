@@ -109,6 +109,15 @@ func (p *Parser) convertLogTarget(log *Log) (*policyv1.LogTarget, error) {
 		target.SampleKey = sk
 	}
 
+	// Parse transform if present
+	if log.Transform != nil {
+		transform, err := p.convertLogTransform(log.Transform)
+		if err != nil {
+			return nil, err
+		}
+		target.Transform = transform
+	}
+
 	return target, nil
 }
 
@@ -258,6 +267,174 @@ func (p *Parser) convertSampleKey(sk *SampleKey) (*policyv1.LogSampleKey, error)
 	}
 
 	return nil, NewParseError("sample_key", "no field selector")
+}
+
+func (p *Parser) convertLogTransform(t *LogTransform) (*policyv1.LogTransform, error) {
+	result := &policyv1.LogTransform{}
+
+	for i, r := range t.Remove {
+		pr, err := p.convertLogRemove(r)
+		if err != nil {
+			return nil, fmt.Errorf("remove[%d]: %w", i, err)
+		}
+		result.Remove = append(result.Remove, pr)
+	}
+
+	for i, r := range t.Redact {
+		pr, err := p.convertLogRedact(r)
+		if err != nil {
+			return nil, fmt.Errorf("redact[%d]: %w", i, err)
+		}
+		result.Redact = append(result.Redact, pr)
+	}
+
+	for i, r := range t.Rename {
+		pr, err := p.convertLogRename(r)
+		if err != nil {
+			return nil, fmt.Errorf("rename[%d]: %w", i, err)
+		}
+		result.Rename = append(result.Rename, pr)
+	}
+
+	for i, a := range t.Add {
+		pa, err := p.convertLogAdd(a)
+		if err != nil {
+			return nil, fmt.Errorf("add[%d]: %w", i, err)
+		}
+		result.Add = append(result.Add, pa)
+	}
+
+	return result, nil
+}
+
+func (p *Parser) convertLogRemove(r LogRemove) (*policyv1.LogRemove, error) {
+	result := &policyv1.LogRemove{}
+	field, err := resolveFieldSelector("remove", r.LogField, r.LogAttribute, r.ResourceAttribute, r.ScopeAttribute)
+	if err != nil {
+		return nil, err
+	}
+	switch f := field.(type) {
+	case logFieldSel:
+		result.Field = &policyv1.LogRemove_LogField{LogField: policyv1.LogField(f)}
+	case logAttrSel:
+		result.Field = &policyv1.LogRemove_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: f.path}}
+	case resourceAttrSel:
+		result.Field = &policyv1.LogRemove_ResourceAttribute{ResourceAttribute: &policyv1.AttributePath{Path: f.path}}
+	case scopeAttrSel:
+		result.Field = &policyv1.LogRemove_ScopeAttribute{ScopeAttribute: &policyv1.AttributePath{Path: f.path}}
+	}
+	return result, nil
+}
+
+func (p *Parser) convertLogRedact(r LogRedact) (*policyv1.LogRedact, error) {
+	result := &policyv1.LogRedact{Replacement: r.Replacement}
+	field, err := resolveFieldSelector("redact", r.LogField, r.LogAttribute, r.ResourceAttribute, r.ScopeAttribute)
+	if err != nil {
+		return nil, err
+	}
+	switch f := field.(type) {
+	case logFieldSel:
+		result.Field = &policyv1.LogRedact_LogField{LogField: policyv1.LogField(f)}
+	case logAttrSel:
+		result.Field = &policyv1.LogRedact_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: f.path}}
+	case resourceAttrSel:
+		result.Field = &policyv1.LogRedact_ResourceAttribute{ResourceAttribute: &policyv1.AttributePath{Path: f.path}}
+	case scopeAttrSel:
+		result.Field = &policyv1.LogRedact_ScopeAttribute{ScopeAttribute: &policyv1.AttributePath{Path: f.path}}
+	}
+	return result, nil
+}
+
+func (p *Parser) convertLogRename(r LogRename) (*policyv1.LogRename, error) {
+	if r.To == "" {
+		return nil, NewParseError("rename.to", "required")
+	}
+	result := &policyv1.LogRename{To: r.To, Upsert: r.Upsert}
+	field, err := resolveFieldSelector("rename", r.LogField, r.LogAttribute, r.ResourceAttribute, r.ScopeAttribute)
+	if err != nil {
+		return nil, err
+	}
+	switch f := field.(type) {
+	case logFieldSel:
+		result.From = &policyv1.LogRename_FromLogField{FromLogField: policyv1.LogField(f)}
+	case logAttrSel:
+		result.From = &policyv1.LogRename_FromLogAttribute{FromLogAttribute: &policyv1.AttributePath{Path: f.path}}
+	case resourceAttrSel:
+		result.From = &policyv1.LogRename_FromResourceAttribute{FromResourceAttribute: &policyv1.AttributePath{Path: f.path}}
+	case scopeAttrSel:
+		result.From = &policyv1.LogRename_FromScopeAttribute{FromScopeAttribute: &policyv1.AttributePath{Path: f.path}}
+	}
+	return result, nil
+}
+
+func (p *Parser) convertLogAdd(a LogAdd) (*policyv1.LogAdd, error) {
+	result := &policyv1.LogAdd{Value: a.Value, Upsert: a.Upsert}
+	field, err := resolveFieldSelector("add", a.LogField, a.LogAttribute, a.ResourceAttribute, a.ScopeAttribute)
+	if err != nil {
+		return nil, err
+	}
+	switch f := field.(type) {
+	case logFieldSel:
+		result.Field = &policyv1.LogAdd_LogField{LogField: policyv1.LogField(f)}
+	case logAttrSel:
+		result.Field = &policyv1.LogAdd_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: f.path}}
+	case resourceAttrSel:
+		result.Field = &policyv1.LogAdd_ResourceAttribute{ResourceAttribute: &policyv1.AttributePath{Path: f.path}}
+	case scopeAttrSel:
+		result.Field = &policyv1.LogAdd_ScopeAttribute{ScopeAttribute: &policyv1.AttributePath{Path: f.path}}
+	}
+	return result, nil
+}
+
+// fieldSelection is a tagged union for resolved field selectors.
+type fieldSelection interface{ fieldSelection() }
+
+type logFieldSel policyv1.LogField
+type logAttrSel struct{ path []string }
+type resourceAttrSel struct{ path []string }
+type scopeAttrSel struct{ path []string }
+
+func (logFieldSel) fieldSelection()     {}
+func (logAttrSel) fieldSelection()      {}
+func (resourceAttrSel) fieldSelection() {}
+func (scopeAttrSel) fieldSelection()    {}
+
+// resolveFieldSelector validates and resolves the field selector from the four possible sources.
+func resolveFieldSelector(context string, logField string, logAttr, resourceAttr, scopeAttr *AttributePath) (fieldSelection, error) {
+	count := 0
+	if logField != "" {
+		count++
+	}
+	if logAttr != nil {
+		count++
+	}
+	if resourceAttr != nil {
+		count++
+	}
+	if scopeAttr != nil {
+		count++
+	}
+	if count == 0 {
+		return nil, NewParseError(context, "must specify a field type")
+	}
+	if count > 1 {
+		return nil, NewParseError(context, "must specify only one field type")
+	}
+
+	if logField != "" {
+		f, ok := parseLogField(logField)
+		if !ok {
+			return nil, NewParseError(context+".log_field", fmt.Sprintf("unknown field: %s", logField))
+		}
+		return logFieldSel(f), nil
+	}
+	if logAttr != nil {
+		return logAttrSel{path: logAttr.Path}, nil
+	}
+	if resourceAttr != nil {
+		return resourceAttrSel{path: resourceAttr.Path}, nil
+	}
+	return scopeAttrSel{path: scopeAttr.Path}, nil
 }
 
 func parseLogField(s string) (policyv1.LogField, bool) {

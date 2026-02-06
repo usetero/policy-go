@@ -633,6 +633,286 @@ func TestParseError(t *testing.T) {
 	assert.Equal(t, "parse error in test_field: test message", err.Error())
 }
 
+func TestParserParseTransformRemove(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"remove": [
+						{"log_field": "trace_id"},
+						{"log_attribute": "secret"},
+						{"resource_attribute": {"path": ["host", "name"]}},
+						{"scope_attribute": "internal"}
+					]
+				}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	transform := policies[0].GetLog().GetTransform()
+	require.NotNil(t, transform)
+	require.Len(t, transform.GetRemove(), 4)
+
+	// log_field
+	assert.Equal(t, policyv1.LogField_LOG_FIELD_TRACE_ID, transform.GetRemove()[0].GetLogField())
+	// log_attribute
+	assert.Equal(t, []string{"secret"}, transform.GetRemove()[1].GetLogAttribute().GetPath())
+	// resource_attribute with path
+	assert.Equal(t, []string{"host", "name"}, transform.GetRemove()[2].GetResourceAttribute().GetPath())
+	// scope_attribute
+	assert.Equal(t, []string{"internal"}, transform.GetRemove()[3].GetScopeAttribute().GetPath())
+}
+
+func TestParserParseTransformRedact(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"redact": [
+						{"log_attribute": "api_key", "replacement": "[REDACTED]"},
+						{"log_field": "body", "replacement": "***"}
+					]
+				}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	transform := policies[0].GetLog().GetTransform()
+	require.Len(t, transform.GetRedact(), 2)
+
+	assert.Equal(t, []string{"api_key"}, transform.GetRedact()[0].GetLogAttribute().GetPath())
+	assert.Equal(t, "[REDACTED]", transform.GetRedact()[0].GetReplacement())
+
+	assert.Equal(t, policyv1.LogField_LOG_FIELD_BODY, transform.GetRedact()[1].GetLogField())
+	assert.Equal(t, "***", transform.GetRedact()[1].GetReplacement())
+}
+
+func TestParserParseTransformRename(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"rename": [
+						{"log_attribute": "old_name", "to": "new_name", "upsert": true},
+						{"resource_attribute": "host", "to": "hostname"}
+					]
+				}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	transform := policies[0].GetLog().GetTransform()
+	require.Len(t, transform.GetRename(), 2)
+
+	assert.Equal(t, []string{"old_name"}, transform.GetRename()[0].GetFromLogAttribute().GetPath())
+	assert.Equal(t, "new_name", transform.GetRename()[0].GetTo())
+	assert.True(t, transform.GetRename()[0].GetUpsert())
+
+	assert.Equal(t, []string{"host"}, transform.GetRename()[1].GetFromResourceAttribute().GetPath())
+	assert.Equal(t, "hostname", transform.GetRename()[1].GetTo())
+	assert.False(t, transform.GetRename()[1].GetUpsert())
+}
+
+func TestParserParseTransformAdd(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"add": [
+						{"log_attribute": "processed", "value": "true"},
+						{"log_field": "event_name", "value": "transformed", "upsert": true}
+					]
+				}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	transform := policies[0].GetLog().GetTransform()
+	require.Len(t, transform.GetAdd(), 2)
+
+	assert.Equal(t, []string{"processed"}, transform.GetAdd()[0].GetLogAttribute().GetPath())
+	assert.Equal(t, "true", transform.GetAdd()[0].GetValue())
+	assert.False(t, transform.GetAdd()[0].GetUpsert())
+
+	assert.Equal(t, policyv1.LogField_LOG_FIELD_EVENT_NAME, transform.GetAdd()[1].GetLogField())
+	assert.Equal(t, "transformed", transform.GetAdd()[1].GetValue())
+	assert.True(t, transform.GetAdd()[1].GetUpsert())
+}
+
+func TestParserParseTransformMixed(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"remove": [{"log_attribute": "secret"}],
+					"redact": [{"log_attribute": "api_key", "replacement": "[REDACTED]"}],
+					"rename": [{"log_attribute": "old", "to": "new", "upsert": true}],
+					"add": [{"log_attribute": "processed", "value": "true"}]
+				}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	transform := policies[0].GetLog().GetTransform()
+	require.NotNil(t, transform)
+	assert.Len(t, transform.GetRemove(), 1)
+	assert.Len(t, transform.GetRedact(), 1)
+	assert.Len(t, transform.GetRename(), 1)
+	assert.Len(t, transform.GetAdd(), 1)
+}
+
+func TestParserParseTransformNoFieldError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"remove": [{}]
+				}
+			}
+		}]
+	}`
+
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must specify a field type")
+}
+
+func TestParserParseTransformMultipleFieldsError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"redact": [{"log_field": "body", "log_attribute": "extra", "replacement": "x"}]
+				}
+			}
+		}]
+	}`
+
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must specify only one field type")
+}
+
+func TestParserParseTransformUnknownFieldError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"remove": [{"log_field": "nonexistent"}]
+				}
+			}
+		}]
+	}`
+
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown field")
+}
+
+func TestParserParseTransformRenameMissingToError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"rename": [{"log_attribute": "old"}]
+				}
+			}
+		}]
+	}`
+
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rename.to")
+}
+
+func TestParserParseNoTransform(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all"
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+	assert.Nil(t, policies[0].GetLog().GetTransform())
+}
+
 // Helper functions
 func strPtr(s string) *string {
 	return &s
