@@ -732,6 +732,179 @@ func TestCompilerCaseSensitiveAndInsensitiveSeparateDatabases(t *testing.T) {
 	assert.True(t, foundCaseInsensitive, "expected case-insensitive database")
 }
 
+// ============================================================================
+// TRANSFORM COMPILATION TESTS
+// ============================================================================
+
+func TestCompilerCompileLogTransformRedact(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{"redact-policy": {}}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "redact-policy",
+			Name: "Redact API Key",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{
+								LogAttribute: &policyv1.AttributePath{Path: []string{"api_key"}},
+							},
+							Match: &policyv1.LogMatcher_Exists{Exists: true},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field: &policyv1.LogRedact_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"api_key"}},
+								},
+								Replacement: "[REDACTED]",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	policy, ok := compiled.Logs.GetPolicy("redact-policy")
+	require.True(t, ok)
+	require.Len(t, policy.Transforms, 1)
+
+	op := policy.Transforms[0]
+	assert.Equal(t, TransformRedact, op.Kind)
+	assert.Equal(t, AttrScopeRecord, op.Ref.AttrScope)
+	assert.Equal(t, []string{"api_key"}, op.Ref.AttrPath)
+	assert.Equal(t, "[REDACTED]", op.Value)
+}
+
+func TestCompilerCompileLogTransformAllOps(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{"all-transforms": {}}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "all-transforms",
+			Name: "All Transform Types",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: ".+"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Remove: []*policyv1.LogRemove{
+							{
+								Field: &policyv1.LogRemove_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"secret"}},
+								},
+							},
+						},
+						Redact: []*policyv1.LogRedact{
+							{
+								Field:       &policyv1.LogRedact_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+								Replacement: "***",
+							},
+						},
+						Rename: []*policyv1.LogRename{
+							{
+								From: &policyv1.LogRename_FromLogAttribute{
+									FromLogAttribute: &policyv1.AttributePath{Path: []string{"old_name"}},
+								},
+								To:     "new_name",
+								Upsert: true,
+							},
+						},
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_ResourceAttribute{
+									ResourceAttribute: &policyv1.AttributePath{Path: []string{"env"}},
+								},
+								Value:  "production",
+								Upsert: false,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	policy, ok := compiled.Logs.GetPolicy("all-transforms")
+	require.True(t, ok)
+	require.Len(t, policy.Transforms, 4)
+
+	// Verify ordering: remove, redact, rename, add
+	assert.Equal(t, TransformRemove, policy.Transforms[0].Kind)
+	assert.Equal(t, TransformRedact, policy.Transforms[1].Kind)
+	assert.Equal(t, TransformRename, policy.Transforms[2].Kind)
+	assert.Equal(t, TransformAdd, policy.Transforms[3].Kind)
+
+	// Verify remove
+	assert.Equal(t, AttrScopeRecord, policy.Transforms[0].Ref.AttrScope)
+	assert.Equal(t, []string{"secret"}, policy.Transforms[0].Ref.AttrPath)
+
+	// Verify redact
+	assert.Equal(t, LogFieldBody, policy.Transforms[1].Ref.Field)
+	assert.Equal(t, "***", policy.Transforms[1].Value)
+
+	// Verify rename
+	assert.Equal(t, []string{"old_name"}, policy.Transforms[2].Ref.AttrPath)
+	assert.Equal(t, "new_name", policy.Transforms[2].To)
+	assert.True(t, policy.Transforms[2].Upsert)
+
+	// Verify add
+	assert.Equal(t, AttrScopeResource, policy.Transforms[3].Ref.AttrScope)
+	assert.Equal(t, []string{"env"}, policy.Transforms[3].Ref.AttrPath)
+	assert.Equal(t, "production", policy.Transforms[3].Value)
+	assert.False(t, policy.Transforms[3].Upsert)
+}
+
+func TestCompilerCompileLogNoTransform(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{"no-transform": {}}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "no-transform",
+			Name: "No Transform",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "test"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	policy, ok := compiled.Logs.GetPolicy("no-transform")
+	require.True(t, ok)
+	assert.Nil(t, policy.Transforms)
+}
+
 func TestCompilerSpecialCharactersEscaped(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{

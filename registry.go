@@ -118,7 +118,8 @@ func (r *PolicyRegistry) TraceSnapshot() *TraceSnapshot {
 	return r.traceSnapshot
 }
 
-// CollectStats returns immutable snapshots of stats for all policies.
+// CollectStats atomically reads and resets stats for all policies, returning
+// snapshots of the delta since the last call.
 // This is the StatsCollector implementation that gets registered with providers.
 func (r *PolicyRegistry) CollectStats() []PolicyStatsSnapshot {
 	r.mu.RLock()

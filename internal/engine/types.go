@@ -79,12 +79,23 @@ func ParseKeep(s string) (Keep, error) {
 	return Keep{}, fmt.Errorf("invalid keep value %q", s)
 }
 
+// transformStageStats holds atomic hit/miss counters for a single transform stage.
+type transformStageStats struct {
+	hits   atomic.Uint64
+	misses atomic.Uint64
+}
+
 // PolicyStats holds atomic counters for a single policy.
 type PolicyStats struct {
 	Hits        atomic.Uint64
 	Drops       atomic.Uint64
 	Samples     atomic.Uint64
 	RateLimited atomic.Uint64
+
+	RemoveStats transformStageStats
+	RedactStats transformStageStats
+	RenameStats transformStageStats
+	AddStats    transformStageStats
 }
 
 // RecordHit increments the hit counter.
@@ -107,6 +118,34 @@ func (s *PolicyStats) RecordRateLimited() {
 	s.RateLimited.Add(1)
 }
 
+// RecordTransformHit increments the hit counter for the given transform kind.
+func (s *PolicyStats) RecordTransformHit(kind TransformKind) {
+	switch kind {
+	case TransformRemove:
+		s.RemoveStats.hits.Add(1)
+	case TransformRedact:
+		s.RedactStats.hits.Add(1)
+	case TransformRename:
+		s.RenameStats.hits.Add(1)
+	case TransformAdd:
+		s.AddStats.hits.Add(1)
+	}
+}
+
+// RecordTransformMiss increments the miss counter for the given transform kind.
+func (s *PolicyStats) RecordTransformMiss(kind TransformKind) {
+	switch kind {
+	case TransformRemove:
+		s.RemoveStats.misses.Add(1)
+	case TransformRedact:
+		s.RedactStats.misses.Add(1)
+	case TransformRename:
+		s.RenameStats.misses.Add(1)
+	case TransformAdd:
+		s.AddStats.misses.Add(1)
+	}
+}
+
 // PolicyStatsSnapshot is an immutable copy of stats for reporting.
 type PolicyStatsSnapshot struct {
 	PolicyID    string
@@ -114,15 +153,33 @@ type PolicyStatsSnapshot struct {
 	Drops       uint64
 	Samples     uint64
 	RateLimited uint64
+
+	RemoveHits   uint64
+	RemoveMisses uint64
+	RedactHits   uint64
+	RedactMisses uint64
+	RenameHits   uint64
+	RenameMisses uint64
+	AddHits      uint64
+	AddMisses    uint64
 }
 
-// Snapshot creates an immutable snapshot of the current stats.
+// Snapshot atomically reads and resets all counters, returning an immutable snapshot.
+// Each call returns the delta since the last Snapshot call.
 func (s *PolicyStats) Snapshot(policyID string) PolicyStatsSnapshot {
 	return PolicyStatsSnapshot{
-		PolicyID:    policyID,
-		Hits:        s.Hits.Load(),
-		Drops:       s.Drops.Load(),
-		Samples:     s.Samples.Load(),
-		RateLimited: s.RateLimited.Load(),
+		PolicyID:     policyID,
+		Hits:         s.Hits.Swap(0),
+		Drops:        s.Drops.Swap(0),
+		Samples:      s.Samples.Swap(0),
+		RateLimited:  s.RateLimited.Swap(0),
+		RemoveHits:   s.RemoveStats.hits.Swap(0),
+		RemoveMisses: s.RemoveStats.misses.Swap(0),
+		RedactHits:   s.RedactStats.hits.Swap(0),
+		RedactMisses: s.RedactStats.misses.Swap(0),
+		RenameHits:   s.RenameStats.hits.Swap(0),
+		RenameMisses: s.RenameStats.misses.Swap(0),
+		AddHits:      s.AddStats.hits.Swap(0),
+		AddMisses:    s.AddStats.misses.Swap(0),
 	}
 }

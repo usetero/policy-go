@@ -110,6 +110,7 @@ type CompiledPolicy[T FieldType] struct {
 	SampleKey    *FieldRef[T] // Optional field to use for consistent sampling
 	RateLimiter  *RateLimiter // Rate limiter for KeepRatePerSecond/KeepRatePerMinute
 	Stats        *PolicyStats
+	Transforms   []TransformOp // Log transform operations (nil for metrics/traces)
 }
 
 // CompiledMatchers holds all compiled pattern databases for policy evaluation.
@@ -225,7 +226,8 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				logBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
-			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats)
+			transforms := compileLogTransform(log.GetTransform())
+			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats, transforms)
 		}
 
 		// Process metric target
@@ -244,7 +246,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				metricBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
-			metricBuilder.finalizePolicy(id, idx, keep, len(metric.GetMatch()), nil, policyStats)
+			metricBuilder.finalizePolicy(id, idx, keep, len(metric.GetMatch()), nil, policyStats, nil)
 		}
 
 		// Process trace target
@@ -263,7 +265,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				traceBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
-			traceBuilder.finalizePolicy(id, idx, keep, len(trace.GetMatch()), nil, policyStats)
+			traceBuilder.finalizePolicy(id, idx, keep, len(trace.GetMatch()), nil, policyStats, nil)
 		}
 	}
 

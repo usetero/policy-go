@@ -232,6 +232,27 @@ var TraceScopeName = engine.TraceScopeName
 var TraceScopeVersion = engine.TraceScopeVersion
 
 // ============================================================================
+// TRANSFORM TYPES
+// ============================================================================
+
+// Re-export transform types from engine package for public use.
+type (
+	// TransformKind identifies the type of transform operation.
+	TransformKind = engine.TransformKind
+
+	// TransformOp is a single compiled transform operation.
+	TransformOp = engine.TransformOp
+)
+
+// TransformKind constants.
+const (
+	TransformRemove = engine.TransformRemove
+	TransformRedact = engine.TransformRedact
+	TransformRename = engine.TransformRename
+	TransformAdd    = engine.TransformAdd
+)
+
+// ============================================================================
 // MATCH FUNCTIONS
 // ============================================================================
 
@@ -246,3 +267,33 @@ type MetricMatchFunc[T any] func(record T, ref MetricFieldRef) []byte
 // TraceMatchFunc extracts field values from a span of type T.
 // Consumers implement this function to bridge their record type to the policy engine.
 type TraceMatchFunc[T any] func(record T, ref TraceFieldRef) []byte
+
+// ============================================================================
+// TRANSFORM FUNCTIONS
+// ============================================================================
+
+// LogTransformFunc applies a single transform operation to a log record of type T.
+// Consumers implement this function to bridge their record type to the policy engine.
+// Returns true if the targeted field was present (hit), false if absent (miss).
+type LogTransformFunc[T any] func(record T, op TransformOp) bool
+
+// ============================================================================
+// EVALUATION OPTIONS
+// ============================================================================
+
+// logOptions holds optional configuration for log evaluation.
+type logOptions[T any] struct {
+	transform LogTransformFunc[T]
+}
+
+// LogOption configures optional behavior for EvaluateLog.
+type LogOption[T any] func(*logOptions[T])
+
+// WithLogTransform sets a transform function that is called for each transform
+// operation on the winning policy. The function is called once per TransformOp,
+// in order: removes, redacts, renames, adds.
+func WithLogTransform[T any](fn LogTransformFunc[T]) LogOption[T] {
+	return func(o *logOptions[T]) {
+		o.transform = fn
+	}
+}

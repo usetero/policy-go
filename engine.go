@@ -74,8 +74,13 @@ func NewPolicyEngine(registry *PolicyRegistry) *PolicyEngine {
 // This method uses index-based arrays instead of maps for better performance.
 //
 // The match function is called to extract field values from the record.
-// Consumers provide this function to bridge their record type to the policy engine.
-func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T]) EvaluateResult {
+// Optional behaviors can be provided via LogOption functions (e.g., WithLogTransform).
+func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts ...LogOption[T]) EvaluateResult {
+	var options logOptions[T]
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	snapshot := e.registry.LogSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -208,13 +213,15 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T]) Evalua
 	}
 
 	// Apply the keep action
-	return applyKeepActionLog(e, bestPolicy, record, match)
+	return applyKeepActionLog(e, bestPolicy, record, match, &options)
 }
 
-func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], record T, match LogMatchFunc[T]) EvaluateResult {
+func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], record T, match LogMatchFunc[T], options *logOptions[T]) EvaluateResult {
+	var kept bool
+
 	switch policy.Keep.Action {
 	case KeepAll:
-		return ResultKeep
+		kept = true
 
 	case KeepNone:
 		if policy.Stats != nil {
@@ -230,26 +237,43 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 		if policy.Stats != nil {
 			policy.Stats.RecordSample()
 		}
-		if shouldKeep {
-			return ResultKeep
+		if !shouldKeep {
+			return ResultDrop
 		}
-		return ResultDrop
+		kept = true
 
 	case KeepRatePerSecond, KeepRatePerMinute:
 		if policy.RateLimiter == nil {
-			return ResultKeep
+			kept = true
+		} else if policy.RateLimiter.ShouldKeep() {
+			kept = true
+		} else {
+			if policy.Stats != nil {
+				policy.Stats.RecordRateLimited()
+			}
+			return ResultDrop
 		}
-		if policy.RateLimiter.ShouldKeep() {
-			return ResultKeep
-		}
-		if policy.Stats != nil {
-			policy.Stats.RecordRateLimited()
-		}
-		return ResultDrop
 
 	default:
-		return ResultKeep
+		kept = true
 	}
+
+	if kept && len(policy.Transforms) > 0 {
+		if options.transform != nil {
+			for _, op := range policy.Transforms {
+				hit := options.transform(record, op)
+				if policy.Stats != nil {
+					if hit {
+						policy.Stats.RecordTransformHit(op.Kind)
+					} else {
+						policy.Stats.RecordTransformMiss(op.Kind)
+					}
+				}
+			}
+		}
+		return ResultKeepWithTransform
+	}
+	return ResultKeep
 }
 
 // shouldSampleLog determines if a record should be kept based on the sampling configuration.
