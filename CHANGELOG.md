@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/usetero/policy-go/compare/v1.2.0...v1.3.0) (2026-02-06)
+
+
+### Features
+
+* implement log transformations ([#16](https://github.com/usetero/policy-go/issues/16)) ([505d193](https://github.com/usetero/policy-go/commit/505d19341cc9e77d3a683fd5b1640c4446899600))
+
+
+### Bug Fixes
+
+* support matching enums ([#15](https://github.com/usetero/policy-go/issues/15)) ([38959ef](https://github.com/usetero/policy-go/commit/38959ef84d9f497f548f5db0584c5c7a8bd6faa4))
+
 ## [1.2.0](https://github.com/usetero/policy-go/compare/v1.1.0...v1.2.0) (2026-02-02)
 
 
