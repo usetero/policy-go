@@ -371,11 +371,24 @@ func collectPolicyStatuses(collector StatsCollector) []*policyv1.PolicySyncStatu
 	statuses := make([]*policyv1.PolicySyncStatus, 0, len(snapshots))
 
 	for _, snap := range snapshots {
-		statuses = append(statuses, &policyv1.PolicySyncStatus{
+		status := &policyv1.PolicySyncStatus{
 			Id:          snap.PolicyID,
 			MatchHits:   int64(snap.Hits),
 			MatchMisses: int64(snap.Drops + snap.Samples + snap.RateLimited),
-		})
+		}
+		if snap.RemoveHits > 0 || snap.RemoveMisses > 0 {
+			status.Remove = &policyv1.TransformStageStatus{Hits: int64(snap.RemoveHits), Misses: int64(snap.RemoveMisses)}
+		}
+		if snap.RedactHits > 0 || snap.RedactMisses > 0 {
+			status.Redact = &policyv1.TransformStageStatus{Hits: int64(snap.RedactHits), Misses: int64(snap.RedactMisses)}
+		}
+		if snap.RenameHits > 0 || snap.RenameMisses > 0 {
+			status.Rename = &policyv1.TransformStageStatus{Hits: int64(snap.RenameHits), Misses: int64(snap.RenameMisses)}
+		}
+		if snap.AddHits > 0 || snap.AddMisses > 0 {
+			status.Add = &policyv1.TransformStageStatus{Hits: int64(snap.AddHits), Misses: int64(snap.AddMisses)}
+		}
+		statuses = append(statuses, status)
 	}
 
 	return statuses
@@ -416,11 +429,24 @@ func syncRequestToMap(req *policyv1.SyncRequest) map[string]any {
 	if len(req.GetPolicyStatuses()) > 0 {
 		statuses := make([]map[string]any, len(req.GetPolicyStatuses()))
 		for i, s := range req.GetPolicyStatuses() {
-			statuses[i] = map[string]any{
+			sm := map[string]any{
 				"id":           s.GetId(),
 				"match_hits":   s.GetMatchHits(),
 				"match_misses": s.GetMatchMisses(),
 			}
+			if s.GetRemove() != nil {
+				sm["remove"] = map[string]any{"hits": s.GetRemove().GetHits(), "misses": s.GetRemove().GetMisses()}
+			}
+			if s.GetRedact() != nil {
+				sm["redact"] = map[string]any{"hits": s.GetRedact().GetHits(), "misses": s.GetRedact().GetMisses()}
+			}
+			if s.GetRename() != nil {
+				sm["rename"] = map[string]any{"hits": s.GetRename().GetHits(), "misses": s.GetRename().GetMisses()}
+			}
+			if s.GetAdd() != nil {
+				sm["add"] = map[string]any{"hits": s.GetAdd().GetHits(), "misses": s.GetAdd().GetMisses()}
+			}
+			statuses[i] = sm
 		}
 		m["policy_statuses"] = statuses
 	}

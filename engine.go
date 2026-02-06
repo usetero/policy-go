@@ -261,7 +261,14 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 	if kept && len(policy.Transforms) > 0 {
 		if options.transform != nil {
 			for _, op := range policy.Transforms {
-				options.transform(record, op)
+				hit := options.transform(record, op)
+				if policy.Stats != nil {
+					if hit {
+						policy.Stats.RecordTransformHit(op.Kind)
+					} else {
+						policy.Stats.RecordTransformMiss(op.Kind)
+					}
+				}
 			}
 		}
 		return ResultKeepWithTransform

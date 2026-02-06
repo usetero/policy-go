@@ -274,7 +274,8 @@ type TraceMatchFunc[T any] func(record T, ref TraceFieldRef) []byte
 
 // LogTransformFunc applies a single transform operation to a log record of type T.
 // Consumers implement this function to bridge their record type to the policy engine.
-type LogTransformFunc[T any] func(record T, op TransformOp)
+// Returns true if the targeted field was present (hit), false if absent (miss).
+type LogTransformFunc[T any] func(record T, op TransformOp) bool
 
 // ============================================================================
 // EVALUATION OPTIONS

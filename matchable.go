@@ -53,108 +53,139 @@ func SimpleLogMatcher(r *SimpleLogRecord, ref LogFieldRef) []byte {
 
 // SimpleLogTransformer is a LogTransformFunc implementation for SimpleLogRecord.
 // It applies transform operations by mutating the record in place.
-func SimpleLogTransformer(r *SimpleLogRecord, op TransformOp) {
+// Returns true if the targeted field was present (hit), false if absent (miss).
+func SimpleLogTransformer(r *SimpleLogRecord, op TransformOp) bool {
 	switch op.Kind {
 	case TransformRemove:
-		simpleLogRemove(r, op.Ref)
+		return simpleLogRemove(r, op.Ref)
 	case TransformRedact:
-		simpleLogRedact(r, op.Ref, op.Value)
+		return simpleLogRedact(r, op.Ref, op.Value)
 	case TransformRename:
-		simpleLogRename(r, op.Ref, op.To, op.Upsert)
+		return simpleLogRename(r, op.Ref, op.To, op.Upsert)
 	case TransformAdd:
-		simpleLogAdd(r, op.Ref, op.Value, op.Upsert)
+		return simpleLogAdd(r, op.Ref, op.Value, op.Upsert)
 	}
+	return false
 }
 
-func simpleLogRemove(r *SimpleLogRecord, ref LogFieldRef) {
+func simpleLogRemove(r *SimpleLogRecord, ref LogFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
 		case LogFieldBody:
+			hit := r.Body != nil
 			r.Body = nil
+			return hit
 		case LogFieldSeverityText:
+			hit := r.SeverityText != nil
 			r.SeverityText = nil
+			return hit
 		case LogFieldTraceID:
+			hit := r.TraceID != nil
 			r.TraceID = nil
+			return hit
 		case LogFieldSpanID:
+			hit := r.SpanID != nil
 			r.SpanID = nil
+			return hit
 		case LogFieldEventName:
+			hit := r.EventName != nil
 			r.EventName = nil
+			return hit
 		}
-		return
+		return false
 	}
-	if attrs := simpleLogAttrs(r, ref); attrs != nil {
-		deletePath(attrs, ref.AttrPath)
+	attrs := simpleLogAttrs(r, ref)
+	if attrs == nil {
+		return false
 	}
+	_, exists := getPath(attrs, ref.AttrPath)
+	deletePath(attrs, ref.AttrPath)
+	return exists
 }
 
-func simpleLogRedact(r *SimpleLogRecord, ref LogFieldRef, replacement string) {
+func simpleLogRedact(r *SimpleLogRecord, ref LogFieldRef, replacement string) bool {
 	val := []byte(replacement)
 	if ref.IsField() {
 		switch ref.Field {
 		case LogFieldBody:
+			hit := r.Body != nil
 			r.Body = val
+			return hit
 		case LogFieldSeverityText:
+			hit := r.SeverityText != nil
 			r.SeverityText = val
+			return hit
 		case LogFieldTraceID:
+			hit := r.TraceID != nil
 			r.TraceID = val
+			return hit
 		case LogFieldSpanID:
+			hit := r.SpanID != nil
 			r.SpanID = val
+			return hit
 		case LogFieldEventName:
+			hit := r.EventName != nil
 			r.EventName = val
+			return hit
 		}
-		return
-	}
-	if attrs := simpleLogAttrs(r, ref); attrs != nil {
-		setPath(attrs, ref.AttrPath, replacement)
-	}
-}
-
-func simpleLogRename(r *SimpleLogRecord, ref LogFieldRef, to string, upsert bool) {
-	if ref.IsField() {
-		// Renaming a fixed field to an attribute: read value, remove field, set attr
-		return
+		return false
 	}
 	attrs := simpleLogAttrs(r, ref)
 	if attrs == nil {
-		return
+		return false
+	}
+	_, exists := getPath(attrs, ref.AttrPath)
+	setPath(attrs, ref.AttrPath, replacement)
+	return exists
+}
+
+func simpleLogRename(r *SimpleLogRecord, ref LogFieldRef, to string, upsert bool) bool {
+	if ref.IsField() {
+		// Renaming a fixed field to an attribute: not supported in simple impl
+		return false
+	}
+	attrs := simpleLogAttrs(r, ref)
+	if attrs == nil {
+		return false
 	}
 	val, ok := getPath(attrs, ref.AttrPath)
 	if !ok {
-		return
+		return false
 	}
 	if !upsert {
 		if _, exists := attrs[to]; exists {
-			return
+			return true // source existed but target blocked
 		}
 	}
 	deletePath(attrs, ref.AttrPath)
 	attrs[to] = val
+	return true
 }
 
-func simpleLogAdd(r *SimpleLogRecord, ref LogFieldRef, value string, upsert bool) {
+func simpleLogAdd(r *SimpleLogRecord, ref LogFieldRef, value string, upsert bool) bool {
 	if ref.IsField() {
 		val := []byte(value)
 		if !upsert {
 			switch ref.Field {
 			case LogFieldBody:
 				if r.Body != nil {
-					return
+					return true
 				}
 			case LogFieldSeverityText:
 				if r.SeverityText != nil {
-					return
+					return true
 				}
 			case LogFieldTraceID:
 				if r.TraceID != nil {
-					return
+					return true
 				}
 			case LogFieldSpanID:
 				if r.SpanID != nil {
-					return
+					return true
 				}
 			case LogFieldEventName:
 				if r.EventName != nil {
-					return
+					return true
 				}
 			}
 		}
@@ -170,18 +201,19 @@ func simpleLogAdd(r *SimpleLogRecord, ref LogFieldRef, value string, upsert bool
 		case LogFieldEventName:
 			r.EventName = val
 		}
-		return
+		return true
 	}
 	attrs := simpleLogEnsureAttrs(r, ref)
 	if attrs == nil {
-		return
+		return false
 	}
 	if !upsert {
 		if _, exists := attrs[ref.AttrPath[0]]; exists {
-			return
+			return true
 		}
 	}
 	setPath(attrs, ref.AttrPath, value)
+	return true
 }
 
 // simpleLogAttrs returns the attribute map for the given ref scope, or nil.

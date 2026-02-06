@@ -2430,6 +2430,241 @@ func TestEvaluateLogTransformRenameAttribute(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", record.LogAttributes["source_ip"])
 }
 
+func TestEvaluateLogTransformStatsRecorded(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "transform-stats",
+			Name: "Transform Stats",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "log"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Remove: []*policyv1.LogRemove{
+							{
+								Field: &policyv1.LogRemove_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"secret"}},
+								},
+							},
+						},
+						Redact: []*policyv1.LogRedact{
+							{
+								Field: &policyv1.LogRedact_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"api_key"}},
+								},
+								Replacement: "[REDACTED]",
+							},
+							{
+								Field: &policyv1.LogRedact_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"missing_attr"}},
+								},
+								Replacement: "[REDACTED]",
+							},
+						},
+						Rename: []*policyv1.LogRename{
+							{
+								From: &policyv1.LogRename_FromLogAttribute{
+									FromLogAttribute: &policyv1.AttributePath{Path: []string{"old_name"}},
+								},
+								To:     "new_name",
+								Upsert: true,
+							},
+						},
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"processed"}},
+								},
+								Value:  "true",
+								Upsert: false,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body: []byte("log entry"),
+		LogAttributes: map[string]any{
+			"secret":   "password123",
+			"api_key":  "key-abc",
+			"old_name": "value",
+		},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+
+	// Collect stats and verify transform counters
+	stats := registry.CollectStats()
+	require.NotEmpty(t, stats)
+
+	var snap *PolicyStatsSnapshot
+	for _, s := range stats {
+		if s.PolicyID == "transform-stats" {
+			snap = &s
+			break
+		}
+	}
+	require.NotNil(t, snap)
+
+	// Remove: "secret" existed → 1 hit, 0 misses
+	assert.Equal(t, uint64(1), snap.RemoveHits)
+	assert.Equal(t, uint64(0), snap.RemoveMisses)
+
+	// Redact: "api_key" existed (hit), "missing_attr" did not (miss)
+	assert.Equal(t, uint64(1), snap.RedactHits)
+	assert.Equal(t, uint64(1), snap.RedactMisses)
+
+	// Rename: "old_name" existed → 1 hit
+	assert.Equal(t, uint64(1), snap.RenameHits)
+	assert.Equal(t, uint64(0), snap.RenameMisses)
+
+	// Add: "processed" didn't exist, but add always returns true (field is being set)
+	assert.Equal(t, uint64(1), snap.AddHits)
+	assert.Equal(t, uint64(0), snap.AddMisses)
+}
+
+func TestEvaluateLogTransformStatsResetAfterCollect(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "stats-reset",
+			Name: "Stats Reset",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "msg"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field: &policyv1.LogRedact_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"secret"}},
+								},
+								Replacement: "[REDACTED]",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// First evaluation
+	record := &SimpleLogRecord{
+		Body:          []byte("msg"),
+		LogAttributes: map[string]any{"secret": "val"},
+	}
+	EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+
+	// First collect — should have stats
+	stats := registry.CollectStats()
+	var snap *PolicyStatsSnapshot
+	for _, s := range stats {
+		if s.PolicyID == "stats-reset" {
+			snap = &s
+			break
+		}
+	}
+	require.NotNil(t, snap)
+	assert.Equal(t, uint64(1), snap.Hits)
+	assert.Equal(t, uint64(1), snap.RedactHits)
+
+	// Second collect without new evaluations — counters should be zero (reset)
+	stats2 := registry.CollectStats()
+	var snap2 *PolicyStatsSnapshot
+	for _, s := range stats2 {
+		if s.PolicyID == "stats-reset" {
+			snap2 = &s
+			break
+		}
+	}
+	require.NotNil(t, snap2)
+	assert.Equal(t, uint64(0), snap2.Hits)
+	assert.Equal(t, uint64(0), snap2.RedactHits)
+	assert.Equal(t, uint64(0), snap2.RedactMisses)
+}
+
+func TestEvaluateLogTransformStatsNotRecordedWithoutFunc(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "transform-no-func-stats",
+			Name: "Transform No Func Stats",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "test"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field: &policyv1.LogRedact_LogField{
+									LogField: policyv1.LogField_LOG_FIELD_BODY,
+								},
+								Replacement: "[REDACTED]",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body: []byte("test message"),
+	}
+
+	// No transform func provided
+	result := EvaluateLog(engine, record, SimpleLogMatcher)
+	assert.Equal(t, ResultKeepWithTransform, result)
+
+	// Stats should have zero transform counters since no func was called
+	stats := registry.CollectStats()
+	var snap *PolicyStatsSnapshot
+	for _, s := range stats {
+		if s.PolicyID == "transform-no-func-stats" {
+			snap = &s
+			break
+		}
+	}
+	require.NotNil(t, snap)
+	assert.Equal(t, uint64(0), snap.RedactHits)
+	assert.Equal(t, uint64(0), snap.RedactMisses)
+}
+
 func TestEvaluateLogTransformRedactBody(t *testing.T) {
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
