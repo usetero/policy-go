@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/usetero/policy-go/compare/v1.3.0...v1.3.1) (2026-02-06)
+
+
+### Bug Fixes
+
+* support json format ([#18](https://github.com/usetero/policy-go/issues/18)) ([22bc40d](https://github.com/usetero/policy-go/commit/22bc40dc0dddf27d55632b6f04583b6d34c86484))
+
 ## [1.3.0](https://github.com/usetero/policy-go/compare/v1.2.0...v1.3.0) (2026-02-06)
 
 
