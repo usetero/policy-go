@@ -51,6 +51,228 @@ func SimpleLogMatcher(r *SimpleLogRecord, ref LogFieldRef) []byte {
 	return traversePath(attrs, ref.AttrPath)
 }
 
+// SimpleLogTransformer is a LogTransformFunc implementation for SimpleLogRecord.
+// It applies transform operations by mutating the record in place.
+func SimpleLogTransformer(r *SimpleLogRecord, op TransformOp) {
+	switch op.Kind {
+	case TransformRemove:
+		simpleLogRemove(r, op.Ref)
+	case TransformRedact:
+		simpleLogRedact(r, op.Ref, op.Value)
+	case TransformRename:
+		simpleLogRename(r, op.Ref, op.To, op.Upsert)
+	case TransformAdd:
+		simpleLogAdd(r, op.Ref, op.Value, op.Upsert)
+	}
+}
+
+func simpleLogRemove(r *SimpleLogRecord, ref LogFieldRef) {
+	if ref.IsField() {
+		switch ref.Field {
+		case LogFieldBody:
+			r.Body = nil
+		case LogFieldSeverityText:
+			r.SeverityText = nil
+		case LogFieldTraceID:
+			r.TraceID = nil
+		case LogFieldSpanID:
+			r.SpanID = nil
+		case LogFieldEventName:
+			r.EventName = nil
+		}
+		return
+	}
+	if attrs := simpleLogAttrs(r, ref); attrs != nil {
+		deletePath(attrs, ref.AttrPath)
+	}
+}
+
+func simpleLogRedact(r *SimpleLogRecord, ref LogFieldRef, replacement string) {
+	val := []byte(replacement)
+	if ref.IsField() {
+		switch ref.Field {
+		case LogFieldBody:
+			r.Body = val
+		case LogFieldSeverityText:
+			r.SeverityText = val
+		case LogFieldTraceID:
+			r.TraceID = val
+		case LogFieldSpanID:
+			r.SpanID = val
+		case LogFieldEventName:
+			r.EventName = val
+		}
+		return
+	}
+	if attrs := simpleLogAttrs(r, ref); attrs != nil {
+		setPath(attrs, ref.AttrPath, replacement)
+	}
+}
+
+func simpleLogRename(r *SimpleLogRecord, ref LogFieldRef, to string, upsert bool) {
+	if ref.IsField() {
+		// Renaming a fixed field to an attribute: read value, remove field, set attr
+		return
+	}
+	attrs := simpleLogAttrs(r, ref)
+	if attrs == nil {
+		return
+	}
+	val, ok := getPath(attrs, ref.AttrPath)
+	if !ok {
+		return
+	}
+	if !upsert {
+		if _, exists := attrs[to]; exists {
+			return
+		}
+	}
+	deletePath(attrs, ref.AttrPath)
+	attrs[to] = val
+}
+
+func simpleLogAdd(r *SimpleLogRecord, ref LogFieldRef, value string, upsert bool) {
+	if ref.IsField() {
+		val := []byte(value)
+		if !upsert {
+			switch ref.Field {
+			case LogFieldBody:
+				if r.Body != nil {
+					return
+				}
+			case LogFieldSeverityText:
+				if r.SeverityText != nil {
+					return
+				}
+			case LogFieldTraceID:
+				if r.TraceID != nil {
+					return
+				}
+			case LogFieldSpanID:
+				if r.SpanID != nil {
+					return
+				}
+			case LogFieldEventName:
+				if r.EventName != nil {
+					return
+				}
+			}
+		}
+		switch ref.Field {
+		case LogFieldBody:
+			r.Body = val
+		case LogFieldSeverityText:
+			r.SeverityText = val
+		case LogFieldTraceID:
+			r.TraceID = val
+		case LogFieldSpanID:
+			r.SpanID = val
+		case LogFieldEventName:
+			r.EventName = val
+		}
+		return
+	}
+	attrs := simpleLogEnsureAttrs(r, ref)
+	if attrs == nil {
+		return
+	}
+	if !upsert {
+		if _, exists := attrs[ref.AttrPath[0]]; exists {
+			return
+		}
+	}
+	setPath(attrs, ref.AttrPath, value)
+}
+
+// simpleLogAttrs returns the attribute map for the given ref scope, or nil.
+func simpleLogAttrs(r *SimpleLogRecord, ref LogFieldRef) map[string]any {
+	switch {
+	case ref.IsRecordAttr():
+		return r.LogAttributes
+	case ref.IsResourceAttr():
+		return r.ResourceAttributes
+	case ref.IsScopeAttr():
+		return r.ScopeAttributes
+	default:
+		return nil
+	}
+}
+
+// simpleLogEnsureAttrs returns the attribute map, creating it if needed.
+func simpleLogEnsureAttrs(r *SimpleLogRecord, ref LogFieldRef) map[string]any {
+	switch {
+	case ref.IsRecordAttr():
+		if r.LogAttributes == nil {
+			r.LogAttributes = make(map[string]any)
+		}
+		return r.LogAttributes
+	case ref.IsResourceAttr():
+		if r.ResourceAttributes == nil {
+			r.ResourceAttributes = make(map[string]any)
+		}
+		return r.ResourceAttributes
+	case ref.IsScopeAttr():
+		if r.ScopeAttributes == nil {
+			r.ScopeAttributes = make(map[string]any)
+		}
+		return r.ScopeAttributes
+	default:
+		return nil
+	}
+}
+
+// deletePath removes a value at the given path in a nested map.
+func deletePath(m map[string]any, path []string) {
+	if len(path) == 0 || m == nil {
+		return
+	}
+	if len(path) == 1 {
+		delete(m, path[0])
+		return
+	}
+	nested, ok := m[path[0]].(map[string]any)
+	if !ok {
+		return
+	}
+	deletePath(nested, path[1:])
+}
+
+// setPath sets a value at the given path in a nested map.
+func setPath(m map[string]any, path []string, value string) {
+	if len(path) == 0 || m == nil {
+		return
+	}
+	if len(path) == 1 {
+		m[path[0]] = value
+		return
+	}
+	nested, ok := m[path[0]].(map[string]any)
+	if !ok {
+		nested = make(map[string]any)
+		m[path[0]] = nested
+	}
+	setPath(nested, path[1:], value)
+}
+
+// getPath retrieves a value at the given path in a nested map.
+func getPath(m map[string]any, path []string) (any, bool) {
+	if len(path) == 0 || m == nil {
+		return nil, false
+	}
+	val, ok := m[path[0]]
+	if !ok {
+		return nil, false
+	}
+	if len(path) == 1 {
+		return val, true
+	}
+	nested, ok := val.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return getPath(nested, path[1:])
+}
+
 // ============================================================================
 // METRIC RECORDS
 // ============================================================================
