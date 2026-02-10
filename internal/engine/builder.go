@@ -152,7 +152,7 @@ func compileGroup(entries []patternEntry, caseInsensitive bool) (*CompiledDataba
 	patterns := make([]*hyperscan.Pattern, len(entries))
 	patternIndex := make([]PatternRef, len(entries))
 
-	flags := hyperscan.SomLeftMost
+	flags := hyperscan.SingleMatch
 	if caseInsensitive {
 		flags |= hyperscan.Caseless
 	}
