@@ -302,6 +302,48 @@ func TestEvaluateLogMultipleMatchers(t *testing.T) {
 	assert.Equal(t, ResultNoMatch, result)
 }
 
+func TestEvaluateLogRegexMultipleEndOffsets(t *testing.T) {
+	// Regression test: patterns like "prod-.*" can cause Hyperscan to report
+	// multiple matches per pattern (one per end-offset as .* extends). Without
+	// HS_FLAG_SINGLEMATCH or idempotent match tracking, this would inflate
+	// match_counts beyond required_match_count, causing false NoMatch results.
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-prod-logs",
+			Name: "Drop Prod Logs",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_ResourceAttribute{
+								ResourceAttribute: &policyv1.AttributePath{Path: []string{"service.name"}},
+							},
+							Match: &policyv1.LogMatcher_Regex{Regex: "prod-.*"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body: []byte("some log message"),
+		ResourceAttributes: map[string]any{
+			"service.name": "prod-api-server-1",
+		},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher)
+	assert.Equal(t, ResultDrop, result, "regex with multiple end-offsets must still match correctly")
+}
+
 // ============================================================================
 // METRIC EVALUATION TESTS
 // ============================================================================
