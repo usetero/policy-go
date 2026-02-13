@@ -75,6 +75,18 @@ func (p *Parser) convertPolicy(jp Policy) (*policyv1.Policy, error) {
 			return nil, err
 		}
 		pol.Target = &policyv1.Policy_Log{Log: logTarget}
+	} else if jp.Metric != nil {
+		metricTarget, err := p.convertMetricTarget(jp.Metric)
+		if err != nil {
+			return nil, err
+		}
+		pol.Target = &policyv1.Policy_Metric{Metric: metricTarget}
+	} else if jp.Trace != nil {
+		traceTarget, err := p.convertTraceTarget(jp.Trace)
+		if err != nil {
+			return nil, err
+		}
+		pol.Target = &policyv1.Policy_Trace{Trace: traceTarget}
 	}
 
 	return pol, nil
@@ -384,6 +396,439 @@ func (p *Parser) convertLogAdd(a LogAdd) (*policyv1.LogAdd, error) {
 		result.Field = &policyv1.LogAdd_ScopeAttribute{ScopeAttribute: &policyv1.AttributePath{Path: f.path}}
 	}
 	return result, nil
+}
+
+// ============================================================================
+// METRIC CONVERSION
+// ============================================================================
+
+func (p *Parser) convertMetricTarget(metric *Metric) (*policyv1.MetricTarget, error) {
+	matchers := make([]*policyv1.MetricMatcher, 0, len(metric.Match))
+	for i, m := range metric.Match {
+		matcher, err := p.convertMetricMatcher(m)
+		if err != nil {
+			return nil, fmt.Errorf("matcher %d: %w", i, err)
+		}
+		matchers = append(matchers, matcher)
+	}
+
+	return &policyv1.MetricTarget{
+		Match: matchers,
+		Keep:  metric.Keep,
+	}, nil
+}
+
+func (p *Parser) convertMetricMatcher(m MetricMatcher) (*policyv1.MetricMatcher, error) {
+	matcher := &policyv1.MetricMatcher{
+		Negate:          m.Negated,
+		CaseInsensitive: m.CaseInsensitive,
+	}
+
+	// Set field selector
+	if err := p.setMetricFieldSelector(matcher, m); err != nil {
+		return nil, err
+	}
+
+	// For metric_type and aggregation_temporality, the match is implicit (no match oneof needed)
+	if m.MetricType != "" || m.AggregationTemporality != "" {
+		return matcher, nil
+	}
+
+	// Set match type
+	if m.Exists != nil {
+		matcher.Match = &policyv1.MetricMatcher_Exists{Exists: *m.Exists}
+	} else if m.Exact != "" {
+		matcher.Match = &policyv1.MetricMatcher_Exact{Exact: m.Exact}
+	} else if m.Regex != "" {
+		if _, err := regexp.Compile(m.Regex); err != nil {
+			return nil, fmt.Errorf("invalid regex: %w", err)
+		}
+		matcher.Match = &policyv1.MetricMatcher_Regex{Regex: m.Regex}
+	} else if m.StartsWith != "" {
+		matcher.Match = &policyv1.MetricMatcher_StartsWith{StartsWith: m.StartsWith}
+	} else if m.EndsWith != "" {
+		matcher.Match = &policyv1.MetricMatcher_EndsWith{EndsWith: m.EndsWith}
+	} else if m.Contains != "" {
+		matcher.Match = &policyv1.MetricMatcher_Contains{Contains: m.Contains}
+	} else {
+		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, or contains)")
+	}
+
+	return matcher, nil
+}
+
+func (p *Parser) setMetricFieldSelector(matcher *policyv1.MetricMatcher, m MetricMatcher) error {
+	count := 0
+	if m.MetricField != "" {
+		count++
+	}
+	if m.DatapointAttribute != nil {
+		count++
+	}
+	if m.ResourceAttribute != nil {
+		count++
+	}
+	if m.ScopeAttribute != nil {
+		count++
+	}
+	if m.MetricType != "" {
+		count++
+	}
+	if m.AggregationTemporality != "" {
+		count++
+	}
+
+	if count == 0 {
+		return NewParseError("matcher", "must specify a field type")
+	}
+	if count > 1 {
+		return NewParseError("matcher", "must specify only one field type")
+	}
+
+	if m.MetricField != "" {
+		field, ok := parseMetricField(m.MetricField)
+		if !ok {
+			return NewParseError("metric_field", fmt.Sprintf("unknown field: %s", m.MetricField))
+		}
+		matcher.Field = &policyv1.MetricMatcher_MetricField{MetricField: field}
+		return nil
+	}
+	if m.DatapointAttribute != nil {
+		matcher.Field = &policyv1.MetricMatcher_DatapointAttribute{
+			DatapointAttribute: &policyv1.AttributePath{Path: m.DatapointAttribute.Path},
+		}
+		return nil
+	}
+	if m.ResourceAttribute != nil {
+		matcher.Field = &policyv1.MetricMatcher_ResourceAttribute{
+			ResourceAttribute: &policyv1.AttributePath{Path: m.ResourceAttribute.Path},
+		}
+		return nil
+	}
+	if m.ScopeAttribute != nil {
+		matcher.Field = &policyv1.MetricMatcher_ScopeAttribute{
+			ScopeAttribute: &policyv1.AttributePath{Path: m.ScopeAttribute.Path},
+		}
+		return nil
+	}
+	if m.MetricType != "" {
+		mt, ok := parseMetricType(m.MetricType)
+		if !ok {
+			return NewParseError("metric_type", fmt.Sprintf("unknown type: %s", m.MetricType))
+		}
+		matcher.Field = &policyv1.MetricMatcher_MetricType{MetricType: mt}
+		return nil
+	}
+	if m.AggregationTemporality != "" {
+		at, ok := parseAggregationTemporality(m.AggregationTemporality)
+		if !ok {
+			return NewParseError("aggregation_temporality", fmt.Sprintf("unknown temporality: %s", m.AggregationTemporality))
+		}
+		matcher.Field = &policyv1.MetricMatcher_AggregationTemporality{AggregationTemporality: at}
+		return nil
+	}
+
+	return NewParseError("matcher", "no field selector")
+}
+
+func parseMetricField(s string) (policyv1.MetricField, bool) {
+	switch s {
+	case "name":
+		return policyv1.MetricField_METRIC_FIELD_NAME, true
+	case "description":
+		return policyv1.MetricField_METRIC_FIELD_DESCRIPTION, true
+	case "unit":
+		return policyv1.MetricField_METRIC_FIELD_UNIT, true
+	case "resource_schema_url":
+		return policyv1.MetricField_METRIC_FIELD_RESOURCE_SCHEMA_URL, true
+	case "scope_schema_url":
+		return policyv1.MetricField_METRIC_FIELD_SCOPE_SCHEMA_URL, true
+	case "scope_name":
+		return policyv1.MetricField_METRIC_FIELD_SCOPE_NAME, true
+	case "scope_version":
+		return policyv1.MetricField_METRIC_FIELD_SCOPE_VERSION, true
+	default:
+		return policyv1.MetricField_METRIC_FIELD_UNSPECIFIED, false
+	}
+}
+
+func parseMetricType(s string) (policyv1.MetricType, bool) {
+	switch s {
+	case "gauge":
+		return policyv1.MetricType_METRIC_TYPE_GAUGE, true
+	case "sum":
+		return policyv1.MetricType_METRIC_TYPE_SUM, true
+	case "histogram":
+		return policyv1.MetricType_METRIC_TYPE_HISTOGRAM, true
+	case "exponential_histogram":
+		return policyv1.MetricType_METRIC_TYPE_EXPONENTIAL_HISTOGRAM, true
+	case "summary":
+		return policyv1.MetricType_METRIC_TYPE_SUMMARY, true
+	default:
+		return policyv1.MetricType_METRIC_TYPE_UNSPECIFIED, false
+	}
+}
+
+func parseAggregationTemporality(s string) (policyv1.AggregationTemporality, bool) {
+	switch s {
+	case "delta":
+		return policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA, true
+	case "cumulative":
+		return policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, true
+	default:
+		return policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED, false
+	}
+}
+
+// ============================================================================
+// TRACE CONVERSION
+// ============================================================================
+
+func (p *Parser) convertTraceTarget(trace *Trace) (*policyv1.TraceTarget, error) {
+	matchers := make([]*policyv1.TraceMatcher, 0, len(trace.Match))
+	for i, m := range trace.Match {
+		matcher, err := p.convertTraceMatcher(m)
+		if err != nil {
+			return nil, fmt.Errorf("matcher %d: %w", i, err)
+		}
+		matchers = append(matchers, matcher)
+	}
+
+	target := &policyv1.TraceTarget{
+		Match: matchers,
+	}
+
+	if trace.Keep != nil {
+		cfg := &policyv1.TraceSamplingConfig{
+			Percentage: trace.Keep.Percentage,
+		}
+		if trace.Keep.Mode != "" {
+			mode, ok := parseSamplingMode(trace.Keep.Mode)
+			if !ok {
+				return nil, NewParseError("keep.mode", fmt.Sprintf("unknown mode: %s", trace.Keep.Mode))
+			}
+			cfg.Mode = &mode
+		}
+		if trace.Keep.SamplingPrecision != nil {
+			cfg.SamplingPrecision = trace.Keep.SamplingPrecision
+		}
+		if trace.Keep.HashSeed != nil {
+			cfg.HashSeed = trace.Keep.HashSeed
+		}
+		if trace.Keep.FailClosed != nil {
+			cfg.FailClosed = trace.Keep.FailClosed
+		}
+		target.Keep = cfg
+	}
+
+	return target, nil
+}
+
+func (p *Parser) convertTraceMatcher(m TraceMatcher) (*policyv1.TraceMatcher, error) {
+	matcher := &policyv1.TraceMatcher{
+		Negate:          m.Negated,
+		CaseInsensitive: m.CaseInsensitive,
+	}
+
+	// Set field selector
+	if err := p.setTraceFieldSelector(matcher, m); err != nil {
+		return nil, err
+	}
+
+	// For span_kind and span_status, the match is implicit (no match oneof needed)
+	if m.SpanKind != "" || m.SpanStatus != "" {
+		return matcher, nil
+	}
+
+	// For event_name and link_trace_id, the value is in the field selector itself
+	if m.EventName != "" || m.LinkTraceID != "" {
+		return matcher, nil
+	}
+
+	// Set match type
+	if m.Exists != nil {
+		matcher.Match = &policyv1.TraceMatcher_Exists{Exists: *m.Exists}
+	} else if m.Exact != "" {
+		matcher.Match = &policyv1.TraceMatcher_Exact{Exact: m.Exact}
+	} else if m.Regex != "" {
+		if _, err := regexp.Compile(m.Regex); err != nil {
+			return nil, fmt.Errorf("invalid regex: %w", err)
+		}
+		matcher.Match = &policyv1.TraceMatcher_Regex{Regex: m.Regex}
+	} else if m.StartsWith != "" {
+		matcher.Match = &policyv1.TraceMatcher_StartsWith{StartsWith: m.StartsWith}
+	} else if m.EndsWith != "" {
+		matcher.Match = &policyv1.TraceMatcher_EndsWith{EndsWith: m.EndsWith}
+	} else if m.Contains != "" {
+		matcher.Match = &policyv1.TraceMatcher_Contains{Contains: m.Contains}
+	} else {
+		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, or contains)")
+	}
+
+	return matcher, nil
+}
+
+func (p *Parser) setTraceFieldSelector(matcher *policyv1.TraceMatcher, m TraceMatcher) error {
+	count := 0
+	if m.TraceField != "" {
+		count++
+	}
+	if m.SpanAttribute != nil {
+		count++
+	}
+	if m.ResourceAttribute != nil {
+		count++
+	}
+	if m.ScopeAttribute != nil {
+		count++
+	}
+	if m.SpanKind != "" {
+		count++
+	}
+	if m.SpanStatus != "" {
+		count++
+	}
+	if m.EventName != "" {
+		count++
+	}
+	if m.EventAttribute != nil {
+		count++
+	}
+	if m.LinkTraceID != "" {
+		count++
+	}
+
+	if count == 0 {
+		return NewParseError("matcher", "must specify a field type")
+	}
+	if count > 1 {
+		return NewParseError("matcher", "must specify only one field type")
+	}
+
+	if m.TraceField != "" {
+		field, ok := parseTraceField(m.TraceField)
+		if !ok {
+			return NewParseError("trace_field", fmt.Sprintf("unknown field: %s", m.TraceField))
+		}
+		matcher.Field = &policyv1.TraceMatcher_TraceField{TraceField: field}
+		return nil
+	}
+	if m.SpanAttribute != nil {
+		matcher.Field = &policyv1.TraceMatcher_SpanAttribute{
+			SpanAttribute: &policyv1.AttributePath{Path: m.SpanAttribute.Path},
+		}
+		return nil
+	}
+	if m.ResourceAttribute != nil {
+		matcher.Field = &policyv1.TraceMatcher_ResourceAttribute{
+			ResourceAttribute: &policyv1.AttributePath{Path: m.ResourceAttribute.Path},
+		}
+		return nil
+	}
+	if m.ScopeAttribute != nil {
+		matcher.Field = &policyv1.TraceMatcher_ScopeAttribute{
+			ScopeAttribute: &policyv1.AttributePath{Path: m.ScopeAttribute.Path},
+		}
+		return nil
+	}
+	if m.SpanKind != "" {
+		kind, ok := parseSpanKind(m.SpanKind)
+		if !ok {
+			return NewParseError("span_kind", fmt.Sprintf("unknown kind: %s", m.SpanKind))
+		}
+		matcher.Field = &policyv1.TraceMatcher_SpanKind{SpanKind: kind}
+		return nil
+	}
+	if m.SpanStatus != "" {
+		status, ok := parseSpanStatus(m.SpanStatus)
+		if !ok {
+			return NewParseError("span_status", fmt.Sprintf("unknown status: %s", m.SpanStatus))
+		}
+		matcher.Field = &policyv1.TraceMatcher_SpanStatus{SpanStatus: status}
+		return nil
+	}
+	if m.EventName != "" {
+		matcher.Field = &policyv1.TraceMatcher_EventName{EventName: m.EventName}
+		return nil
+	}
+	if m.EventAttribute != nil {
+		matcher.Field = &policyv1.TraceMatcher_EventAttribute{
+			EventAttribute: &policyv1.AttributePath{Path: m.EventAttribute.Path},
+		}
+		return nil
+	}
+	if m.LinkTraceID != "" {
+		matcher.Field = &policyv1.TraceMatcher_LinkTraceId{LinkTraceId: m.LinkTraceID}
+		return nil
+	}
+
+	return NewParseError("matcher", "no field selector")
+}
+
+func parseTraceField(s string) (policyv1.TraceField, bool) {
+	switch s {
+	case "name", "TRACE_FIELD_NAME":
+		return policyv1.TraceField_TRACE_FIELD_NAME, true
+	case "trace_id", "TRACE_FIELD_TRACE_ID":
+		return policyv1.TraceField_TRACE_FIELD_TRACE_ID, true
+	case "span_id", "TRACE_FIELD_SPAN_ID":
+		return policyv1.TraceField_TRACE_FIELD_SPAN_ID, true
+	case "parent_span_id", "TRACE_FIELD_PARENT_SPAN_ID":
+		return policyv1.TraceField_TRACE_FIELD_PARENT_SPAN_ID, true
+	case "trace_state", "TRACE_FIELD_TRACE_STATE":
+		return policyv1.TraceField_TRACE_FIELD_TRACE_STATE, true
+	case "resource_schema_url", "TRACE_FIELD_RESOURCE_SCHEMA_URL":
+		return policyv1.TraceField_TRACE_FIELD_RESOURCE_SCHEMA_URL, true
+	case "scope_schema_url", "TRACE_FIELD_SCOPE_SCHEMA_URL":
+		return policyv1.TraceField_TRACE_FIELD_SCOPE_SCHEMA_URL, true
+	case "scope_name", "TRACE_FIELD_SCOPE_NAME":
+		return policyv1.TraceField_TRACE_FIELD_SCOPE_NAME, true
+	case "scope_version", "TRACE_FIELD_SCOPE_VERSION":
+		return policyv1.TraceField_TRACE_FIELD_SCOPE_VERSION, true
+	default:
+		return policyv1.TraceField_TRACE_FIELD_UNSPECIFIED, false
+	}
+}
+
+func parseSamplingMode(s string) (policyv1.SamplingMode, bool) {
+	switch s {
+	case "hash_seed", "SAMPLING_MODE_HASH_SEED":
+		return policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, true
+	case "proportional", "SAMPLING_MODE_PROPORTIONAL":
+		return policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL, true
+	case "equalizing", "SAMPLING_MODE_EQUALIZING":
+		return policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING, true
+	default:
+		return policyv1.SamplingMode_SAMPLING_MODE_UNSPECIFIED, false
+	}
+}
+
+func parseSpanKind(s string) (policyv1.SpanKind, bool) {
+	switch s {
+	case "internal", "SPAN_KIND_INTERNAL":
+		return policyv1.SpanKind_SPAN_KIND_INTERNAL, true
+	case "server", "SPAN_KIND_SERVER":
+		return policyv1.SpanKind_SPAN_KIND_SERVER, true
+	case "client", "SPAN_KIND_CLIENT":
+		return policyv1.SpanKind_SPAN_KIND_CLIENT, true
+	case "producer", "SPAN_KIND_PRODUCER":
+		return policyv1.SpanKind_SPAN_KIND_PRODUCER, true
+	case "consumer", "SPAN_KIND_CONSUMER":
+		return policyv1.SpanKind_SPAN_KIND_CONSUMER, true
+	default:
+		return policyv1.SpanKind_SPAN_KIND_UNSPECIFIED, false
+	}
+}
+
+func parseSpanStatus(s string) (policyv1.SpanStatusCode, bool) {
+	switch s {
+	case "ok", "SPAN_STATUS_CODE_OK":
+		return policyv1.SpanStatusCode_SPAN_STATUS_CODE_OK, true
+	case "error", "SPAN_STATUS_CODE_ERROR":
+		return policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR, true
+	default:
+		return policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED, false
+	}
 }
 
 // fieldSelection is a tagged union for resolved field selectors.
