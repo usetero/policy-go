@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/usetero/policy-go/compare/v1.3.1...v1.3.2) (2026-02-13)
+
+
+### Bug Fixes
+
+* metric and trace policy loading ([#21](https://github.com/usetero/policy-go/issues/21)) ([41db73c](https://github.com/usetero/policy-go/commit/41db73c135ea1db75dcbbb2f970c5e7cd02cec3a))
+
 ## [1.3.1](https://github.com/usetero/policy-go/compare/v1.3.0...v1.3.1) (2026-02-06)
 
 
