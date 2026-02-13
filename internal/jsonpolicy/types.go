@@ -10,10 +10,11 @@ type File struct {
 
 // Policy represents a single policy in JSON format.
 type Policy struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Log  *Log   `json:"log,omitempty"`
-	// Metric and Trace will be added later
+	ID     string  `json:"id"`
+	Name   string  `json:"name"`
+	Log    *Log    `json:"log,omitempty"`
+	Metric *Metric `json:"metric,omitempty"`
+	Trace  *Trace  `json:"trace,omitempty"`
 }
 
 // Log represents log policy configuration.
@@ -67,6 +68,76 @@ type LogAdd struct {
 	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
 	Value             string         `json:"value"`
 	Upsert            bool           `json:"upsert,omitempty"`
+}
+
+// Metric represents metric policy configuration.
+type Metric struct {
+	Match []MetricMatcher `json:"match"`
+	Keep  bool            `json:"keep"`
+}
+
+// MetricMatcher represents a single matcher for metrics.
+type MetricMatcher struct {
+	// Field selectors
+	MetricField            string         `json:"metric_field,omitempty"`
+	DatapointAttribute     *AttributePath `json:"datapoint_attribute,omitempty"`
+	ResourceAttribute      *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute         *AttributePath `json:"scope_attribute,omitempty"`
+	MetricType             string         `json:"metric_type,omitempty"`
+	AggregationTemporality string         `json:"aggregation_temporality,omitempty"`
+
+	// Match conditions
+	Regex      string `json:"regex,omitempty"`
+	Exact      string `json:"exact,omitempty"`
+	Exists     *bool  `json:"exists,omitempty"`
+	StartsWith string `json:"starts_with,omitempty"`
+	EndsWith   string `json:"ends_with,omitempty"`
+	Contains   string `json:"contains,omitempty"`
+
+	// Flags
+	Negated         bool `json:"negated,omitempty"`
+	CaseInsensitive bool `json:"case_insensitive,omitempty"`
+}
+
+// Trace represents trace policy configuration.
+type Trace struct {
+	Match []TraceMatcher `json:"match"`
+	Keep  *TraceKeep     `json:"keep,omitempty"`
+}
+
+// TraceKeep represents trace sampling configuration.
+type TraceKeep struct {
+	Percentage        float32 `json:"percentage"`
+	Mode              string  `json:"mode,omitempty"`
+	SamplingPrecision *uint32 `json:"sampling_precision,omitempty"`
+	HashSeed          *uint32 `json:"hash_seed,omitempty"`
+	FailClosed        *bool   `json:"fail_closed,omitempty"`
+}
+
+// TraceMatcher represents a single matcher for traces.
+type TraceMatcher struct {
+	// Field selectors
+	TraceField        string         `json:"trace_field,omitempty"`
+	SpanAttribute     *AttributePath `json:"span_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
+	SpanKind          string         `json:"span_kind,omitempty"`
+	SpanStatus        string         `json:"span_status,omitempty"`
+	EventName         string         `json:"event_name,omitempty"`
+	EventAttribute    *AttributePath `json:"event_attribute,omitempty"`
+	LinkTraceID       string         `json:"link_trace_id,omitempty"`
+
+	// Match conditions
+	Regex      string `json:"regex,omitempty"`
+	Exact      string `json:"exact,omitempty"`
+	Exists     *bool  `json:"exists,omitempty"`
+	StartsWith string `json:"starts_with,omitempty"`
+	EndsWith   string `json:"ends_with,omitempty"`
+	Contains   string `json:"contains,omitempty"`
+
+	// Flags
+	Negated         bool `json:"negated,omitempty"`
+	CaseInsensitive bool `json:"case_insensitive,omitempty"`
 }
 
 // AttributePath represents an attribute path that can be specified in multiple ways.

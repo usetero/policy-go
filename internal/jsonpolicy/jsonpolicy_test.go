@@ -913,6 +913,395 @@ func TestParserParseNoTransform(t *testing.T) {
 	assert.Nil(t, policies[0].GetLog().GetTransform())
 }
 
+// ============================================================================
+// METRIC TESTS
+// ============================================================================
+
+func TestParserParseMetricPolicy(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "drop-metrics",
+			"name": "Drop Metrics",
+			"metric": {
+				"match": [{"metric_field": "name", "regex": "http\\..*"}],
+				"keep": false
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	p := policies[0]
+	assert.Equal(t, "drop-metrics", p.GetId())
+	require.NotNil(t, p.GetMetric())
+	assert.Nil(t, p.GetLog())
+	assert.Len(t, p.GetMetric().GetMatch(), 1)
+	assert.False(t, p.GetMetric().GetKeep())
+
+	matcher := p.GetMetric().GetMatch()[0]
+	mf, ok := matcher.GetField().(*policyv1.MetricMatcher_MetricField)
+	require.True(t, ok)
+	assert.Equal(t, policyv1.MetricField_METRIC_FIELD_NAME, mf.MetricField)
+	assert.Equal(t, "http\\..*", matcher.GetRegex())
+}
+
+func TestParserParseMetricKeepTrue(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "keep-metrics",
+			"name": "Keep Metrics",
+			"metric": {
+				"match": [{"metric_field": "name", "exact": "important"}],
+				"keep": true
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+	assert.True(t, policies[0].GetMetric().GetKeep())
+}
+
+func TestParserParseMetricAllFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    string
+		expected policyv1.MetricField
+	}{
+		{"name", "name", policyv1.MetricField_METRIC_FIELD_NAME},
+		{"description", "description", policyv1.MetricField_METRIC_FIELD_DESCRIPTION},
+		{"unit", "unit", policyv1.MetricField_METRIC_FIELD_UNIT},
+		{"scope_name", "scope_name", policyv1.MetricField_METRIC_FIELD_SCOPE_NAME},
+		{"scope_version", "scope_version", policyv1.MetricField_METRIC_FIELD_SCOPE_VERSION},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := `{"policies": [{"id": "test", "name": "Test", "metric": {"match": [{"metric_field": "` + tt.field + `", "regex": ".*"}], "keep": false}}]}`
+			policies, err := parser.ParseBytes([]byte(j))
+			require.NoError(t, err)
+
+			matcher := policies[0].GetMetric().GetMatch()[0]
+			mf, ok := matcher.GetField().(*policyv1.MetricMatcher_MetricField)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, mf.MetricField)
+		})
+	}
+}
+
+func TestParserParseMetricDatapointAttribute(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"metric": {
+				"match": [{"datapoint_attribute": "host.name", "exact": "prod-1"}],
+				"keep": false
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	matcher := policies[0].GetMetric().GetMatch()[0]
+	attr, ok := matcher.GetField().(*policyv1.MetricMatcher_DatapointAttribute)
+	require.True(t, ok)
+	assert.Equal(t, []string{"host.name"}, attr.DatapointAttribute.GetPath())
+}
+
+func TestParserParseMetricType(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeName string
+		expected policyv1.MetricType
+	}{
+		{"gauge", "gauge", policyv1.MetricType_METRIC_TYPE_GAUGE},
+		{"sum", "sum", policyv1.MetricType_METRIC_TYPE_SUM},
+		{"histogram", "histogram", policyv1.MetricType_METRIC_TYPE_HISTOGRAM},
+		{"exponential_histogram", "exponential_histogram", policyv1.MetricType_METRIC_TYPE_EXPONENTIAL_HISTOGRAM},
+		{"summary", "summary", policyv1.MetricType_METRIC_TYPE_SUMMARY},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := `{"policies": [{"id": "test", "name": "Test", "metric": {"match": [{"metric_type": "` + tt.typeName + `"}], "keep": false}}]}`
+			policies, err := parser.ParseBytes([]byte(j))
+			require.NoError(t, err)
+
+			matcher := policies[0].GetMetric().GetMatch()[0]
+			mt, ok := matcher.GetField().(*policyv1.MetricMatcher_MetricType)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, mt.MetricType)
+		})
+	}
+}
+
+func TestParserParseMetricAggregationTemporality(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected policyv1.AggregationTemporality
+	}{
+		{"delta", "delta", policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA},
+		{"cumulative", "cumulative", policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := `{"policies": [{"id": "test", "name": "Test", "metric": {"match": [{"aggregation_temporality": "` + tt.value + `"}], "keep": false}}]}`
+			policies, err := parser.ParseBytes([]byte(j))
+			require.NoError(t, err)
+
+			matcher := policies[0].GetMetric().GetMatch()[0]
+			at, ok := matcher.GetField().(*policyv1.MetricMatcher_AggregationTemporality)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, at.AggregationTemporality)
+		})
+	}
+}
+
+func TestParserParseMetricUnknownFieldError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{"policies": [{"id": "test", "name": "Test", "metric": {"match": [{"metric_field": "unknown", "regex": ".*"}], "keep": false}}]}`
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+}
+
+// ============================================================================
+// TRACE TESTS
+// ============================================================================
+
+func TestParserParseTracePolicy(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "trace-policy",
+			"name": "Trace Policy",
+			"trace": {
+				"match": [{"trace_field": "name", "regex": "/api/.*"}],
+				"keep": {"percentage": 50}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	p := policies[0]
+	assert.Equal(t, "trace-policy", p.GetId())
+	require.NotNil(t, p.GetTrace())
+	assert.Nil(t, p.GetLog())
+	assert.Nil(t, p.GetMetric())
+	assert.Len(t, p.GetTrace().GetMatch(), 1)
+	assert.Equal(t, float32(50), p.GetTrace().GetKeep().GetPercentage())
+}
+
+func TestParserParseTraceNoKeep(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"trace": {
+				"match": [{"trace_field": "name", "regex": ".*"}]
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+	assert.Nil(t, policies[0].GetTrace().GetKeep())
+}
+
+func TestParserParseTraceAllFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    string
+		expected policyv1.TraceField
+	}{
+		{"name", "name", policyv1.TraceField_TRACE_FIELD_NAME},
+		{"trace_id", "trace_id", policyv1.TraceField_TRACE_FIELD_TRACE_ID},
+		{"span_id", "span_id", policyv1.TraceField_TRACE_FIELD_SPAN_ID},
+		{"parent_span_id", "parent_span_id", policyv1.TraceField_TRACE_FIELD_PARENT_SPAN_ID},
+		{"trace_state", "trace_state", policyv1.TraceField_TRACE_FIELD_TRACE_STATE},
+		{"scope_name", "scope_name", policyv1.TraceField_TRACE_FIELD_SCOPE_NAME},
+		{"scope_version", "scope_version", policyv1.TraceField_TRACE_FIELD_SCOPE_VERSION},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"trace_field": "` + tt.field + `", "regex": ".*"}]}}]}`
+			policies, err := parser.ParseBytes([]byte(j))
+			require.NoError(t, err)
+
+			matcher := policies[0].GetTrace().GetMatch()[0]
+			tf, ok := matcher.GetField().(*policyv1.TraceMatcher_TraceField)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, tf.TraceField)
+		})
+	}
+}
+
+func TestParserParseTraceSpanKind(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		expected policyv1.SpanKind
+	}{
+		{"internal", "internal", policyv1.SpanKind_SPAN_KIND_INTERNAL},
+		{"server", "server", policyv1.SpanKind_SPAN_KIND_SERVER},
+		{"client", "client", policyv1.SpanKind_SPAN_KIND_CLIENT},
+		{"producer", "producer", policyv1.SpanKind_SPAN_KIND_PRODUCER},
+		{"consumer", "consumer", policyv1.SpanKind_SPAN_KIND_CONSUMER},
+		{"proto form", "SPAN_KIND_INTERNAL", policyv1.SpanKind_SPAN_KIND_INTERNAL},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"span_kind": "` + tt.kind + `"}]}}]}`
+			policies, err := parser.ParseBytes([]byte(j))
+			require.NoError(t, err)
+
+			matcher := policies[0].GetTrace().GetMatch()[0]
+			sk, ok := matcher.GetField().(*policyv1.TraceMatcher_SpanKind)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, sk.SpanKind)
+		})
+	}
+}
+
+func TestParserParseTraceSpanStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   string
+		expected policyv1.SpanStatusCode
+	}{
+		{"ok", "ok", policyv1.SpanStatusCode_SPAN_STATUS_CODE_OK},
+		{"error", "error", policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR},
+		{"proto form", "SPAN_STATUS_CODE_ERROR", policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR},
+	}
+
+	parser := NewParser()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"span_status": "` + tt.status + `"}]}}]}`
+			policies, err := parser.ParseBytes([]byte(j))
+			require.NoError(t, err)
+
+			matcher := policies[0].GetTrace().GetMatch()[0]
+			ss, ok := matcher.GetField().(*policyv1.TraceMatcher_SpanStatus)
+			require.True(t, ok)
+			assert.Equal(t, tt.expected, ss.SpanStatus)
+		})
+	}
+}
+
+func TestParserParseTraceSpanAttribute(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"trace": {
+				"match": [{"span_attribute": "http.method", "exact": "GET"}]
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	matcher := policies[0].GetTrace().GetMatch()[0]
+	attr, ok := matcher.GetField().(*policyv1.TraceMatcher_SpanAttribute)
+	require.True(t, ok)
+	assert.Equal(t, []string{"http.method"}, attr.SpanAttribute.GetPath())
+	assert.Equal(t, "GET", matcher.GetExact())
+}
+
+func TestParserParseTraceUnknownFieldError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"trace_field": "unknown", "regex": ".*"}]}}]}`
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+}
+
+func TestParserParseTraceUnknownSpanKindError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"span_kind": "unknown"}]}}]}`
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+}
+
+func TestParserParseTraceUnknownSpanStatusError(t *testing.T) {
+	parser := NewParser()
+
+	j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"span_status": "unknown"}]}}]}`
+	_, err := parser.ParseBytes([]byte(j))
+	require.Error(t, err)
+}
+
+func TestParserParseMixedPolicies(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [
+			{
+				"id": "log-policy",
+				"name": "Log Policy",
+				"log": {
+					"match": [{"log_field": "body", "regex": "error"}],
+					"keep": "none"
+				}
+			},
+			{
+				"id": "metric-policy",
+				"name": "Metric Policy",
+				"metric": {
+					"match": [{"metric_field": "name", "regex": "http\\..*"}],
+					"keep": false
+				}
+			},
+			{
+				"id": "trace-policy",
+				"name": "Trace Policy",
+				"trace": {
+					"match": [{"span_kind": "internal"}],
+					"keep": {"percentage": 100}
+				}
+			}
+		]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+	require.Len(t, policies, 3)
+
+	assert.NotNil(t, policies[0].GetLog())
+	assert.NotNil(t, policies[1].GetMetric())
+	assert.NotNil(t, policies[2].GetTrace())
+}
+
 // Helper functions
 func strPtr(s string) *string {
 	return &s
