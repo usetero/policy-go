@@ -3,14 +3,13 @@ package policy
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"time"
 
-	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
@@ -264,7 +263,7 @@ func (p *HttpProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 
 	switch p.config.ContentType {
 	case ContentTypeJSON:
-		body, err = json.Marshal(syncRequestToMap(req))
+		body, err = protojson.Marshal(req)
 		if err != nil {
 			return nil, WrapError(ErrProvider, "failed to encode request", err)
 		}
@@ -310,7 +309,7 @@ func (p *HttpProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 	var syncResp policyv1.SyncResponse
 	switch p.config.ContentType {
 	case ContentTypeJSON:
-		if err := json.Unmarshal(respBody, &syncResp); err != nil {
+		if err := protojson.Unmarshal(respBody, &syncResp); err != nil {
 			return nil, WrapError(ErrProvider, "failed to decode JSON response", err)
 		}
 	default:
@@ -392,85 +391,4 @@ func collectPolicyStatuses(collector StatsCollector) []*policyv1.PolicySyncStatu
 	}
 
 	return statuses
-}
-
-// syncRequestToMap converts a SyncRequest to a map for JSON encoding.
-// This is needed because protobuf JSON encoding uses different field names.
-func syncRequestToMap(req *policyv1.SyncRequest) map[string]any {
-	m := map[string]any{
-		"full_sync":                     req.GetFullSync(),
-		"last_sync_timestamp_unix_nano": req.GetLastSyncTimestampUnixNano(),
-		"last_successful_hash":          req.GetLastSuccessfulHash(),
-	}
-
-	if req.GetClientMetadata() != nil {
-		cm := req.GetClientMetadata()
-		cmMap := map[string]any{}
-
-		if len(cm.GetSupportedPolicyStages()) > 0 {
-			stages := make([]int32, len(cm.GetSupportedPolicyStages()))
-			for i, s := range cm.GetSupportedPolicyStages() {
-				stages[i] = int32(s)
-			}
-			cmMap["supported_policy_stages"] = stages
-		}
-
-		if len(cm.GetLabels()) > 0 {
-			cmMap["labels"] = keyValuesToMaps(cm.GetLabels())
-		}
-
-		if len(cm.GetResourceAttributes()) > 0 {
-			cmMap["resource_attributes"] = keyValuesToMaps(cm.GetResourceAttributes())
-		}
-
-		m["client_metadata"] = cmMap
-	}
-
-	if len(req.GetPolicyStatuses()) > 0 {
-		statuses := make([]map[string]any, len(req.GetPolicyStatuses()))
-		for i, s := range req.GetPolicyStatuses() {
-			sm := map[string]any{
-				"id":           s.GetId(),
-				"match_hits":   s.GetMatchHits(),
-				"match_misses": s.GetMatchMisses(),
-			}
-			if s.GetRemove() != nil {
-				sm["remove"] = map[string]any{"hits": s.GetRemove().GetHits(), "misses": s.GetRemove().GetMisses()}
-			}
-			if s.GetRedact() != nil {
-				sm["redact"] = map[string]any{"hits": s.GetRedact().GetHits(), "misses": s.GetRedact().GetMisses()}
-			}
-			if s.GetRename() != nil {
-				sm["rename"] = map[string]any{"hits": s.GetRename().GetHits(), "misses": s.GetRename().GetMisses()}
-			}
-			if s.GetAdd() != nil {
-				sm["add"] = map[string]any{"hits": s.GetAdd().GetHits(), "misses": s.GetAdd().GetMisses()}
-			}
-			statuses[i] = sm
-		}
-		m["policy_statuses"] = statuses
-	}
-
-	return m
-}
-
-func keyValuesToMaps(kvs []*commonv1.KeyValue) []map[string]any {
-	result := make([]map[string]any, len(kvs))
-	for i, kv := range kvs {
-		m := map[string]any{"key": kv.GetKey()}
-		if v := kv.GetValue(); v != nil {
-			switch val := v.GetValue().(type) {
-			case *commonv1.AnyValue_StringValue:
-				m["value"] = map[string]any{"stringValue": val.StringValue}
-			case *commonv1.AnyValue_IntValue:
-				m["value"] = map[string]any{"intValue": val.IntValue}
-			case *commonv1.AnyValue_BoolValue:
-				m["value"] = map[string]any{"boolValue": val.BoolValue}
-			case *commonv1.AnyValue_DoubleValue:
-				m["value"] = map[string]any{"doubleValue": val.DoubleValue}
-			}
-		}
-		result[i] = m
-	}
-	return result
 }

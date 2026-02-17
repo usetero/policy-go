@@ -1,7 +1,7 @@
 package policy
 
 import (
-	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
@@ -244,20 +245,21 @@ func TestHttpProvider_Load_JSON(t *testing.T) {
 		// Verify request
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
-		// Parse JSON request
+		// Parse JSON request using protojson
 		body, _ := io.ReadAll(r.Body)
-		var req map[string]any
-		require.NoError(t, json.Unmarshal(body, &req))
-		assert.Equal(t, true, req["full_sync"])
+		var req policyv1.SyncRequest
+		require.NoError(t, protojson.Unmarshal(body, &req))
+		assert.True(t, req.GetFullSync())
 
-		// Send JSON response (using protobuf JSON format)
+		// Send JSON response using protojson (spec-compliant proto3 JSON)
 		resp := &policyv1.SyncResponse{
 			Policies: []*policyv1.Policy{
 				{Id: "json-policy", Name: "JSON Policy"},
 			},
 			Hash: "json-hash",
 		}
-		respBytes, _ := json.Marshal(resp)
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(respBytes)
 	}))
@@ -268,6 +270,388 @@ func TestHttpProvider_Load_JSON(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
+	assert.Equal(t, "json-policy", policies[0].GetId())
+}
+
+func TestHttpProvider_Load_JSON_StringUint64(t *testing.T) {
+	// Proto3 JSON spec requires uint64/int64 to be encoded as strings.
+	// A spec-compliant server (using protojson.Marshal) emits string values.
+	// encoding/json would reject these; protojson handles them correctly.
+	ts := uint64(1771277811889719000)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:                 "p1",
+					Name:               "test",
+					CreatedAtUnixNano:  ts,
+					ModifiedAtUnixNano: ts,
+				},
+			},
+			Hash:                  "hash-1",
+			SyncTimestampUnixNano: ts,
+		}
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
+
+		// Verify the server output actually contains string-encoded uint64s
+		assert.Contains(t, string(respBytes), fmt.Sprintf("%q", fmt.Sprint(ts)))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, ts, policies[0].GetCreatedAtUnixNano())
+	assert.Equal(t, ts, policies[0].GetModifiedAtUnixNano())
+	assert.Equal(t, ts, p.lastSyncTimestamp)
+}
+
+func TestHttpProvider_Load_JSON_RawStringUint64(t *testing.T) {
+	// Test with hand-crafted JSON where uint64 fields are JSON strings,
+	// exactly as a spec-compliant proto3 server would emit.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := `{
+			"policies": [{"id": "p1", "name": "test"}],
+			"hash": "abc",
+			"syncTimestampUnixNano": "1771277811889719000"
+		}`
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(raw))
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, uint64(1771277811889719000), p.lastSyncTimestamp)
+}
+
+func TestHttpProvider_Load_JSON_OneofLogTarget(t *testing.T) {
+	// Oneof fields require protojson to decode correctly.
+	// encoding/json cannot populate proto oneof interfaces.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:      "log-policy",
+					Name:    "Log Filter",
+					Enabled: true,
+					Target: &policyv1.Policy_Log{
+						Log: &policyv1.LogTarget{
+							Keep: "all",
+							Match: []*policyv1.LogMatcher{
+								{
+									Field: &policyv1.LogMatcher_LogField{
+										LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT,
+									},
+									Match: &policyv1.LogMatcher_Exact{
+										Exact: "ERROR",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Hash: "log-hash",
+		}
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	policy := policies[0]
+	assert.Equal(t, "log-policy", policy.GetId())
+	assert.True(t, policy.GetEnabled())
+
+	// Verify oneof target was decoded
+	logTarget := policy.GetLog()
+	require.NotNil(t, logTarget, "log oneof target should be populated")
+	assert.Equal(t, "all", logTarget.GetKeep())
+	require.Len(t, logTarget.GetMatch(), 1)
+
+	matcher := logTarget.GetMatch()[0]
+	assert.Equal(t, policyv1.LogField_LOG_FIELD_SEVERITY_TEXT, matcher.GetLogField())
+	assert.Equal(t, "ERROR", matcher.GetExact())
+}
+
+func TestHttpProvider_Load_JSON_OneofTraceTarget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:      "trace-policy",
+					Name:    "Trace Sampler",
+					Enabled: true,
+					Target: &policyv1.Policy_Trace{
+						Trace: &policyv1.TraceTarget{
+							Keep: &policyv1.TraceSamplingConfig{
+								Percentage: 50.0,
+							},
+							Match: []*policyv1.TraceMatcher{
+								{
+									Field: &policyv1.TraceMatcher_TraceField{
+										TraceField: policyv1.TraceField_TRACE_FIELD_NAME,
+									},
+									Match: &policyv1.TraceMatcher_StartsWith{
+										StartsWith: "GET /api",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Hash: "trace-hash",
+		}
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	policy := policies[0]
+	traceTarget := policy.GetTrace()
+	require.NotNil(t, traceTarget, "trace oneof target should be populated")
+	assert.Equal(t, float32(50.0), traceTarget.GetKeep().GetPercentage())
+	require.Len(t, traceTarget.GetMatch(), 1)
+	assert.Equal(t, "GET /api", traceTarget.GetMatch()[0].GetStartsWith())
+}
+
+func TestHttpProvider_Load_JSON_OneofMetricTarget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:      "metric-policy",
+					Name:    "Metric Filter",
+					Enabled: true,
+					Target: &policyv1.Policy_Metric{
+						Metric: &policyv1.MetricTarget{
+							Keep: false,
+							Match: []*policyv1.MetricMatcher{
+								{
+									Field: &policyv1.MetricMatcher_MetricField{
+										MetricField: policyv1.MetricField_METRIC_FIELD_NAME,
+									},
+									Match: &policyv1.MetricMatcher_Regex{
+										Regex: "system\\.cpu\\..*",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Hash: "metric-hash",
+		}
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	policy := policies[0]
+	metricTarget := policy.GetMetric()
+	require.NotNil(t, metricTarget, "metric oneof target should be populated")
+	assert.False(t, metricTarget.GetKeep())
+	require.Len(t, metricTarget.GetMatch(), 1)
+	assert.Equal(t, "system\\.cpu\\..*", metricTarget.GetMatch()[0].GetRegex())
+}
+
+func TestHttpProvider_Load_JSON_MultiplePoliciesMixedTargets(t *testing.T) {
+	// Test a realistic sync response with multiple policies using different
+	// oneof targets and string-encoded uint64 timestamps.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := uint64(1771277811889719000)
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:                 "log-1",
+					Name:               "Log Keep All",
+					Enabled:            true,
+					CreatedAtUnixNano:  ts,
+					ModifiedAtUnixNano: ts,
+					Target: &policyv1.Policy_Log{
+						Log: &policyv1.LogTarget{Keep: "all"},
+					},
+				},
+				{
+					Id:                 "trace-1",
+					Name:               "Trace Sample",
+					Enabled:            true,
+					CreatedAtUnixNano:  ts,
+					ModifiedAtUnixNano: ts,
+					Target: &policyv1.Policy_Trace{
+						Trace: &policyv1.TraceTarget{
+							Keep: &policyv1.TraceSamplingConfig{Percentage: 25.0},
+						},
+					},
+				},
+				{
+					Id:                 "metric-1",
+					Name:               "Metric Drop",
+					Enabled:            true,
+					CreatedAtUnixNano:  ts,
+					ModifiedAtUnixNano: ts,
+					Target: &policyv1.Policy_Metric{
+						Metric: &policyv1.MetricTarget{Keep: false},
+					},
+				},
+			},
+			Hash:                  "mixed-hash",
+			SyncTimestampUnixNano: ts,
+		}
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 3)
+
+	// Verify each policy decoded its oneof target correctly
+	assert.NotNil(t, policies[0].GetLog())
+	assert.Nil(t, policies[0].GetTrace())
+	assert.Nil(t, policies[0].GetMetric())
+
+	assert.Nil(t, policies[1].GetLog())
+	assert.NotNil(t, policies[1].GetTrace())
+	assert.Nil(t, policies[1].GetMetric())
+
+	assert.Nil(t, policies[2].GetLog())
+	assert.Nil(t, policies[2].GetTrace())
+	assert.NotNil(t, policies[2].GetMetric())
+
+	// Verify uint64 timestamps survived
+	expectedTS := uint64(1771277811889719000)
+	for _, pol := range policies {
+		assert.Equal(t, expectedTS, pol.GetCreatedAtUnixNano())
+		assert.Equal(t, expectedTS, pol.GetModifiedAtUnixNano())
+	}
+	assert.Equal(t, expectedTS, p.lastSyncTimestamp)
+}
+
+func TestHttpProvider_Load_JSON_AttributeMatchers(t *testing.T) {
+	// Test nested oneof fields within matchers (attribute paths).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := &policyv1.SyncResponse{
+			Policies: []*policyv1.Policy{
+				{
+					Id:      "attr-policy",
+					Name:    "Attribute Matcher",
+					Enabled: true,
+					Target: &policyv1.Policy_Log{
+						Log: &policyv1.LogTarget{
+							Keep: "none",
+							Match: []*policyv1.LogMatcher{
+								{
+									Field: &policyv1.LogMatcher_LogAttribute{
+										LogAttribute: &policyv1.AttributePath{Path: []string{"http.status_code"}},
+									},
+									Match: &policyv1.LogMatcher_Exact{
+										Exact: "500",
+									},
+								},
+								{
+									Field: &policyv1.LogMatcher_ResourceAttribute{
+										ResourceAttribute: &policyv1.AttributePath{Path: []string{"service.name"}},
+									},
+									Match: &policyv1.LogMatcher_Contains{
+										Contains: "payment",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			Hash: "attr-hash",
+		}
+		respBytes, err := protojson.Marshal(resp)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	logTarget := policies[0].GetLog()
+	require.NotNil(t, logTarget)
+	require.Len(t, logTarget.GetMatch(), 2)
+
+	// First matcher: log attribute exact match
+	m0 := logTarget.GetMatch()[0]
+	assert.Equal(t, []string{"http.status_code"}, m0.GetLogAttribute().GetPath())
+	assert.Equal(t, "500", m0.GetExact())
+
+	// Second matcher: resource attribute contains
+	m1 := logTarget.GetMatch()[1]
+	assert.Equal(t, []string{"service.name"}, m1.GetResourceAttribute().GetPath())
+	assert.Equal(t, "payment", m1.GetContains())
+}
+
+func TestHttpProvider_Load_JSON_NumericUint64AlsoWorks(t *testing.T) {
+	// protojson.Unmarshal also accepts numeric uint64 values (both formats
+	// are valid per the proto3 JSON spec). Verify backwards compatibility.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := `{
+			"policies": [{"id": "p1", "name": "test"}],
+			"hash": "abc",
+			"syncTimestampUnixNano": 1234567890
+		}`
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(raw))
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeJSON))
+	policies, err := p.Load()
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, uint64(1234567890), p.lastSyncTimestamp)
 }
 
 func TestHttpProvider_Load_WithHeaders(t *testing.T) {
@@ -787,48 +1171,6 @@ func TestCollectPolicyStatuses_Values(t *testing.T) {
 	assert.Equal(t, int64(100), status.GetMatchHits())
 	// MatchMisses = Drops + Samples + RateLimited = 10 + 5 + 3 = 18
 	assert.Equal(t, int64(18), status.GetMatchMisses())
-}
-
-func TestSyncRequestToMap(t *testing.T) {
-	tests := []struct {
-		name string
-		req  *policyv1.SyncRequest
-		want map[string]any
-	}{
-		{
-			name: "minimal request",
-			req: &policyv1.SyncRequest{
-				FullSync: true,
-			},
-			want: map[string]any{
-				"full_sync":                     true,
-				"last_sync_timestamp_unix_nano": uint64(0),
-				"last_successful_hash":          "",
-			},
-		},
-		{
-			name: "with hash and timestamp",
-			req: &policyv1.SyncRequest{
-				FullSync:                  false,
-				LastSuccessfulHash:        "abc123",
-				LastSyncTimestampUnixNano: 1234567890,
-			},
-			want: map[string]any{
-				"full_sync":                     false,
-				"last_sync_timestamp_unix_nano": uint64(1234567890),
-				"last_successful_hash":          "abc123",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := syncRequestToMap(tt.req)
-
-			assert.Equal(t, tt.want["full_sync"], got["full_sync"])
-			assert.Equal(t, tt.want["last_successful_hash"], got["last_successful_hash"])
-		})
-	}
 }
 
 func TestHttpProvider_ConcurrentAccess(t *testing.T) {
