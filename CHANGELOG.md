@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.5](https://github.com/usetero/policy-go/compare/v1.3.4...v1.3.5) (2026-02-18)
+
+
+### Bug Fixes
+
+* all policies post keep should be run if decision is matched ([#30](https://github.com/usetero/policy-go/issues/30)) ([a04c5de](https://github.com/usetero/policy-go/commit/a04c5deca3cec163a7e703eaae7d5f0b8ab8ddf9))
+* negate not negated ([#29](https://github.com/usetero/policy-go/issues/29)) ([8c9deaa](https://github.com/usetero/policy-go/commit/8c9deaacf996e1fc6fa2de3410d493f3f92b82fd))
+* rename transform fields ([#27](https://github.com/usetero/policy-go/issues/27)) ([13f2b86](https://github.com/usetero/policy-go/commit/13f2b861b3af05cd613275ecb601cf9190d34675))
+* support enabled ([#31](https://github.com/usetero/policy-go/issues/31)) ([e2103b7](https://github.com/usetero/policy-go/commit/e2103b7088c4cbc3d68c723dfd37b6aebe10522c))
+
 ## [1.3.4](https://github.com/usetero/policy-go/compare/v1.3.3...v1.3.4) (2026-02-18)
 
 
