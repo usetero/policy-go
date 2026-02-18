@@ -52,10 +52,10 @@ type LogRedact struct {
 
 // LogRename specifies a field to rename.
 type LogRename struct {
-	LogField          string         `json:"log_field,omitempty"`
-	LogAttribute      *AttributePath `json:"log_attribute,omitempty"`
-	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
-	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
+	LogField          string         `json:"from_log_field,omitempty"`
+	LogAttribute      *AttributePath `json:"from_log_attribute,omitempty"`
+	ResourceAttribute *AttributePath `json:"from_resource_attribute,omitempty"`
+	ScopeAttribute    *AttributePath `json:"from_scope_attribute,omitempty"`
 	To                string         `json:"to"`
 	Upsert            bool           `json:"upsert,omitempty"`
 }

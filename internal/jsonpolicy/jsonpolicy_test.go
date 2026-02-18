@@ -717,8 +717,8 @@ func TestParserParseTransformRename(t *testing.T) {
 				"keep": "all",
 				"transform": {
 					"rename": [
-						{"log_attribute": "old_name", "to": "new_name", "upsert": true},
-						{"resource_attribute": "host", "to": "hostname"}
+						{"from_log_attribute": "old_name", "to": "new_name", "upsert": true},
+						{"from_resource_attribute": "host", "to": "hostname"}
 					]
 				}
 			}
@@ -788,7 +788,7 @@ func TestParserParseTransformMixed(t *testing.T) {
 				"transform": {
 					"remove": [{"log_attribute": "secret"}],
 					"redact": [{"log_attribute": "api_key", "replacement": "[REDACTED]"}],
-					"rename": [{"log_attribute": "old", "to": "new", "upsert": true}],
+					"rename": [{"from_log_attribute": "old", "to": "new", "upsert": true}],
 					"add": [{"log_attribute": "processed", "value": "true"}]
 				}
 			}
@@ -883,7 +883,7 @@ func TestParserParseTransformRenameMissingToError(t *testing.T) {
 				"match": [{"log_field": "body", "regex": ".*"}],
 				"keep": "all",
 				"transform": {
-					"rename": [{"log_attribute": "old"}]
+					"rename": [{"from_log_attribute": "old"}]
 				}
 			}
 		}]
