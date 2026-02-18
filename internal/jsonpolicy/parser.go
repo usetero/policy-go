@@ -66,7 +66,7 @@ func (p *Parser) convertPolicy(jp Policy) (*policyv1.Policy, error) {
 	pol := &policyv1.Policy{
 		Id:      jp.ID,
 		Name:    jp.Name,
-		Enabled: true,
+		Enabled: jp.Enabled == nil || *jp.Enabled,
 	}
 
 	if jp.Log != nil {
