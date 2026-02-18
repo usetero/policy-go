@@ -431,6 +431,7 @@ func (p *Parser) convertMetricMatcher(m MetricMatcher) (*policyv1.MetricMatcher,
 
 	// For metric_type and aggregation_temporality, the match is implicit (no match oneof needed)
 	if m.MetricType != "" || m.AggregationTemporality != "" {
+		matcher.Match = &policyv1.MetricMatcher_Exists{Exists: true}
 		return matcher, nil
 	}
 
@@ -637,6 +638,7 @@ func (p *Parser) convertTraceMatcher(m TraceMatcher) (*policyv1.TraceMatcher, er
 
 	// For span_kind and span_status, the match is implicit (no match oneof needed)
 	if m.SpanKind != "" || m.SpanStatus != "" {
+		matcher.Match = &policyv1.TraceMatcher_Exists{Exists: true}
 		return matcher, nil
 	}
 
