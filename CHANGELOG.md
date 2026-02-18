@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/usetero/policy-go/compare/v1.3.3...v1.3.4) (2026-02-18)
+
+
+### Bug Fixes
+
+* don't emit null matchers for enum fields ([#25](https://github.com/usetero/policy-go/issues/25)) ([834da16](https://github.com/usetero/policy-go/commit/834da163662d11fa43017ff7d386fc70aaa6f963))
+
 ## [1.3.3](https://github.com/usetero/policy-go/compare/v1.3.2...v1.3.3) (2026-02-17)
 
 
