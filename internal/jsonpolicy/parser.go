@@ -135,7 +135,7 @@ func (p *Parser) convertLogTarget(log *Log) (*policyv1.LogTarget, error) {
 
 func (p *Parser) convertLogMatcher(m LogMatcher) (*policyv1.LogMatcher, error) {
 	matcher := &policyv1.LogMatcher{
-		Negate:          m.Negated,
+		Negate:          m.Negate,
 		CaseInsensitive: m.CaseInsensitive,
 	}
 
@@ -420,7 +420,7 @@ func (p *Parser) convertMetricTarget(metric *Metric) (*policyv1.MetricTarget, er
 
 func (p *Parser) convertMetricMatcher(m MetricMatcher) (*policyv1.MetricMatcher, error) {
 	matcher := &policyv1.MetricMatcher{
-		Negate:          m.Negated,
+		Negate:          m.Negate,
 		CaseInsensitive: m.CaseInsensitive,
 	}
 
@@ -627,7 +627,7 @@ func (p *Parser) convertTraceTarget(trace *Trace) (*policyv1.TraceTarget, error)
 
 func (p *Parser) convertTraceMatcher(m TraceMatcher) (*policyv1.TraceMatcher, error) {
 	matcher := &policyv1.TraceMatcher{
-		Negate:          m.Negated,
+		Negate:          m.Negate,
 		CaseInsensitive: m.CaseInsensitive,
 	}
 

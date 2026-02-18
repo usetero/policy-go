@@ -465,7 +465,7 @@ Shorthand forms are also supported:
 | `ends_with`        | Match if field ends with the literal suffix               |
 | `contains`         | Match if field contains the literal substring             |
 | `exists`           | Match if field exists (true) or doesn't exist (false)     |
-| `negated`          | Invert the match condition                                |
+| `negate`           | Invert the match condition                                |
 | `case_insensitive` | Make the match case-insensitive (works with all matchers) |
 
 The literal matchers (`starts_with`, `ends_with`, `contains`, `exact`) are
