@@ -2750,3 +2750,78 @@ func TestEvaluateLogTransformRedactBody(t *testing.T) {
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, []byte("[BODY REDACTED]"), record.Body)
 }
+
+func TestEvaluateLogTransformMultiplePolicies(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "policy-add-tag1",
+			Name: "Add Tag1",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^.*$"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"tag1"}},
+								},
+								Value:  "a",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "policy-add-tag2",
+			Name: "Add Tag2",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^.*$"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"tag2"}},
+								},
+								Value:  "b",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body:          []byte("hello world"),
+		LogAttributes: map[string]any{},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+
+	// Both policies matched — transforms from both should be applied
+	assert.Equal(t, "a", record.LogAttributes["tag1"], "tag1 from policy 1 should be present")
+	assert.Equal(t, "b", record.LogAttributes["tag2"], "tag2 from policy 2 should be present")
+}

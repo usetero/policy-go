@@ -9,8 +9,10 @@ import (
 
 // evalState holds reusable slices for policy evaluation to avoid allocations.
 type evalState struct {
-	matchCounts  []int
-	disqualified []bool
+	matchCounts    []int
+	disqualified   []bool
+	matchedIndices []int
+	matchedCount   int
 }
 
 var evalStatePool = sync.Pool{
@@ -100,14 +102,17 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 	if cap(state.matchCounts) < policyCount {
 		state.matchCounts = make([]int, policyCount)
 		state.disqualified = make([]bool, policyCount)
+		state.matchedIndices = make([]int, policyCount)
 	} else {
 		state.matchCounts = state.matchCounts[:policyCount]
 		state.disqualified = state.disqualified[:policyCount]
+		state.matchedIndices = state.matchedIndices[:policyCount]
 		for i := range state.matchCounts {
 			state.matchCounts[i] = 0
 			state.disqualified[i] = false
 		}
 	}
+	state.matchedCount = 0
 
 	matchCounts := state.matchCounts
 	disqualified := state.disqualified
@@ -179,7 +184,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 		db.ReleaseMatched(matched)
 	}
 
-	// Find the most restrictive matching policy
+	// Find all matching policies and track the most restrictive one
 	var bestPolicy *engine.CompiledPolicy[engine.LogField]
 	bestRestrictiveness := -1
 
@@ -200,6 +205,9 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 			policy.Stats.RecordHit()
 		}
 
+		state.matchedIndices[state.matchedCount] = i
+		state.matchedCount++
+
 		// Select most restrictive
 		restrictiveness := policy.Keep.Restrictiveness()
 		if restrictiveness > bestRestrictiveness {
@@ -212,17 +220,12 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 		return ResultNoMatch
 	}
 
-	// Apply the keep action
-	return applyKeepActionLog(e, bestPolicy, record, match, &options)
+	// Apply the keep action, with transforms from all matched policies
+	return applyKeepActionLog(e, bestPolicy, matchers, state.matchedIndices[:state.matchedCount], record, match, &options)
 }
 
-func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], record T, match LogMatchFunc[T], options *logOptions[T]) EvaluateResult {
-	var kept bool
-
+func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], matchers *engine.CompiledMatchers[engine.LogField], matchedIndices []int, record T, match LogMatchFunc[T], options *logOptions[T]) EvaluateResult {
 	switch policy.Keep.Action {
-	case KeepAll:
-		kept = true
-
 	case KeepNone:
 		if policy.Stats != nil {
 			policy.Stats.RecordDrop()
@@ -230,9 +233,6 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 		return ResultDrop
 
 	case KeepSample:
-		// Hash-based deterministic sampling
-		// If a sample key is configured, use it for consistent sampling
-		// Otherwise, sample randomly based on percentage
 		shouldKeep := shouldSampleLog(e, policy, record, match)
 		if policy.Stats != nil {
 			policy.Stats.RecordSample()
@@ -240,37 +240,39 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 		if !shouldKeep {
 			return ResultDrop
 		}
-		kept = true
 
 	case KeepRatePerSecond, KeepRatePerMinute:
-		if policy.RateLimiter == nil {
-			kept = true
-		} else if policy.RateLimiter.ShouldKeep() {
-			kept = true
-		} else {
+		if policy.RateLimiter != nil && !policy.RateLimiter.ShouldKeep() {
 			if policy.Stats != nil {
 				policy.Stats.RecordRateLimited()
 			}
 			return ResultDrop
 		}
-
-	default:
-		kept = true
 	}
 
-	if kept && len(policy.Transforms) > 0 {
+	// Apply transforms from all matching policies
+	hasTransforms := false
+	for _, idx := range matchedIndices {
+		p := matchers.PolicyByIndex(idx)
+		if len(p.Transforms) == 0 {
+			continue
+		}
+		hasTransforms = true
 		if options.transform != nil {
-			for _, op := range policy.Transforms {
+			for _, op := range p.Transforms {
 				hit := options.transform(record, op)
-				if policy.Stats != nil {
+				if p.Stats != nil {
 					if hit {
-						policy.Stats.RecordTransformHit(op.Kind)
+						p.Stats.RecordTransformHit(op.Kind)
 					} else {
-						policy.Stats.RecordTransformMiss(op.Kind)
+						p.Stats.RecordTransformMiss(op.Kind)
 					}
 				}
 			}
 		}
+	}
+
+	if hasTransforms {
 		return ResultKeepWithTransform
 	}
 	return ResultKeep
