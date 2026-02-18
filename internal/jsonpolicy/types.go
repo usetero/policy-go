@@ -10,11 +10,12 @@ type File struct {
 
 // Policy represents a single policy in JSON format.
 type Policy struct {
-	ID     string  `json:"id"`
-	Name   string  `json:"name"`
-	Log    *Log    `json:"log,omitempty"`
-	Metric *Metric `json:"metric,omitempty"`
-	Trace  *Trace  `json:"trace,omitempty"`
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Enabled *bool   `json:"enabled,omitempty"`
+	Log     *Log    `json:"log,omitempty"`
+	Metric  *Metric `json:"metric,omitempty"`
+	Trace   *Trace  `json:"trace,omitempty"`
 }
 
 // Log represents log policy configuration.

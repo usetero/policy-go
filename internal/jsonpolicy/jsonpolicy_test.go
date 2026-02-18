@@ -1914,6 +1914,40 @@ func TestParserParseReaderInvalidJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to decode JSON")
 }
 
+func TestParserParseEnabledField(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		expected bool
+	}{
+		{
+			name:     "omitted defaults to true",
+			json:     `{"policies": [{"id": "p1", "name": "P1", "log": {"match": [{"log_field": "body", "regex": ".*"}], "keep": "all"}}]}`,
+			expected: true,
+		},
+		{
+			name:     "explicit true",
+			json:     `{"policies": [{"id": "p1", "name": "P1", "enabled": true, "log": {"match": [{"log_field": "body", "regex": ".*"}], "keep": "all"}}]}`,
+			expected: true,
+		},
+		{
+			name:     "explicit false",
+			json:     `{"policies": [{"id": "p1", "name": "P1", "enabled": false, "log": {"match": [{"log_field": "body", "regex": ".*"}], "keep": "all"}}]}`,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewParser()
+			policies, err := parser.ParseBytes([]byte(tt.json))
+			require.NoError(t, err)
+			require.Len(t, policies, 1)
+			assert.Equal(t, tt.expected, policies[0].GetEnabled())
+		})
+	}
+}
+
 // Helper functions
 func strPtr(s string) *string {
 	return &s
