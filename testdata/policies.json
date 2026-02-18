@@ -64,8 +64,8 @@
       "name": "Keep logs that are NOT debug AND NOT trace",
       "log": {
         "match": [
-          { "log_field": "body", "regex": "debug", "negated": true },
-          { "log_field": "severity_text", "regex": "TRACE", "negated": true }
+          { "log_field": "body", "regex": "debug", "negate": true },
+          { "log_field": "severity_text", "regex": "TRACE", "negate": true }
         ],
         "keep": "all"
       }

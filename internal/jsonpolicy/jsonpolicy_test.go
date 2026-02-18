@@ -528,7 +528,7 @@ func TestParserParseNegatedMatcher(t *testing.T) {
 			"id": "test",
 			"name": "Test",
 			"log": {
-				"match": [{"log_field": "body", "regex": "debug", "negated": true}],
+				"match": [{"log_field": "body", "regex": "debug", "negate": true}],
 				"keep": "all"
 			}
 		}]
@@ -1600,7 +1600,7 @@ func TestParserParseMetricAttributeSelectors(t *testing.T) {
 func TestParserParseMetricFlags(t *testing.T) {
 	parser := NewParser()
 
-	j := `{"policies": [{"id": "test", "name": "Test", "metric": {"match": [{"metric_field": "name", "regex": "debug", "negated": true, "case_insensitive": true}], "keep": false}}]}`
+	j := `{"policies": [{"id": "test", "name": "Test", "metric": {"match": [{"metric_field": "name", "regex": "debug", "negate": true, "case_insensitive": true}], "keep": false}}]}`
 	policies, err := parser.ParseBytes([]byte(j))
 	require.NoError(t, err)
 
@@ -1841,7 +1841,7 @@ func TestParserParseTraceKeepOptions(t *testing.T) {
 func TestParserParseTraceFlags(t *testing.T) {
 	parser := NewParser()
 
-	j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"trace_field": "name", "regex": "debug", "negated": true, "case_insensitive": true}]}}]}`
+	j := `{"policies": [{"id": "test", "name": "Test", "trace": {"match": [{"trace_field": "name", "regex": "debug", "negate": true, "case_insensitive": true}]}}]}`
 	policies, err := parser.ParseBytes([]byte(j))
 	require.NoError(t, err)
 

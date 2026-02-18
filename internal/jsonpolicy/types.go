@@ -95,7 +95,7 @@ type MetricMatcher struct {
 	Contains   string `json:"contains,omitempty"`
 
 	// Flags
-	Negated         bool `json:"negated,omitempty"`
+	Negate          bool `json:"negate,omitempty"`
 	CaseInsensitive bool `json:"case_insensitive,omitempty"`
 }
 
@@ -136,7 +136,7 @@ type TraceMatcher struct {
 	Contains   string `json:"contains,omitempty"`
 
 	// Flags
-	Negated         bool `json:"negated,omitempty"`
+	Negate          bool `json:"negate,omitempty"`
 	CaseInsensitive bool `json:"case_insensitive,omitempty"`
 }
 
@@ -194,7 +194,7 @@ type LogMatcher struct {
 	Contains   string `json:"contains,omitempty"`
 
 	// Flags
-	Negated         bool `json:"negated,omitempty"`
+	Negate          bool `json:"negate,omitempty"`
 	CaseInsensitive bool `json:"case_insensitive,omitempty"`
 }
 
