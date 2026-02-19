@@ -1277,8 +1277,195 @@ func TestStatsCollection(t *testing.T) {
 		}
 	}
 	require.NotNil(t, found, "stats for 'drop-debug-level' not found")
-	assert.Greater(t, found.Hits, uint64(0), "expected hits > 0")
-	assert.Greater(t, found.Drops, uint64(0), "expected drops > 0")
+	assert.Greater(t, found.MatchHits, uint64(0), "expected match hits > 0")
+}
+
+func TestMatchHitMissTracking(t *testing.T) {
+	// Scenario from the spec:
+	// - "keep-info" (keep: all) matches INFO logs
+	// - "drop-health" (keep: none) matches "health" in body
+	// A "health check ok" INFO log matches both → dropped by drop-health.
+	//   drop-health: match hit, keep-info: match miss
+	// A "user action logged" INFO log matches only keep-info → kept.
+	//   keep-info: match hit
+	// A "database error" ERROR log matches neither → no match.
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "keep-info",
+			Name: "Keep Info",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+							Match: &policyv1.LogMatcher_Exact{Exact: "INFO"},
+						},
+					},
+					Keep: "all",
+				},
+			},
+		},
+		{
+			Id:   "drop-health",
+			Name: "Drop Health",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "health"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+							Match: &policyv1.LogMatcher_Exact{Exact: "INFO"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Record 1: "health check ok" (INFO) — matches both policies, should be dropped
+	healthLog := &SimpleLogRecord{Body: []byte("health check ok"), SeverityText: []byte("INFO")}
+	result := EvaluateLog(engine, healthLog, SimpleLogMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Record 2: "user action logged" (INFO) — matches only keep-info, should be kept
+	userLog := &SimpleLogRecord{Body: []byte("user action logged"), SeverityText: []byte("INFO")}
+	result = EvaluateLog(engine, userLog, SimpleLogMatcher)
+	assert.Equal(t, ResultKeep, result)
+
+	// Record 3: "database error" (ERROR) — matches neither, no match
+	errorLog := &SimpleLogRecord{Body: []byte("database error"), SeverityText: []byte("ERROR")}
+	result = EvaluateLog(engine, errorLog, SimpleLogMatcher)
+	assert.Equal(t, ResultNoMatch, result)
+
+	// Collect stats and verify
+	stats := registry.CollectStats()
+	statsMap := make(map[string]PolicyStatsSnapshot)
+	for _, s := range stats {
+		statsMap[s.PolicyID] = s
+	}
+
+	keepInfo := statsMap["keep-info"]
+	dropHealth := statsMap["drop-health"]
+
+	// keep-info: matched record 1 (miss) + record 2 (hit) = 1 hit, 1 miss
+	assert.Equal(t, uint64(1), keepInfo.MatchHits, "keep-info should have 1 match hit (record 2 kept)")
+	assert.Equal(t, uint64(1), keepInfo.MatchMisses, "keep-info should have 1 match miss (record 1 overridden by drop-health)")
+
+	// drop-health: matched record 1 (hit) = 1 hit, 0 misses
+	assert.Equal(t, uint64(1), dropHealth.MatchHits, "drop-health should have 1 match hit (record 1 dropped)")
+	assert.Equal(t, uint64(0), dropHealth.MatchMisses, "drop-health should have 0 match misses")
+}
+
+func TestMatchHitMissTracking_AllKept(t *testing.T) {
+	// When a record is kept, ALL matching policies get a match hit
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "keep-info",
+			Name: "Keep Info",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+							Match: &policyv1.LogMatcher_Exact{Exact: "INFO"},
+						},
+					},
+					Keep: "all",
+				},
+			},
+		},
+		{
+			Id:   "keep-info-body",
+			Name: "Keep Info Body",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+							Match: &policyv1.LogMatcher_Exact{Exact: "INFO"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "user"},
+						},
+					},
+					Keep: "all",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// This log matches both keep-all policies → kept, both get match hit
+	log := &SimpleLogRecord{Body: []byte("user action"), SeverityText: []byte("INFO")}
+	result := EvaluateLog(engine, log, SimpleLogMatcher)
+	assert.Equal(t, ResultKeep, result)
+
+	stats := registry.CollectStats()
+	statsMap := make(map[string]PolicyStatsSnapshot)
+	for _, s := range stats {
+		statsMap[s.PolicyID] = s
+	}
+
+	assert.Equal(t, uint64(1), statsMap["keep-info"].MatchHits)
+	assert.Equal(t, uint64(0), statsMap["keep-info"].MatchMisses)
+	assert.Equal(t, uint64(1), statsMap["keep-info-body"].MatchHits)
+	assert.Equal(t, uint64(0), statsMap["keep-info-body"].MatchMisses)
+}
+
+func TestMatchHitMissTracking_NoMatch(t *testing.T) {
+	// When a record matches no policies, no stats are recorded
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "keep-info",
+			Name: "Keep Info",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+							Match: &policyv1.LogMatcher_Exact{Exact: "INFO"},
+						},
+					},
+					Keep: "all",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// ERROR log doesn't match the INFO policy
+	log := &SimpleLogRecord{Body: []byte("error"), SeverityText: []byte("ERROR")}
+	result := EvaluateLog(engine, log, SimpleLogMatcher)
+	assert.Equal(t, ResultNoMatch, result)
+
+	stats := registry.CollectStats()
+	for _, s := range stats {
+		if s.PolicyID == "keep-info" {
+			assert.Equal(t, uint64(0), s.MatchHits, "no match should mean no match hits")
+			assert.Equal(t, uint64(0), s.MatchMisses, "no match should mean no match misses")
+		}
+	}
 }
 
 // ============================================================================
@@ -2632,7 +2819,7 @@ func TestEvaluateLogTransformStatsResetAfterCollect(t *testing.T) {
 		}
 	}
 	require.NotNil(t, snap)
-	assert.Equal(t, uint64(1), snap.Hits)
+	assert.Equal(t, uint64(1), snap.MatchHits)
 	assert.Equal(t, uint64(1), snap.RedactHits)
 
 	// Second collect without new evaluations — counters should be zero (reset)
@@ -2645,7 +2832,7 @@ func TestEvaluateLogTransformStatsResetAfterCollect(t *testing.T) {
 		}
 	}
 	require.NotNil(t, snap2)
-	assert.Equal(t, uint64(0), snap2.Hits)
+	assert.Equal(t, uint64(0), snap2.MatchHits)
 	assert.Equal(t, uint64(0), snap2.RedactHits)
 	assert.Equal(t, uint64(0), snap2.RedactMisses)
 }

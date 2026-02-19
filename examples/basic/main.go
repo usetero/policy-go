@@ -208,8 +208,8 @@ func main() {
 	fmt.Println("\nPolicy stats:")
 	fmt.Println("=============")
 	for _, stats := range registry.CollectStats() {
-		if stats.Hits > 0 {
-			fmt.Printf("%-30s hits=%d drops=%d\n", stats.PolicyID, stats.Hits, stats.Drops)
+		if stats.MatchHits > 0 || stats.MatchMisses > 0 {
+			fmt.Printf("%-30s match_hits=%d match_misses=%d\n", stats.PolicyID, stats.MatchHits, stats.MatchMisses)
 		}
 	}
 }

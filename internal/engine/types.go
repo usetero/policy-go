@@ -87,10 +87,8 @@ type transformStageStats struct {
 
 // PolicyStats holds atomic counters for a single policy.
 type PolicyStats struct {
-	Hits        atomic.Uint64
-	Drops       atomic.Uint64
-	Samples     atomic.Uint64
-	RateLimited atomic.Uint64
+	MatchHits   atomic.Uint64
+	MatchMisses atomic.Uint64
 
 	RemoveStats transformStageStats
 	RedactStats transformStageStats
@@ -98,24 +96,16 @@ type PolicyStats struct {
 	AddStats    transformStageStats
 }
 
-// RecordHit increments the hit counter.
-func (s *PolicyStats) RecordHit() {
-	s.Hits.Add(1)
+// RecordMatchHit increments the match hit counter.
+// A match hit means the policy matched and the final outcome was consistent with its intent.
+func (s *PolicyStats) RecordMatchHit() {
+	s.MatchHits.Add(1)
 }
 
-// RecordDrop increments the drop counter.
-func (s *PolicyStats) RecordDrop() {
-	s.Drops.Add(1)
-}
-
-// RecordSample increments the sample counter.
-func (s *PolicyStats) RecordSample() {
-	s.Samples.Add(1)
-}
-
-// RecordRateLimited increments the rate limited counter.
-func (s *PolicyStats) RecordRateLimited() {
-	s.RateLimited.Add(1)
+// RecordMatchMiss increments the match miss counter.
+// A match miss means the policy matched but a more restrictive policy overrode the outcome.
+func (s *PolicyStats) RecordMatchMiss() {
+	s.MatchMisses.Add(1)
 }
 
 // RecordTransformHit increments the hit counter for the given transform kind.
@@ -148,11 +138,10 @@ func (s *PolicyStats) RecordTransformMiss(kind TransformKind) {
 
 // PolicyStatsSnapshot is an immutable copy of stats for reporting.
 type PolicyStatsSnapshot struct {
-	PolicyID    string
-	Hits        uint64
-	Drops       uint64
-	Samples     uint64
-	RateLimited uint64
+	PolicyID string
+
+	MatchHits   uint64
+	MatchMisses uint64
 
 	RemoveHits   uint64
 	RemoveMisses uint64
@@ -169,10 +158,8 @@ type PolicyStatsSnapshot struct {
 func (s *PolicyStats) Snapshot(policyID string) PolicyStatsSnapshot {
 	return PolicyStatsSnapshot{
 		PolicyID:     policyID,
-		Hits:         s.Hits.Swap(0),
-		Drops:        s.Drops.Swap(0),
-		Samples:      s.Samples.Swap(0),
-		RateLimited:  s.RateLimited.Swap(0),
+		MatchHits:    s.MatchHits.Swap(0),
+		MatchMisses:  s.MatchMisses.Swap(0),
 		RemoveHits:   s.RemoveStats.hits.Swap(0),
 		RemoveMisses: s.RemoveStats.misses.Swap(0),
 		RedactHits:   s.RedactStats.hits.Swap(0),

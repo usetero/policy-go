@@ -184,7 +184,7 @@ func TestHttpProvider_SetStatsCollector(t *testing.T) {
 
 	collector := func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
-			{PolicyID: "policy-1", Hits: 10, Drops: 5},
+			{PolicyID: "policy-1", MatchHits: 10, MatchMisses: 5},
 		}
 	}
 
@@ -741,8 +741,8 @@ func TestHttpProvider_Load_WithStatsCollector(t *testing.T) {
 	p := NewHttpProvider(server.URL)
 	p.SetStatsCollector(func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
-			{PolicyID: "policy-1", Hits: 100, Drops: 10},
-			{PolicyID: "policy-2", Hits: 50, Drops: 5, Samples: 3, RateLimited: 2},
+			{PolicyID: "policy-1", MatchHits: 100},
+			{PolicyID: "policy-2", MatchHits: 50},
 		}
 	})
 
@@ -1133,8 +1133,8 @@ func TestCollectPolicyStatuses(t *testing.T) {
 			name: "multiple snapshots",
 			collector: func() []PolicyStatsSnapshot {
 				return []PolicyStatsSnapshot{
-					{PolicyID: "p1", Hits: 10, Drops: 5, Samples: 2, RateLimited: 1},
-					{PolicyID: "p2", Hits: 20, Drops: 0, Samples: 0, RateLimited: 0},
+					{PolicyID: "p1", MatchHits: 10, MatchMisses: 5},
+					{PolicyID: "p2", MatchHits: 20},
 				}
 			},
 			wantLen: 2,
@@ -1158,7 +1158,7 @@ func TestCollectPolicyStatuses(t *testing.T) {
 func TestCollectPolicyStatuses_Values(t *testing.T) {
 	collector := func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
-			{PolicyID: "p1", Hits: 100, Drops: 10, Samples: 5, RateLimited: 3},
+			{PolicyID: "p1", MatchHits: 82, MatchMisses: 18},
 		}
 	}
 
@@ -1168,8 +1168,7 @@ func TestCollectPolicyStatuses_Values(t *testing.T) {
 
 	status := result[0]
 	assert.Equal(t, "p1", status.GetId())
-	assert.Equal(t, int64(100), status.GetMatchHits())
-	// MatchMisses = Drops + Samples + RateLimited = 10 + 5 + 3 = 18
+	assert.Equal(t, int64(82), status.GetMatchHits())
 	assert.Equal(t, int64(18), status.GetMatchMisses())
 }
 

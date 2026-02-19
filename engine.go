@@ -200,11 +200,6 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 			continue
 		}
 
-		// Record hit
-		if policy.Stats != nil {
-			policy.Stats.RecordHit()
-		}
-
 		state.matchedIndices[state.matchedCount] = i
 		state.matchedCount++
 
@@ -225,29 +220,30 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 }
 
 func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], matchers *engine.CompiledMatchers[engine.LogField], matchedIndices []int, record T, match LogMatchFunc[T], options *logOptions[T]) EvaluateResult {
+	dropped := false
+
 	switch policy.Keep.Action {
 	case KeepNone:
-		if policy.Stats != nil {
-			policy.Stats.RecordDrop()
-		}
-		return ResultDrop
+		dropped = true
 
 	case KeepSample:
-		shouldKeep := shouldSampleLog(e, policy, record, match)
-		if policy.Stats != nil {
-			policy.Stats.RecordSample()
-		}
-		if !shouldKeep {
-			return ResultDrop
+		if !shouldSampleLog(e, policy, record, match) {
+			dropped = true
 		}
 
 	case KeepRatePerSecond, KeepRatePerMinute:
 		if policy.RateLimiter != nil && !policy.RateLimiter.ShouldKeep() {
-			if policy.Stats != nil {
-				policy.Stats.RecordRateLimited()
-			}
-			return ResultDrop
+			dropped = true
 		}
+	}
+
+	// Record match hits/misses based on outcome.
+	// If kept: all matching policies get a match hit.
+	// If dropped: the winning policy gets a match hit; all others get a match miss.
+	recordMatchStats(matchers, matchedIndices, policy, dropped)
+
+	if dropped {
+		return ResultDrop
 	}
 
 	// Apply transforms from all matching policies
@@ -276,6 +272,24 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 		return ResultKeepWithTransform
 	}
 	return ResultKeep
+}
+
+// recordMatchStats records match hits and misses for all matched policies based on the outcome.
+// If the record was kept, all matching policies get a match hit.
+// If the record was dropped, the winning (most restrictive) policy gets a match hit;
+// all other matching policies get a match miss.
+func recordMatchStats[T engine.FieldType](matchers *engine.CompiledMatchers[T], matchedIndices []int, bestPolicy *engine.CompiledPolicy[T], dropped bool) {
+	for _, idx := range matchedIndices {
+		p := matchers.PolicyByIndex(idx)
+		if p.Stats == nil {
+			continue
+		}
+		if dropped && p != bestPolicy {
+			p.Stats.RecordMatchMiss()
+		} else {
+			p.Stats.RecordMatchHit()
+		}
+	}
 }
 
 // shouldSampleLog determines if a record should be kept based on the sampling configuration.
@@ -344,14 +358,17 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, match MetricMatchFunc[T]) 
 	if cap(state.matchCounts) < policyCount {
 		state.matchCounts = make([]int, policyCount)
 		state.disqualified = make([]bool, policyCount)
+		state.matchedIndices = make([]int, policyCount)
 	} else {
 		state.matchCounts = state.matchCounts[:policyCount]
 		state.disqualified = state.disqualified[:policyCount]
+		state.matchedIndices = state.matchedIndices[:policyCount]
 		for i := range state.matchCounts {
 			state.matchCounts[i] = 0
 			state.disqualified[i] = false
 		}
 	}
+	state.matchedCount = 0
 
 	matchCounts := state.matchCounts
 	disqualified := state.disqualified
@@ -430,9 +447,8 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, match MetricMatchFunc[T]) 
 			continue
 		}
 
-		if policy.Stats != nil {
-			policy.Stats.RecordHit()
-		}
+		state.matchedIndices[state.matchedCount] = i
+		state.matchedCount++
 
 		restrictiveness := policy.Keep.Restrictiveness()
 		if restrictiveness > bestRestrictiveness {
@@ -445,43 +461,34 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, match MetricMatchFunc[T]) 
 		return ResultNoMatch
 	}
 
-	return applyKeepActionMetric(bestPolicy)
+	return applyKeepActionMetric(bestPolicy, matchers, state.matchedIndices[:state.matchedCount])
 }
 
-func applyKeepActionMetric(policy *engine.CompiledPolicy[engine.MetricField]) EvaluateResult {
-	switch policy.Keep.Action {
-	case KeepAll:
-		return ResultKeep
+func applyKeepActionMetric(policy *engine.CompiledPolicy[engine.MetricField], matchers *engine.CompiledMatchers[engine.MetricField], matchedIndices []int) EvaluateResult {
+	dropped := false
 
+	switch policy.Keep.Action {
 	case KeepNone:
-		if policy.Stats != nil {
-			policy.Stats.RecordDrop()
-		}
-		return ResultDrop
+		dropped = true
 
 	case KeepSample:
-		// Metrics don't support sample keys, so we just use the percentage directly
-		// For deterministic sampling, the caller should implement their own logic
-		if policy.Stats != nil {
-			policy.Stats.RecordSample()
-		}
+		// Metrics don't support sample keys, so we just use the percentage directly.
+		// Sample result is returned to the caller to decide; treat as kept for match stats.
+		recordMatchStats(matchers, matchedIndices, policy, false)
 		return ResultSample
 
 	case KeepRatePerSecond, KeepRatePerMinute:
-		if policy.RateLimiter == nil {
-			return ResultKeep
+		if policy.RateLimiter != nil && !policy.RateLimiter.ShouldKeep() {
+			dropped = true
 		}
-		if policy.RateLimiter.ShouldKeep() {
-			return ResultKeep
-		}
-		if policy.Stats != nil {
-			policy.Stats.RecordRateLimited()
-		}
-		return ResultDrop
-
-	default:
-		return ResultKeep
 	}
+
+	recordMatchStats(matchers, matchedIndices, policy, dropped)
+
+	if dropped {
+		return ResultDrop
+	}
+	return ResultKeep
 }
 
 // ============================================================================
@@ -513,14 +520,17 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T]) Eval
 	if cap(state.matchCounts) < policyCount {
 		state.matchCounts = make([]int, policyCount)
 		state.disqualified = make([]bool, policyCount)
+		state.matchedIndices = make([]int, policyCount)
 	} else {
 		state.matchCounts = state.matchCounts[:policyCount]
 		state.disqualified = state.disqualified[:policyCount]
+		state.matchedIndices = state.matchedIndices[:policyCount]
 		for i := range state.matchCounts {
 			state.matchCounts[i] = 0
 			state.disqualified[i] = false
 		}
 	}
+	state.matchedCount = 0
 
 	matchCounts := state.matchCounts
 	disqualified := state.disqualified
@@ -599,9 +609,8 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T]) Eval
 			continue
 		}
 
-		if policy.Stats != nil {
-			policy.Stats.RecordHit()
-		}
+		state.matchedIndices[state.matchedCount] = i
+		state.matchedCount++
 
 		restrictiveness := policy.Keep.Restrictiveness()
 		if restrictiveness > bestRestrictiveness {
@@ -614,46 +623,33 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T]) Eval
 		return ResultNoMatch
 	}
 
-	return applyKeepActionTrace(bestPolicy, span, match)
+	return applyKeepActionTrace(bestPolicy, matchers, state.matchedIndices[:state.matchedCount], span, match)
 }
 
-func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) EvaluateResult {
-	switch policy.Keep.Action {
-	case KeepAll:
-		return ResultKeep
+func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], matchers *engine.CompiledMatchers[engine.TraceField], matchedIndices []int, span T, match TraceMatchFunc[T]) EvaluateResult {
+	dropped := false
 
+	switch policy.Keep.Action {
 	case KeepNone:
-		if policy.Stats != nil {
-			policy.Stats.RecordDrop()
-		}
-		return ResultDrop
+		dropped = true
 
 	case KeepSample:
-		// Hash-based deterministic sampling using trace ID
-		shouldKeep := shouldSampleTrace(policy, span, match)
-		if policy.Stats != nil {
-			policy.Stats.RecordSample()
+		if !shouldSampleTrace(policy, span, match) {
+			dropped = true
 		}
-		if shouldKeep {
-			return ResultKeep
-		}
-		return ResultDrop
 
 	case KeepRatePerSecond, KeepRatePerMinute:
-		if policy.RateLimiter == nil {
-			return ResultKeep
+		if policy.RateLimiter != nil && !policy.RateLimiter.ShouldKeep() {
+			dropped = true
 		}
-		if policy.RateLimiter.ShouldKeep() {
-			return ResultKeep
-		}
-		if policy.Stats != nil {
-			policy.Stats.RecordRateLimited()
-		}
-		return ResultDrop
-
-	default:
-		return ResultKeep
 	}
+
+	recordMatchStats(matchers, matchedIndices, policy, dropped)
+
+	if dropped {
+		return ResultDrop
+	}
+	return ResultKeep
 }
 
 // shouldSampleTrace determines if a span should be kept based on the sampling configuration.

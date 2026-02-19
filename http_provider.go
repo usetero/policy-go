@@ -372,8 +372,8 @@ func collectPolicyStatuses(collector StatsCollector) []*policyv1.PolicySyncStatu
 	for _, snap := range snapshots {
 		status := &policyv1.PolicySyncStatus{
 			Id:          snap.PolicyID,
-			MatchHits:   int64(snap.Hits),
-			MatchMisses: int64(snap.Drops + snap.Samples + snap.RateLimited),
+			MatchHits:   int64(snap.MatchHits),
+			MatchMisses: int64(snap.MatchMisses),
 		}
 		if snap.RemoveHits > 0 || snap.RemoveMisses > 0 {
 			status.Remove = &policyv1.TransformStageStatus{Hits: int64(snap.RemoveHits), Misses: int64(snap.RemoveMisses)}
