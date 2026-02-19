@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.6](https://github.com/usetero/policy-go/compare/v1.3.5...v1.3.6) (2026-02-19)
+
+
+### Bug Fixes
+
+* record misses and hits correctly ([#32](https://github.com/usetero/policy-go/issues/32)) ([0dbf3ba](https://github.com/usetero/policy-go/commit/0dbf3baee00b5874f9f5ba5368c928ecc15864f6))
+
 ## [1.3.5](https://github.com/usetero/policy-go/compare/v1.3.4...v1.3.5) (2026-02-18)
 
 
