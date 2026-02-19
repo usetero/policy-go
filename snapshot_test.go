@@ -83,8 +83,7 @@ func TestSnapshotGetStats(t *testing.T) {
 	require.NotNil(t, stats, "GetStats should return stats for the policy")
 
 	// Verify stats were recorded
-	assert.Greater(t, stats.Hits.Load(), uint64(0), "should have at least one hit")
-	assert.Greater(t, stats.Drops.Load(), uint64(0), "should have at least one drop")
+	assert.Greater(t, stats.MatchHits.Load(), uint64(0), "should have at least one match hit")
 }
 
 func TestSnapshotGetStatsNotFound(t *testing.T) {

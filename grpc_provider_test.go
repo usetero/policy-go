@@ -222,7 +222,7 @@ func TestGrpcProvider_SetStatsCollector(t *testing.T) {
 
 	collector := func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
-			{PolicyID: "policy-1", Hits: 10, Drops: 5},
+			{PolicyID: "policy-1", MatchHits: 10, MatchMisses: 5},
 		}
 	}
 
@@ -356,8 +356,8 @@ func TestGrpcProvider_Load_WithStatsCollector(t *testing.T) {
 	p := NewGrpcProvider(addr, WithGrpcInsecure(), WithGrpcPollInterval(0))
 	p.SetStatsCollector(func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
-			{PolicyID: "policy-1", Hits: 100, Drops: 10},
-			{PolicyID: "policy-2", Hits: 50, Drops: 5, Samples: 3, RateLimited: 2},
+			{PolicyID: "policy-1", MatchHits: 100},
+			{PolicyID: "policy-2", MatchHits: 50},
 		}
 	})
 

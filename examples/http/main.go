@@ -161,7 +161,7 @@ func main() {
 		fmt.Println("No policies loaded (server may not have any policies)")
 	}
 	for _, s := range stats {
-		fmt.Printf("%-30s hits=%d drops=%d\n", s.PolicyID, s.Hits, s.Drops)
+		fmt.Printf("%-30s match_hits=%d match_misses=%d\n", s.PolicyID, s.MatchHits, s.MatchMisses)
 	}
 
 	// Wait for interrupt signal

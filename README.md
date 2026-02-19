@@ -582,8 +582,8 @@ The registry maintains per-policy statistics with atomic counters:
 ```go
 stats := registry.CollectStats()
 for _, s := range stats {
-    fmt.Printf("Policy %s: hits=%d drops=%d samples=%d\n",
-        s.PolicyID, s.Hits, s.Drops, s.Samples)
+    fmt.Printf("Policy %s: match_hits=%d match_misses=%d\n",
+        s.PolicyID, s.MatchHits, s.MatchMisses)
 }
 ```
 

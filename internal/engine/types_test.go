@@ -69,24 +69,23 @@ func TestPolicyStats(t *testing.T) {
 
 	// Test initial values
 	snapshot := stats.Snapshot("test-policy")
-	assert.Equal(t, uint64(0), snapshot.Hits)
-	assert.Equal(t, uint64(0), snapshot.Drops)
-	assert.Equal(t, uint64(0), snapshot.Samples)
-	assert.Equal(t, uint64(0), snapshot.RateLimited)
+	assert.Equal(t, uint64(0), snapshot.MatchHits)
+	assert.Equal(t, uint64(0), snapshot.MatchMisses)
 	assert.Equal(t, "test-policy", snapshot.PolicyID)
 
 	// Test incrementing
-	stats.RecordHit()
-	stats.RecordHit()
-	stats.RecordDrop()
-	stats.RecordSample()
-	stats.RecordRateLimited()
+	stats.RecordMatchHit()
+	stats.RecordMatchHit()
+	stats.RecordMatchMiss()
 
 	snapshot = stats.Snapshot("test-policy")
-	assert.Equal(t, uint64(2), snapshot.Hits)
-	assert.Equal(t, uint64(1), snapshot.Drops)
-	assert.Equal(t, uint64(1), snapshot.Samples)
-	assert.Equal(t, uint64(1), snapshot.RateLimited)
+	assert.Equal(t, uint64(2), snapshot.MatchHits)
+	assert.Equal(t, uint64(1), snapshot.MatchMisses)
+
+	// Snapshot resets counters
+	snapshot = stats.Snapshot("test-policy")
+	assert.Equal(t, uint64(0), snapshot.MatchHits)
+	assert.Equal(t, uint64(0), snapshot.MatchMisses)
 }
 
 func TestNewMatchersBuilder(t *testing.T) {
