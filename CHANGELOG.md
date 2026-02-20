@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.9](https://github.com/usetero/policy-go/compare/v1.3.8...v1.3.9) (2026-02-20)
+
+
+### Bug Fixes
+
+* event name should default matcher ([#39](https://github.com/usetero/policy-go/issues/39)) ([fe7cf70](https://github.com/usetero/policy-go/commit/fe7cf7082fb84b8f7943b8fb3e30dd23358d5cf2))
+
 ## [1.3.8](https://github.com/usetero/policy-go/compare/v1.3.7...v1.3.8) (2026-02-20)
 
 
