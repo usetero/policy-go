@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.7](https://github.com/usetero/policy-go/compare/v1.3.6...v1.3.7) (2026-02-20)
+
+
+### Bug Fixes
+
+* use probability sampling ([#34](https://github.com/usetero/policy-go/issues/34)) ([0be5062](https://github.com/usetero/policy-go/commit/0be50623ee77ddeabccf7bf892372b8df87a8396))
+
 ## [1.3.6](https://github.com/usetero/policy-go/compare/v1.3.5...v1.3.6) (2026-02-19)
 
 
