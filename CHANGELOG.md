@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.8](https://github.com/usetero/policy-go/compare/v1.3.7...v1.3.8) (2026-02-20)
+
+
+### Bug Fixes
+
+* respect disabled policies ([#36](https://github.com/usetero/policy-go/issues/36)) ([27dcd60](https://github.com/usetero/policy-go/commit/27dcd6088bb2b14756a6e602012575565dc72a11))
+* support scope and resource fields ([#38](https://github.com/usetero/policy-go/issues/38)) ([e005452](https://github.com/usetero/policy-go/commit/e0054521e5336239d8f040e94a60a1ddae3d2ae8))
+
 ## [1.3.7](https://github.com/usetero/policy-go/compare/v1.3.6...v1.3.7) (2026-02-20)
 
 
