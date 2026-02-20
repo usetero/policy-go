@@ -14,7 +14,21 @@ type staticProvider struct {
 	policies []*policyv1.Policy
 }
 
+// newStaticProvider creates a test provider. It defaults Enabled to true on
+// all policies to mirror the JSON parser behavior (proto3 defaults bool to
+// false, but the spec says policies are enabled by default).
 func newStaticProvider(policies []*policyv1.Policy) *staticProvider {
+	for _, p := range policies {
+		if !p.Enabled {
+			p.Enabled = true
+		}
+	}
+	return &staticProvider{policies: policies}
+}
+
+// newStaticProviderRaw creates a test provider without modifying the policies.
+// Use this when testing the Enabled field directly.
+func newStaticProviderRaw(policies []*policyv1.Policy) *staticProvider {
 	return &staticProvider{policies: policies}
 }
 
@@ -3011,4 +3025,94 @@ func TestEvaluateLogTransformMultiplePolicies(t *testing.T) {
 	// Both policies matched — transforms from both should be applied
 	assert.Equal(t, "a", record.LogAttributes["tag1"], "tag1 from policy 1 should be present")
 	assert.Equal(t, "b", record.LogAttributes["tag2"], "tag2 from policy 2 should be present")
+}
+
+// ============================================================================
+// DISABLED POLICY TESTS
+// ============================================================================
+
+func TestDisabledPolicyNotEvaluated(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProviderRaw([]*policyv1.Policy{
+		{
+			Id:      "disabled-drop-debug",
+			Name:    "Disabled Drop Debug",
+			Enabled: false,
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "debug"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body: []byte("this is a debug message"),
+	}
+
+	// Disabled policy should be skipped — log should pass through
+	result := EvaluateLog(engine, record, SimpleLogMatcher)
+	assert.Equal(t, ResultNoMatch, result)
+}
+
+func TestDisabledPolicyMixedWithEnabled(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProviderRaw([]*policyv1.Policy{
+		{
+			Id:      "disabled-drop-all",
+			Name:    "Disabled Drop All",
+			Enabled: false,
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "message"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+		{
+			Id:      "enabled-keep-all",
+			Name:    "Enabled Keep All",
+			Enabled: true,
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "message"},
+						},
+					},
+					Keep: "all",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body: []byte("test message"),
+	}
+
+	// Only the enabled policy should match — keep all
+	result := EvaluateLog(engine, record, SimpleLogMatcher)
+	assert.Equal(t, ResultKeep, result)
 }
