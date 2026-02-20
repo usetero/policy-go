@@ -643,8 +643,13 @@ func (p *Parser) convertTraceMatcher(m TraceMatcher) (*policyv1.TraceMatcher, er
 		return matcher, nil
 	}
 
-	// For event_name and link_trace_id, the value is in the field selector itself
-	if m.EventName != "" || m.LinkTraceID != "" {
+	// For event_name and link_trace_id, the value doubles as an exact match pattern
+	if m.EventName != "" {
+		matcher.Match = &policyv1.TraceMatcher_Exact{Exact: m.EventName}
+		return matcher, nil
+	}
+	if m.LinkTraceID != "" {
+		matcher.Match = &policyv1.TraceMatcher_Exact{Exact: m.LinkTraceID}
 		return matcher, nil
 	}
 

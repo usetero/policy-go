@@ -1745,7 +1745,7 @@ func TestParserParseTraceFieldSelectors(t *testing.T) {
 				en, ok := m.GetField().(*policyv1.TraceMatcher_EventName)
 				require.True(t, ok)
 				assert.Equal(t, "exception", en.EventName)
-				assert.Nil(t, m.GetMatch())
+				assert.Equal(t, "exception", m.GetExact())
 			},
 		},
 		{
@@ -1765,7 +1765,7 @@ func TestParserParseTraceFieldSelectors(t *testing.T) {
 				lt, ok := m.GetField().(*policyv1.TraceMatcher_LinkTraceId)
 				require.True(t, ok)
 				assert.Equal(t, "abc123", lt.LinkTraceId)
-				assert.Nil(t, m.GetMatch())
+				assert.Equal(t, "abc123", m.GetExact())
 			},
 		},
 	}
