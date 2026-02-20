@@ -1196,6 +1196,8 @@ func TestParserParseTraceSpanStatus(t *testing.T) {
 		status   string
 		expected policyv1.SpanStatusCode
 	}{
+		{"unset", "unset", policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED},
+		{"proto form unset", "SPAN_STATUS_CODE_UNSET", policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED},
 		{"ok", "ok", policyv1.SpanStatusCode_SPAN_STATUS_CODE_OK},
 		{"error", "error", policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR},
 		{"proto form", "SPAN_STATUS_CODE_ERROR", policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR},

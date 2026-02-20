@@ -170,6 +170,21 @@ func LogResourceAttr(path ...string) LogFieldRef {
 	return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: path}
 }
 
+// LogEventName creates a reference to the log event name field.
+func LogEventName() LogFieldRef {
+	return LogFieldRef{Field: LogFieldEventName}
+}
+
+// LogResourceSchemaURL creates a reference to the log resource schema URL field.
+func LogResourceSchemaURL() LogFieldRef {
+	return LogFieldRef{Field: LogFieldResourceSchemaURL}
+}
+
+// LogScopeSchemaURL creates a reference to the log scope schema URL field.
+func LogScopeSchemaURL() LogFieldRef {
+	return LogFieldRef{Field: LogFieldScopeSchemaURL}
+}
+
 // LogScopeAttr creates a reference to a scope attribute on a log record.
 func LogScopeAttr(path ...string) LogFieldRef {
 	return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: path}
@@ -212,6 +227,26 @@ func DatapointAttr(path ...string) MetricFieldRef {
 // MetricResourceAttr creates a reference to a resource attribute on a metric.
 func MetricResourceAttr(path ...string) MetricFieldRef {
 	return MetricFieldRef{AttrScope: AttrScopeResource, AttrPath: path}
+}
+
+// MetricScopeName creates a reference to the metric scope name field.
+func MetricScopeName() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldScopeName}
+}
+
+// MetricScopeVersion creates a reference to the metric scope version field.
+func MetricScopeVersion() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldScopeVersion}
+}
+
+// MetricResourceSchemaURL creates a reference to the metric resource schema URL field.
+func MetricResourceSchemaURL() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldResourceSchemaURL}
+}
+
+// MetricScopeSchemaURL creates a reference to the metric scope schema URL field.
+func MetricScopeSchemaURL() MetricFieldRef {
+	return MetricFieldRef{Field: MetricFieldScopeSchemaURL}
 }
 
 // MetricScopeAttr creates a reference to a scope attribute on a metric.
@@ -291,6 +326,11 @@ func SpanEventAttr(path ...string) TraceFieldRef {
 // SpanLinkAttr creates a reference to a span link attribute.
 func SpanLinkAttr(path ...string) TraceFieldRef {
 	return TraceFieldRef{AttrScope: AttrScopeLink, AttrPath: path}
+}
+
+// TraceResourceSchemaURL creates a reference to the trace resource schema URL field.
+func TraceResourceSchemaURL() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldResourceSchemaURL}
 }
 
 // TraceScopeSchemaURL creates a reference to the scope schema URL field.
