@@ -825,6 +825,8 @@ func parseSpanKind(s string) (policyv1.SpanKind, bool) {
 
 func parseSpanStatus(s string) (policyv1.SpanStatusCode, bool) {
 	switch s {
+	case "unset", "SPAN_STATUS_CODE_UNSET":
+		return policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED, true
 	case "ok", "SPAN_STATUS_CODE_OK":
 		return policyv1.SpanStatusCode_SPAN_STATUS_CODE_OK, true
 	case "error", "SPAN_STATUS_CODE_ERROR":

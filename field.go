@@ -139,6 +139,15 @@ var LogTraceID = engine.LogTraceID
 // LogSpanID creates a reference to the log span ID field.
 var LogSpanID = engine.LogSpanID
 
+// LogEventName creates a reference to the log event name field.
+var LogEventName = engine.LogEventName
+
+// LogResourceSchemaURL creates a reference to the log resource schema URL field.
+var LogResourceSchemaURL = engine.LogResourceSchemaURL
+
+// LogScopeSchemaURL creates a reference to the log scope schema URL field.
+var LogScopeSchemaURL = engine.LogScopeSchemaURL
+
 // LogAttr creates a reference to a log record attribute.
 var LogAttr = engine.LogAttr
 
@@ -166,6 +175,18 @@ var MetricType = engine.MetricType
 
 // MetricAggregationTemporality creates a reference to the aggregation temporality field.
 var MetricAggregationTemporality = engine.MetricAggregationTemporality
+
+// MetricScopeName creates a reference to the metric scope name field.
+var MetricScopeName = engine.MetricScopeName
+
+// MetricScopeVersion creates a reference to the metric scope version field.
+var MetricScopeVersion = engine.MetricScopeVersion
+
+// MetricResourceSchemaURL creates a reference to the metric resource schema URL field.
+var MetricResourceSchemaURL = engine.MetricResourceSchemaURL
+
+// MetricScopeSchemaURL creates a reference to the metric scope schema URL field.
+var MetricScopeSchemaURL = engine.MetricScopeSchemaURL
 
 // DatapointAttr creates a reference to a datapoint attribute.
 var DatapointAttr = engine.DatapointAttr
@@ -221,6 +242,9 @@ var SpanEventAttr = engine.SpanEventAttr
 
 // SpanLinkAttr creates a reference to a span link attribute.
 var SpanLinkAttr = engine.SpanLinkAttr
+
+// TraceResourceSchemaURL creates a reference to the trace resource schema URL field.
+var TraceResourceSchemaURL = engine.TraceResourceSchemaURL
 
 // TraceScopeSchemaURL creates a reference to the scope schema URL field.
 var TraceScopeSchemaURL = engine.TraceScopeSchemaURL

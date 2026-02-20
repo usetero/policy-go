@@ -124,6 +124,44 @@ func TestCompilerTracePolicyWithSpanStatus(t *testing.T) {
 	assert.Empty(t, compiled.Traces.ExistenceChecks())
 }
 
+func TestCompilerTracePolicyWithSpanStatusUnset(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"span-status-unset": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "span-status-unset",
+			Name: "Span Status Unset Policy",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_SpanStatus{SpanStatus: policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 100},
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	policy, ok := compiled.Traces.GetPolicy("span-status-unset")
+	require.True(t, ok)
+	assert.Equal(t, 1, policy.MatcherCount)
+
+	// SpanStatus UNSET should generate a pattern match, not be skipped
+	require.Equal(t, 1, len(compiled.Traces.Databases()))
+	entry := compiled.Traces.Databases()[0]
+	assert.Equal(t, TraceFieldStatus, entry.Key.Ref.Field)
+	assert.Empty(t, compiled.Traces.ExistenceChecks())
+}
+
 func TestCompilerTracePolicyWithEventName(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{
@@ -382,4 +420,78 @@ func TestCompilerTracePolicyMultipleMatchers(t *testing.T) {
 	// Should have 3 databases (span name, span kind, and resource attr) and no existence checks
 	assert.Equal(t, 3, len(compiled.Traces.Databases()))
 	assert.Empty(t, compiled.Traces.ExistenceChecks())
+}
+
+func TestCompilerTracePolicyWithScopeName(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"scope-name-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "scope-name-policy",
+			Name: "Scope Name Policy",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_SCOPE_NAME},
+							Match: &policyv1.TraceMatcher_Exact{Exact: "my.instrumentation.library"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 100},
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	policy, ok := compiled.Traces.GetPolicy("scope-name-policy")
+	require.True(t, ok)
+	assert.Equal(t, 1, policy.MatcherCount)
+
+	require.Equal(t, 1, len(compiled.Traces.Databases()))
+	entry := compiled.Traces.Databases()[0]
+	assert.Equal(t, TraceFieldScopeName, entry.Key.Ref.Field)
+}
+
+func TestCompilerTracePolicyWithResourceSchemaURL(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{
+		"schema-url-policy": {},
+	}
+
+	policies := []*policyv1.Policy{
+		{
+			Id:   "schema-url-policy",
+			Name: "Schema URL Policy",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_RESOURCE_SCHEMA_URL},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "v1.0.0"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 100},
+				},
+			},
+		},
+	}
+
+	compiled, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer compiled.Close()
+
+	policy, ok := compiled.Traces.GetPolicy("schema-url-policy")
+	require.True(t, ok)
+	assert.Equal(t, 1, policy.MatcherCount)
+
+	require.Equal(t, 1, len(compiled.Traces.Databases()))
+	entry := compiled.Traces.Databases()[0]
+	assert.Equal(t, TraceFieldResourceSchemaURL, entry.Key.Ref.Field)
 }

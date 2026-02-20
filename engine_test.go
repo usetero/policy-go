@@ -3116,3 +3116,254 @@ func TestDisabledPolicyMixedWithEnabled(t *testing.T) {
 	result := EvaluateLog(engine, record, SimpleLogMatcher)
 	assert.Equal(t, ResultKeep, result)
 }
+
+func TestEvaluateTraceEventNameMatch(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-exception-events",
+			Name: "Drop Exception Events",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_EventName{EventName: "exception"},
+							Match: &policyv1.TraceMatcher_Exact{Exact: "exception"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 0},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Span with an exception event — should be dropped
+	span := &SimpleSpanRecord{
+		Name:       []byte("my-span"),
+		EventNames: [][]byte{[]byte("exception")},
+	}
+	result := EvaluateTrace(engine, span, SimpleSpanMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Span without exception event — should pass through
+	span2 := &SimpleSpanRecord{
+		Name:       []byte("my-span"),
+		EventNames: [][]byte{[]byte("log")},
+	}
+	result2 := EvaluateTrace(engine, span2, SimpleSpanMatcher)
+	assert.Equal(t, ResultNoMatch, result2)
+}
+
+func TestEvaluateTraceScopeNameMatch(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-scope",
+			Name: "Drop Specific Scope",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_SCOPE_NAME},
+							Match: &policyv1.TraceMatcher_Exact{Exact: "internal.healthcheck"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 0},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Span from the target scope — should be dropped
+	span := &SimpleSpanRecord{
+		Name:      []byte("check"),
+		ScopeName: []byte("internal.healthcheck"),
+	}
+	result := EvaluateTrace(engine, span, SimpleSpanMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Span from a different scope — should pass through
+	span2 := &SimpleSpanRecord{
+		Name:      []byte("check"),
+		ScopeName: []byte("my.service"),
+	}
+	result2 := EvaluateTrace(engine, span2, SimpleSpanMatcher)
+	assert.Equal(t, ResultNoMatch, result2)
+}
+
+func TestEvaluateTraceSpanStatusUnset(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-unset-status",
+			Name: "Drop Unset Status Spans",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_SpanStatus{SpanStatus: policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{Percentage: 0},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Span with unset status — should be dropped
+	span := &SimpleSpanRecord{
+		Name:   []byte("my-span"),
+		Status: []byte("unset"),
+	}
+	result := EvaluateTrace(engine, span, SimpleSpanMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Span with error status — should pass through
+	span2 := &SimpleSpanRecord{
+		Name:   []byte("my-span"),
+		Status: []byte("error"),
+	}
+	result2 := EvaluateTrace(engine, span2, SimpleSpanMatcher)
+	assert.Equal(t, ResultNoMatch, result2)
+}
+
+func TestEvaluateLogResourceSchemaURL(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-old-schema",
+			Name: "Drop Old Schema URL",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_RESOURCE_SCHEMA_URL},
+							Match: &policyv1.LogMatcher_Contains{Contains: "v1.0.0"},
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Log with old schema — should be dropped
+	record := &SimpleLogRecord{
+		Body:              []byte("test"),
+		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v1.0.0"),
+	}
+	result := EvaluateLog(engine, record, SimpleLogMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Log with new schema — should pass through
+	record2 := &SimpleLogRecord{
+		Body:              []byte("test"),
+		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v2.0.0"),
+	}
+	result2 := EvaluateLog(engine, record2, SimpleLogMatcher)
+	assert.Equal(t, ResultNoMatch, result2)
+}
+
+func TestEvaluateMetricResourceSchemaURL(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-old-metric-schema",
+			Name: "Drop Old Metric Schema",
+			Target: &policyv1.Policy_Metric{
+				Metric: &policyv1.MetricTarget{
+					Match: []*policyv1.MetricMatcher{
+						{
+							Field: &policyv1.MetricMatcher_MetricField{MetricField: policyv1.MetricField_METRIC_FIELD_RESOURCE_SCHEMA_URL},
+							Match: &policyv1.MetricMatcher_Contains{Contains: "v1.0.0"},
+						},
+					},
+					Keep: false,
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Metric with old schema — should be dropped
+	record := &SimpleMetricRecord{
+		Name:              []byte("cpu.usage"),
+		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v1.0.0"),
+	}
+	result := EvaluateMetric(engine, record, SimpleMetricMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Metric with new schema — should pass through
+	record2 := &SimpleMetricRecord{
+		Name:              []byte("cpu.usage"),
+		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v2.0.0"),
+	}
+	result2 := EvaluateMetric(engine, record2, SimpleMetricMatcher)
+	assert.Equal(t, ResultNoMatch, result2)
+}
+
+func TestEvaluateMetricScopeName(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "drop-scope-metrics",
+			Name: "Drop Metrics From Scope",
+			Target: &policyv1.Policy_Metric{
+				Metric: &policyv1.MetricTarget{
+					Match: []*policyv1.MetricMatcher{
+						{
+							Field: &policyv1.MetricMatcher_MetricField{MetricField: policyv1.MetricField_METRIC_FIELD_SCOPE_NAME},
+							Match: &policyv1.MetricMatcher_Exact{Exact: "internal.debug"},
+						},
+					},
+					Keep: false,
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// Metric from debug scope — should be dropped
+	record := &SimpleMetricRecord{
+		Name:      []byte("cpu.usage"),
+		ScopeName: []byte("internal.debug"),
+	}
+	result := EvaluateMetric(engine, record, SimpleMetricMatcher)
+	assert.Equal(t, ResultDrop, result)
+
+	// Metric from different scope — should pass through
+	record2 := &SimpleMetricRecord{
+		Name:      []byte("cpu.usage"),
+		ScopeName: []byte("my.service"),
+	}
+	result2 := EvaluateMetric(engine, record2, SimpleMetricMatcher)
+	assert.Equal(t, ResultNoMatch, result2)
+}

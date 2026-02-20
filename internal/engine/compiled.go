@@ -408,6 +408,8 @@ func spanKindToString(sk policyv1.SpanKind) string {
 // spanStatusToString converts a SpanStatusCode enum to its lowercase string representation.
 func spanStatusToString(ss policyv1.SpanStatusCode) string {
 	switch ss {
+	case policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED:
+		return "unset"
 	case policyv1.SpanStatusCode_SPAN_STATUS_CODE_OK:
 		return "ok"
 	case policyv1.SpanStatusCode_SPAN_STATUS_CODE_ERROR:
@@ -432,11 +434,9 @@ func extractTraceMatchPattern(m *policyv1.TraceMatcher) (string, bool, bool) {
 
 	// Special handling for SpanStatus - convert enum to lowercase string for matching
 	if ss, ok := m.GetField().(*policyv1.TraceMatcher_SpanStatus); ok {
-		if ss.SpanStatus != policyv1.SpanStatusCode_SPAN_STATUS_CODE_UNSPECIFIED {
-			statusStr := spanStatusToString(ss.SpanStatus)
-			if statusStr != "" {
-				return "^" + escapeRegex(statusStr) + "$", false, false
-			}
+		statusStr := spanStatusToString(ss.SpanStatus)
+		if statusStr != "" {
+			return "^" + escapeRegex(statusStr) + "$", false, false
 		}
 	}
 

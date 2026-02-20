@@ -12,6 +12,8 @@ type SimpleLogRecord struct {
 	TraceID            []byte
 	SpanID             []byte
 	EventName          []byte
+	ResourceSchemaURL  []byte
+	ScopeSchemaURL     []byte
 	LogAttributes      map[string]any
 	ResourceAttributes map[string]any
 	ScopeAttributes    map[string]any
@@ -31,6 +33,10 @@ func SimpleLogMatcher(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			return r.SpanID
 		case LogFieldEventName:
 			return r.EventName
+		case LogFieldResourceSchemaURL:
+			return r.ResourceSchemaURL
+		case LogFieldScopeSchemaURL:
+			return r.ScopeSchemaURL
 		default:
 			return nil
 		}
@@ -317,6 +323,10 @@ type SimpleMetricRecord struct {
 	Unit                   []byte
 	Type                   []byte // e.g., "gauge", "sum", "histogram"
 	AggregationTemporality []byte // e.g., "delta", "cumulative"
+	ScopeName              []byte
+	ScopeVersion           []byte
+	ResourceSchemaURL      []byte
+	ScopeSchemaURL         []byte
 	DatapointAttributes    map[string]any
 	ResourceAttributes     map[string]any
 	ScopeAttributes        map[string]any
@@ -336,6 +346,14 @@ func SimpleMetricMatcher(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
 			return r.Type
 		case MetricFieldAggregationTemporality:
 			return r.AggregationTemporality
+		case MetricFieldScopeName:
+			return r.ScopeName
+		case MetricFieldScopeVersion:
+			return r.ScopeVersion
+		case MetricFieldResourceSchemaURL:
+			return r.ResourceSchemaURL
+		case MetricFieldScopeSchemaURL:
+			return r.ScopeSchemaURL
 		default:
 			return nil
 		}
@@ -370,6 +388,10 @@ type SimpleSpanRecord struct {
 	TraceState         []byte
 	Kind               []byte // e.g., "server", "client", "internal"
 	Status             []byte // e.g., "ok", "error", "unset"
+	ScopeName          []byte
+	ScopeVersion       []byte
+	ResourceSchemaURL  []byte
+	ScopeSchemaURL     []byte
 	EventNames         [][]byte
 	EventAttributes    []map[string]any
 	LinkTraceIDs       [][]byte
@@ -397,6 +419,14 @@ func SimpleSpanMatcher(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
 			return r.Kind
 		case TraceFieldStatus:
 			return r.Status
+		case TraceFieldScopeName:
+			return r.ScopeName
+		case TraceFieldScopeVersion:
+			return r.ScopeVersion
+		case TraceFieldResourceSchemaURL:
+			return r.ResourceSchemaURL
+		case TraceFieldScopeSchemaURL:
+			return r.ScopeSchemaURL
 		case TraceFieldEventName:
 			// Return first event name if available
 			if len(r.EventNames) > 0 {
