@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
@@ -914,9 +915,11 @@ func (p *Parser) convertKeep(k KeepValue) (string, error) {
 		case "none":
 			return "none", nil
 		default:
-			// Check if it's a percentage string like "50%"
+			// Check if it's a percentage string like "50%" or rate limit like "100/s", "50/m"
 			if len(s) > 0 && s[len(s)-1] == '%' {
-				// Pass through percentage strings as-is for the engine to parse
+				return s, nil
+			}
+			if strings.HasSuffix(s, "/s") || strings.HasSuffix(s, "/m") {
 				return s, nil
 			}
 			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", s))
