@@ -153,10 +153,14 @@ func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*policyv1.Po
 // recompileLocked recompiles the policies and updates the snapshots.
 // INVARIANT: A lock MUST be acquired.
 func (r *PolicyRegistry) recompileLocked() {
-	// Collect all policies from all providers
+	// Collect all enabled policies from all providers
 	var allPolicies []*policyv1.Policy
 	for _, entry := range r.providers {
-		allPolicies = append(allPolicies, entry.policies...)
+		for _, p := range entry.policies {
+			if p.GetEnabled() {
+				allPolicies = append(allPolicies, p)
+			}
+		}
 	}
 
 	// Update stats map - add new policies, keep existing stats

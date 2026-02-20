@@ -285,8 +285,9 @@ func setupTransformBenchmark(b *testing.B, transforms *policyv1.LogTransform) (*
 	provider := &benchStaticProvider{
 		policies: []*policyv1.Policy{
 			{
-				Id:   "transform-bench",
-				Name: "Transform Benchmark",
+				Id:      "transform-bench",
+				Name:    "Transform Benchmark",
+				Enabled: true,
 				Target: &policyv1.Policy_Log{
 					Log: &policyv1.LogTarget{
 						Match: []*policyv1.LogMatcher{
