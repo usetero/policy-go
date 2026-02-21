@@ -38,6 +38,14 @@ const (
 	KeepRatePerMinute = engine.KeepRatePerMinute
 )
 
+// SamplingMode constants re-exported from proto.
+const (
+	SamplingModeUnspecified  = policyv1.SamplingMode_SAMPLING_MODE_UNSPECIFIED
+	SamplingModeHashSeed     = policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	SamplingModeProportional = policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL
+	SamplingModeEqualizing   = policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING
+)
+
 // ParseKeep parses a keep string into a Keep struct.
 var ParseKeep = engine.ParseKeep
 

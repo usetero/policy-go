@@ -1,9 +1,11 @@
 package policy
 
 import (
+	"encoding/binary"
 	"hash/fnv"
 
 	"github.com/usetero/policy-go/internal/engine"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // maxThreshold is 2^56, the maximum value for the 56-bit threshold/randomness space
@@ -35,8 +37,10 @@ func probabilisticSample(input []byte, percentage float64) bool {
 // It implements consistent probability sampling per the OpenTelemetry specification:
 // https://opentelemetry.io/docs/specs/otel/trace/tracestate-probability-sampling/
 //
-// The decision is: if R >= T, keep the span, else drop it.
-// Where R is a 56-bit randomness value and T is the rejection threshold.
+// Dispatches on SamplingMode:
+//   - hash_seed (default): R >= T using hash(traceID, seed) for randomness
+//   - proportional: adjusts threshold based on incoming tracestate probability
+//   - equalizing: keeps spans already at or below target rate, applies T to others
 func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) bool {
 	percentage := policy.Keep.Value
 	if percentage >= 100 {
@@ -46,22 +50,108 @@ func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], 
 		return false
 	}
 
-	// Get the randomness value (R) - 56 bits
-	// First try to get explicit randomness from tracestate rv sub-key
-	// Fall back to least-significant 56 bits of trace ID
+	failOpen := !policy.Keep.FailClosed
+
+	switch policy.Keep.SamplingMode {
+	case policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL:
+		return shouldSampleTraceProportional(percentage, failOpen, span, match)
+	case policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING:
+		return shouldSampleTraceEqualizing(percentage, failOpen, span, match)
+	default:
+		// hash_seed mode (UNSPECIFIED or HASH_SEED)
+		return shouldSampleTraceHashSeed(percentage, policy.Keep.HashSeed, failOpen, span, match)
+	}
+}
+
+// shouldSampleTraceHashSeed implements hash_seed sampling mode.
+// When seed is non-zero, hashes traceID with the seed for deterministic randomness.
+// When seed is zero, uses existing behavior (tracestate rv or trace ID).
+func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen bool, span T, match TraceMatchFunc[T]) bool {
+	var randomness uint64
+	var ok bool
+
+	if seed != 0 {
+		randomness, ok = getTraceRandomnessWithSeed(span, match, seed)
+	} else {
+		randomness, ok = getTraceRandomness(span, match)
+	}
+
+	if !ok {
+		return failOpen
+	}
+
+	threshold := calculateRejectionThreshold(percentage)
+	return randomness >= threshold
+}
+
+// shouldSampleTraceProportional implements proportional downstream sampling.
+// It adjusts the threshold based on the incoming tracestate probability to achieve
+// the target percentage relative to the incoming rate.
+//
+// Per OTel spec: T_o = ProbabilityToThreshold(p * ThresholdToProbability(T_s))
+func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) bool {
 	randomness, ok := getTraceRandomness(span, match)
 	if !ok {
-		// If no randomness source is available, keep the span (fail open)
+		return failOpen
+	}
+
+	// Get incoming threshold from tracestate
+	traceState := match(span, engine.SpanTraceState())
+	incomingThreshold := uint64(0) // T_s=0 means probability 1.0 (no prior sampling)
+	if len(traceState) > 0 {
+		if th, thOK := parseTracestateThreshold(traceState); thOK {
+			incomingThreshold = th
+		}
+	}
+
+	// p = target probability
+	p := percentage / 100.0
+	// p_s = incoming probability = ThresholdToProbability(T_s)
+	pS := thresholdToProbability(incomingThreshold)
+	// T_o = ProbabilityToThreshold(p * p_s)
+	productProb := p * pS
+	if productProb <= 0 {
+		return false
+	}
+	tO := probabilityToThreshold(productProb)
+	if tO >= maxThreshold {
+		return false // below minimum probability
+	}
+
+	return randomness >= tO
+}
+
+// shouldSampleTraceEqualizing implements equalizing downstream sampling.
+// It aims to make all spans have equal threshold after passing this stage.
+//
+// Per OTel spec:
+//   - If T_s > T_d: keep (can't lower threshold)
+//   - If R >= T_d: keep with outbound threshold T_d
+//   - Otherwise: drop
+func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) bool {
+	randomness, ok := getTraceRandomness(span, match)
+	if !ok {
+		return failOpen
+	}
+
+	// Get incoming threshold from tracestate
+	traceState := match(span, engine.SpanTraceState())
+	incomingThreshold := uint64(0) // T_s=0 means probability 1.0
+	if len(traceState) > 0 {
+		if th, thOK := parseTracestateThreshold(traceState); thOK {
+			incomingThreshold = th
+		}
+	}
+
+	targetThreshold := calculateRejectionThreshold(percentage) // T_d
+
+	// If incoming threshold is already more restrictive, keep the span
+	if incomingThreshold > targetThreshold {
 		return true
 	}
 
-	// Calculate rejection threshold (T) from percentage
-	// T = (1 - percentage/100) * 2^56
-	// Using integer math to avoid floating point precision issues
-	threshold := calculateRejectionThreshold(percentage)
-
-	// OTel consistent sampling decision: if R >= T, keep the span
-	return randomness >= threshold
+	// Otherwise apply the target threshold
+	return randomness >= targetThreshold
 }
 
 // shouldSampleLog determines if a log record should be kept based on the sampling configuration.
@@ -133,6 +223,23 @@ func getTraceRandomness[T any](span T, match TraceMatchFunc[T]) (uint64, bool) {
 	// Extract least-significant 56 bits from trace ID
 	// Trace IDs are typically 16 bytes (128 bits), we want the last 7 bytes (56 bits)
 	return extractRandomnessFromTraceID(traceID), true
+}
+
+// getTraceRandomnessWithSeed hashes the trace ID with a seed using FNV-64a
+// to produce deterministic 56-bit randomness.
+func getTraceRandomnessWithSeed[T any](span T, match TraceMatchFunc[T], seed uint32) (uint64, bool) {
+	traceIDRef := engine.SpanTraceID()
+	traceID := match(span, traceIDRef)
+	if len(traceID) == 0 {
+		return 0, false
+	}
+
+	h := fnv.New64a()
+	h.Write(traceID)
+	var seedBytes [4]byte
+	binary.LittleEndian.PutUint32(seedBytes[:], seed)
+	h.Write(seedBytes[:])
+	return h.Sum64() & (maxThreshold - 1), true
 }
 
 // extractRandomnessFromTraceID extracts the least-significant 56 bits from a trace ID.
@@ -216,6 +323,67 @@ func parseTracestateRandomness(traceState []byte) (uint64, bool) {
 	}
 
 	return rv, true
+}
+
+// parseTracestateThreshold extracts the th (threshold) value from OTel tracestate.
+// Format: "ot=...;th:XXXX;..." where th is 1-14 hex digits with trailing zeros removed.
+// The value is left-aligned in 56 bits (missing digits are zero-padded on the right).
+func parseTracestateThreshold(traceState []byte) (uint64, bool) {
+	otStart := findOTelEntry(traceState)
+	if otStart < 0 {
+		return 0, false
+	}
+
+	thStart := findSubKey(traceState[otStart:], []byte("th:"))
+	if thStart < 0 {
+		return 0, false
+	}
+
+	thStart += otStart + 3 // Skip "th:"
+
+	// Find the end of the th value (next separator or end of string)
+	thEnd := thStart
+	for thEnd < len(traceState) && traceState[thEnd] != ';' && traceState[thEnd] != ',' {
+		thEnd++
+	}
+
+	hexDigits := traceState[thStart:thEnd]
+	if len(hexDigits) == 0 || len(hexDigits) > 14 {
+		return 0, false
+	}
+
+	// Parse hex digits, left-aligned in 56 bits.
+	// Each hex digit is 4 bits. 14 digits = 56 bits.
+	// Missing trailing digits are implicitly zero.
+	var th uint64
+	for _, c := range hexDigits {
+		th = (th << 4) | uint64(hexVal(c))
+	}
+	// Left-shift to fill remaining bits (pad with zeros on the right)
+	th <<= uint(14-len(hexDigits)) * 4
+
+	return th, true
+}
+
+// thresholdToProbability converts a 56-bit rejection threshold to a probability [0, 1].
+// Per OTel spec: probability = (maxThreshold - T) / maxThreshold
+func thresholdToProbability(t uint64) float64 {
+	if t >= maxThreshold {
+		return 0
+	}
+	return float64(maxThreshold-t) / float64(maxThreshold)
+}
+
+// probabilityToThreshold converts a probability [0, 1] to a 56-bit rejection threshold.
+// Per OTel spec: T = maxThreshold - (p * maxThreshold)
+func probabilityToThreshold(p float64) uint64 {
+	if p >= 1.0 {
+		return 0
+	}
+	if p <= 0 {
+		return maxThreshold
+	}
+	return maxThreshold - uint64(p*float64(maxThreshold))
 }
 
 // findOTelEntry finds the start of "ot=" in tracestate, returns index after "ot="

@@ -1882,7 +1882,7 @@ func TestEvaluateTraceSamplingDistribution(t *testing.T) {
 }
 
 func TestEvaluateTraceSamplingNoTraceID(t *testing.T) {
-	// Test that spans without trace ID are kept (fail open)
+	// Test that spans without trace ID are dropped by default (fail_closed=true is the default)
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
@@ -1907,14 +1907,14 @@ func TestEvaluateTraceSamplingNoTraceID(t *testing.T) {
 
 	engine := NewPolicyEngine(registry)
 
-	// Span without trace ID should be kept
+	// Span without trace ID should be dropped (fail_closed=true by default)
 	span := &SimpleSpanRecord{
 		Name: []byte("GET /api/users"),
 		// No TraceID set
 	}
 
 	result := EvaluateTrace(engine, span, SimpleSpanMatcher)
-	assert.Equal(t, ResultKeep, result, "span without trace ID should be kept (fail open)")
+	assert.Equal(t, ResultDrop, result, "span without trace ID should be dropped (fail_closed=true)")
 }
 
 func TestEvaluateTraceSampling100Percent(t *testing.T) {
@@ -3366,4 +3366,217 @@ func TestEvaluateMetricScopeName(t *testing.T) {
 	}
 	result2 := EvaluateMetric(engine, record2, SimpleMetricMatcher)
 	assert.Equal(t, ResultNoMatch, result2)
+}
+
+// ============================================================================
+// SAMPLING MODE INTEGRATION TESTS
+// ============================================================================
+
+func TestEvaluateTraceHashSeedMode(t *testing.T) {
+	seed := uint32(42)
+	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "hash-seed-policy",
+			Name: "Hash Seed Sampling",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+						HashSeed:   &seed,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	// Same span should produce same result (deterministic)
+	span := &SimpleSpanRecord{
+		Name:    []byte("GET /api/users"),
+		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+	}
+
+	r1 := EvaluateTrace(eng, span, SimpleSpanMatcher)
+	r2 := EvaluateTrace(eng, span, SimpleSpanMatcher)
+	assert.Equal(t, r1, r2, "hash_seed mode should be deterministic")
+	assert.Contains(t, []EvaluateResult{ResultKeep, ResultDrop}, r1)
+}
+
+func TestEvaluateTraceProportionalMode(t *testing.T) {
+	mode := policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "proportional-policy",
+			Name: "Proportional Sampling",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	// With no tracestate th, proportional should behave like p_target * 1.0 = 50%
+	kept := 0
+	total := 200
+	for i := 0; i < total; i++ {
+		span := &SimpleSpanRecord{
+			Name:    []byte("GET /api/users"),
+			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/uint64(total)))),
+		}
+		if EvaluateTrace(eng, span, SimpleSpanMatcher) == ResultKeep {
+			kept++
+		}
+	}
+
+	keepRate := float64(kept) / float64(total) * 100
+	assert.InDelta(t, 50.0, keepRate, 15.0, "proportional with no th should keep ~50%%")
+}
+
+func TestEvaluateTraceEqualizingMode(t *testing.T) {
+	mode := policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "equalizing-policy",
+			Name: "Equalizing Sampling",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	// Spans already sampled at 10% (T_s > T_d) should all be kept
+	traceState := []byte("ot=th:e6666666666666")
+	for i := 0; i < 20; i++ {
+		span := &SimpleSpanRecord{
+			Name:       []byte("GET /api/users"),
+			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/20))),
+			TraceState: traceState,
+		}
+		result := EvaluateTrace(eng, span, SimpleSpanMatcher)
+		assert.Equal(t, ResultKeep, result, "equalizing should keep spans with T_s > T_d (span %d)", i)
+	}
+}
+
+func TestEvaluateTraceFailClosedDefault(t *testing.T) {
+	// Default fail_closed=true: spans without trace ID should be dropped
+	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "fail-closed-policy",
+			Name: "Fail Closed Policy",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	span := &SimpleSpanRecord{
+		Name: []byte("GET /api/users"),
+		// No TraceID
+	}
+	result := EvaluateTrace(eng, span, SimpleSpanMatcher)
+	assert.Equal(t, ResultDrop, result, "fail_closed=true should drop spans without trace ID")
+}
+
+func TestEvaluateTraceFailOpenExplicit(t *testing.T) {
+	// Explicit fail_closed=false: spans without trace ID should be kept
+	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	failClosed := false
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "fail-open-policy",
+			Name: "Fail Open Policy",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+						FailClosed: &failClosed,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	span := &SimpleSpanRecord{
+		Name: []byte("GET /api/users"),
+		// No TraceID
+	}
+	result := EvaluateTrace(eng, span, SimpleSpanMatcher)
+	assert.Equal(t, ResultKeep, result, "fail_closed=false should keep spans without trace ID")
 }
