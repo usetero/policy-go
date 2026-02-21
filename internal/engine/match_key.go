@@ -71,6 +71,7 @@ const (
 	TraceFieldStatus
 	TraceFieldEventName
 	TraceFieldLinkTraceID
+	TraceFieldSamplingThreshold // virtual field: encoded th value for tracestate write-back
 )
 
 // FieldType is a constraint for field enum types.
@@ -301,6 +302,12 @@ func SpanEventName() TraceFieldRef {
 // SpanLinkTraceID creates a reference to span link trace IDs.
 func SpanLinkTraceID() TraceFieldRef {
 	return TraceFieldRef{Field: TraceFieldLinkTraceID}
+}
+
+// SpanSamplingThreshold creates a reference to the sampling threshold virtual field.
+// Used for writing the effective th value back to tracestate after sampling.
+func SpanSamplingThreshold() TraceFieldRef {
+	return TraceFieldRef{Field: TraceFieldSamplingThreshold}
 }
 
 // SpanAttr creates a reference to a span attribute.

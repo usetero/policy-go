@@ -3580,3 +3580,178 @@ func TestEvaluateTraceFailOpenExplicit(t *testing.T) {
 	result := EvaluateTrace(eng, span, SimpleSpanMatcher)
 	assert.Equal(t, ResultKeep, result, "fail_closed=false should keep spans without trace ID")
 }
+
+func TestEvaluateTraceThresholdWriteBack(t *testing.T) {
+	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "trace-sample",
+			Name: "Trace Sample",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	// Use a trace ID that we know will be kept at 50%
+	// (high randomness value >= 50% threshold)
+	span := &SimpleSpanRecord{
+		Name:    []byte("GET /api/users"),
+		TraceID: []byte("00000000000000000080000000000000"),
+	}
+
+	var writtenRef TraceFieldRef
+	var writtenValue string
+	transform := func(s *SimpleSpanRecord, ref TraceFieldRef, value string) {
+		writtenRef = ref
+		writtenValue = value
+	}
+
+	result := EvaluateTrace(eng, span, SimpleSpanMatcher, WithTraceTransform(transform))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, SpanSamplingThreshold(), writtenRef)
+	assert.NotEmpty(t, writtenValue, "threshold value should be written")
+}
+
+func TestEvaluateTraceThresholdWriteBackDropped(t *testing.T) {
+	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "trace-sample",
+			Name: "Trace Sample",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	// Use a trace ID with low randomness that will be dropped at 50%
+	span := &SimpleSpanRecord{
+		Name:    []byte("GET /api/users"),
+		TraceID: []byte("00000000000000000000000000000001"),
+	}
+
+	called := false
+	transform := func(s *SimpleSpanRecord, ref TraceFieldRef, value string) {
+		called = true
+	}
+
+	result := EvaluateTrace(eng, span, SimpleSpanMatcher, WithTraceTransform(transform))
+	assert.Equal(t, ResultDrop, result)
+	assert.False(t, called, "transform should not be called for dropped spans")
+}
+
+func TestEvaluateTraceNoTransformReturnsKeep(t *testing.T) {
+	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "trace-sample",
+			Name: "Trace Sample",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 50,
+						Mode:       &mode,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	span := &SimpleSpanRecord{
+		Name:    []byte("GET /api/users"),
+		TraceID: []byte("00000000000000000080000000000000"),
+	}
+
+	// Without WithTraceTransform, should return ResultKeep (not ResultKeepWithTransform)
+	result := EvaluateTrace(eng, span, SimpleSpanMatcher)
+	assert.Equal(t, ResultKeep, result)
+}
+
+func TestEvaluateTrace100PercentWritesZeroThreshold(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "trace-keep-all",
+			Name: "Trace Keep All",
+			Target: &policyv1.Policy_Trace{
+				Trace: &policyv1.TraceTarget{
+					Match: []*policyv1.TraceMatcher{
+						{
+							Field: &policyv1.TraceMatcher_TraceField{TraceField: policyv1.TraceField_TRACE_FIELD_NAME},
+							Match: &policyv1.TraceMatcher_Contains{Contains: "api"},
+						},
+					},
+					Keep: &policyv1.TraceSamplingConfig{
+						Percentage: 100,
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	eng := NewPolicyEngine(registry)
+
+	span := &SimpleSpanRecord{
+		Name:    []byte("GET /api/users"),
+		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+	}
+
+	var writtenValue string
+	transform := func(s *SimpleSpanRecord, ref TraceFieldRef, value string) {
+		writtenValue = value
+	}
+
+	result := EvaluateTrace(eng, span, SimpleSpanMatcher, WithTraceTransform(transform))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, "0000", writtenValue, "100%% sampling should write threshold 0")
+}

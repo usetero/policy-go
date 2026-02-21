@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/binary"
+	"fmt"
 	"hash/fnv"
 
 	"github.com/usetero/policy-go/internal/engine"
@@ -37,17 +38,20 @@ func probabilisticSample(input []byte, percentage float64) bool {
 // It implements consistent probability sampling per the OpenTelemetry specification:
 // https://opentelemetry.io/docs/specs/otel/trace/tracestate-probability-sampling/
 //
+// Returns (keep, effectiveThreshold) where effectiveThreshold is the 56-bit threshold
+// to write back to the span's tracestate `th` sub-key.
+//
 // Dispatches on SamplingMode:
 //   - hash_seed (default): R >= T using hash(traceID, seed) for randomness
 //   - proportional: adjusts threshold based on incoming tracestate probability
 //   - equalizing: keeps spans already at or below target rate, applies T to others
-func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) bool {
+func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) (bool, uint64) {
 	percentage := policy.Keep.Value
 	if percentage >= 100 {
-		return true
+		return true, 0 // threshold 0 = keep everything
 	}
 	if percentage <= 0 {
-		return false
+		return false, 0
 	}
 
 	failOpen := !policy.Keep.FailClosed
@@ -66,7 +70,7 @@ func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], 
 // shouldSampleTraceHashSeed implements hash_seed sampling mode.
 // When seed is non-zero, hashes traceID with the seed for deterministic randomness.
 // When seed is zero, uses existing behavior (tracestate rv or trace ID).
-func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen bool, span T, match TraceMatchFunc[T]) bool {
+func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen bool, span T, match TraceMatchFunc[T]) (bool, uint64) {
 	var randomness uint64
 	var ok bool
 
@@ -77,11 +81,11 @@ func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen 
 	}
 
 	if !ok {
-		return failOpen
+		return failOpen, 0
 	}
 
 	threshold := calculateRejectionThreshold(percentage)
-	return randomness >= threshold
+	return randomness >= threshold, threshold
 }
 
 // shouldSampleTraceProportional implements proportional downstream sampling.
@@ -89,10 +93,10 @@ func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen 
 // the target percentage relative to the incoming rate.
 //
 // Per OTel spec: T_o = ProbabilityToThreshold(p * ThresholdToProbability(T_s))
-func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) bool {
+func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) (bool, uint64) {
 	randomness, ok := getTraceRandomness(span, match)
 	if !ok {
-		return failOpen
+		return failOpen, 0
 	}
 
 	// Get incoming threshold from tracestate
@@ -111,14 +115,14 @@ func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, spa
 	// T_o = ProbabilityToThreshold(p * p_s)
 	productProb := p * pS
 	if productProb <= 0 {
-		return false
+		return false, 0
 	}
 	tO := probabilityToThreshold(productProb)
 	if tO >= maxThreshold {
-		return false // below minimum probability
+		return false, 0 // below minimum probability
 	}
 
-	return randomness >= tO
+	return randomness >= tO, tO
 }
 
 // shouldSampleTraceEqualizing implements equalizing downstream sampling.
@@ -128,10 +132,10 @@ func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, spa
 //   - If T_s > T_d: keep (can't lower threshold)
 //   - If R >= T_d: keep with outbound threshold T_d
 //   - Otherwise: drop
-func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) bool {
+func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) (bool, uint64) {
 	randomness, ok := getTraceRandomness(span, match)
 	if !ok {
-		return failOpen
+		return failOpen, 0
 	}
 
 	// Get incoming threshold from tracestate
@@ -147,11 +151,11 @@ func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span 
 
 	// If incoming threshold is already more restrictive, keep the span
 	if incomingThreshold > targetThreshold {
-		return true
+		return true, incomingThreshold
 	}
 
 	// Otherwise apply the target threshold
-	return randomness >= targetThreshold
+	return randomness >= targetThreshold, targetThreshold
 }
 
 // shouldSampleLog determines if a log record should be kept based on the sampling configuration.
@@ -414,6 +418,44 @@ func findSubKey(data, key []byte) int {
 		}
 	}
 	return -1
+}
+
+// encodeThreshold converts a 56-bit threshold to a compact hex string for the OTel
+// tracestate `th` sub-key. Trailing zero nibbles are removed per spec, but at least
+// `precision` digits are always emitted (1-14, default 4).
+// Returns "0" for threshold 0 (keep everything).
+func encodeThreshold(threshold uint64, precision uint32) string {
+	if precision < 1 {
+		precision = 4
+	}
+	if precision > 14 {
+		precision = 14
+	}
+
+	// Format as 14-digit zero-padded hex
+	hex := fmt.Sprintf("%014x", threshold)
+
+	// Find last non-zero digit to determine minimum length
+	lastNonZero := 0
+	for i := len(hex) - 1; i >= 0; i-- {
+		if hex[i] != '0' {
+			lastNonZero = i + 1
+			break
+		}
+	}
+
+	// Use at least `precision` digits, but keep all significant digits
+	length := int(precision)
+	if lastNonZero > length {
+		length = lastNonZero
+	}
+
+	// Always return at least "0"
+	if length == 0 {
+		return "0"
+	}
+
+	return hex[:length]
 }
 
 // calculateRejectionThreshold calculates the 56-bit rejection threshold from a percentage.
