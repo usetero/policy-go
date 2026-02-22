@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // KeepAction represents what to do with matched telemetry.
@@ -20,10 +22,15 @@ const (
 )
 
 // Keep represents a compiled keep action with its parameters.
-// Parsed from the proto's keep string field (e.g., "all", "none", "50%", "100/s").
+// Parsed from the proto's keep string field (e.g., "all", "none", "50%", "100/s")
+// or from TraceSamplingConfig for trace policies.
 type Keep struct {
-	Action KeepAction
-	Value  float64
+	Action            KeepAction
+	Value             float64
+	SamplingMode      policyv1.SamplingMode
+	HashSeed          uint32
+	SamplingPrecision uint32 // 1-14, default 4
+	FailClosed        bool   // default true
 }
 
 // Restrictiveness returns a score indicating how restrictive this keep action is.

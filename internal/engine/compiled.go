@@ -479,16 +479,34 @@ func escapeRegex(s string) string {
 // parseTraceSamplingConfig converts a TraceSamplingConfig to a Keep.
 func parseTraceSamplingConfig(cfg *policyv1.TraceSamplingConfig) (Keep, error) {
 	if cfg == nil {
-		return Keep{Action: KeepAll}, nil
+		return Keep{Action: KeepAll, FailClosed: true, SamplingPrecision: 4}, nil
 	}
 
-	percentage := cfg.GetPercentage()
+	percentage := float64(cfg.GetPercentage())
 	if percentage >= 100 {
-		return Keep{Action: KeepAll}, nil
+		return Keep{Action: KeepAll, FailClosed: true, SamplingPrecision: 4}, nil
 	}
 	if percentage <= 0 {
-		return Keep{Action: KeepNone}, nil
+		return Keep{Action: KeepNone, FailClosed: true, SamplingPrecision: 4}, nil
 	}
 
-	return Keep{Action: KeepSample, Value: float64(percentage)}, nil
+	keep := Keep{
+		Action:            KeepSample,
+		Value:             percentage,
+		SamplingMode:      cfg.GetMode(),
+		SamplingPrecision: 4,
+		FailClosed:        true,
+	}
+
+	if cfg.HashSeed != nil {
+		keep.HashSeed = *cfg.HashSeed
+	}
+	if cfg.SamplingPrecision != nil {
+		keep.SamplingPrecision = *cfg.SamplingPrecision
+	}
+	if cfg.FailClosed != nil {
+		keep.FailClosed = *cfg.FailClosed
+	}
+
+	return keep, nil
 }

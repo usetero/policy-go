@@ -462,7 +462,10 @@ func applyKeepActionMetric(policy *engine.CompiledPolicy[engine.MetricField], ma
 //
 // The match function is called to extract field values from the span.
 // Consumers provide this function to bridge their span type to the policy engine.
-func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T]) EvaluateResult {
+//
+// Optional TraceOption parameters can be provided to enable threshold write-back
+// after sampling decisions. Use WithTraceTransform to receive the effective threshold.
+func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T], opts ...TraceOption[T]) EvaluateResult {
 	snapshot := e.registry.TraceSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -585,20 +588,35 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T]) Eval
 		return ResultNoMatch
 	}
 
-	return applyKeepActionTrace(bestPolicy, matchers, state.matchedIndices[:state.matchedCount], span, match)
+	var options traceOptions[T]
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	return applyKeepActionTrace(bestPolicy, matchers, state.matchedIndices[:state.matchedCount], span, match, &options)
 }
 
-func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], matchers *engine.CompiledMatchers[engine.TraceField], matchedIndices []int, span T, match TraceMatchFunc[T]) EvaluateResult {
+func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], matchers *engine.CompiledMatchers[engine.TraceField], matchedIndices []int, span T, match TraceMatchFunc[T], options *traceOptions[T]) EvaluateResult {
 	dropped := false
+	var effectiveThreshold uint64
+	writeThreshold := false
 
 	switch policy.Keep.Action {
 	case KeepNone:
 		dropped = true
 
 	case KeepSample:
-		if !shouldSampleTrace(policy, span, match) {
+		keep, threshold, hasThreshold := shouldSampleTrace(policy, span, match)
+		if !keep {
 			dropped = true
 		}
+		effectiveThreshold = threshold
+		writeThreshold = hasThreshold
+
+	case KeepAll:
+		// 100% keep — threshold is 0
+		effectiveThreshold = 0
+		writeThreshold = true
 
 	case KeepRatePerSecond, KeepRatePerMinute:
 		if policy.RateLimiter != nil && !policy.RateLimiter.ShouldKeep() {
@@ -611,5 +629,16 @@ func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField
 	if dropped {
 		return ResultDrop
 	}
+
+	// Write the effective threshold back to the span if a transform function is provided.
+	// Per W3C spec, only write threshold when sampling probability is known (i.e. randomness
+	// was successfully derived). When randomness couldn't be derived (e.g. empty traceId with
+	// fail_closed=false), the threshold must be erased.
+	if options.transform != nil && writeThreshold {
+		encoded := encodeThreshold(effectiveThreshold, policy.Keep.SamplingPrecision)
+		options.transform(span, engine.SpanSamplingThreshold(), encoded)
+		return ResultKeepWithTransform
+	}
+
 	return ResultKeep
 }

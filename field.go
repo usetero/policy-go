@@ -38,6 +38,14 @@ const (
 	KeepRatePerMinute = engine.KeepRatePerMinute
 )
 
+// SamplingMode constants re-exported from proto.
+const (
+	SamplingModeUnspecified  = policyv1.SamplingMode_SAMPLING_MODE_UNSPECIFIED
+	SamplingModeHashSeed     = policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
+	SamplingModeProportional = policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL
+	SamplingModeEqualizing   = policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING
+)
+
 // ParseKeep parses a keep string into a Keep struct.
 var ParseKeep = engine.ParseKeep
 
@@ -228,6 +236,10 @@ var SpanEventName = engine.SpanEventName
 // SpanLinkTraceID creates a reference to span link trace IDs.
 var SpanLinkTraceID = engine.SpanLinkTraceID
 
+// SpanSamplingThreshold creates a reference to the sampling threshold virtual field.
+// Used for writing the effective th value back to tracestate after sampling.
+var SpanSamplingThreshold = engine.SpanSamplingThreshold
+
 // SpanAttr creates a reference to a span attribute.
 var SpanAttr = engine.SpanAttr
 
@@ -301,6 +313,12 @@ type TraceMatchFunc[T any] func(record T, ref TraceFieldRef) []byte
 // Returns true if the targeted field was present (hit), false if absent (miss).
 type LogTransformFunc[T any] func(record T, op TransformOp) bool
 
+// TraceTransformFunc writes a sampling threshold value to a span of type T.
+// Called after a sampling decision to write the effective `th` value back to tracestate.
+// The ref identifies the target field (SpanSamplingThreshold) and value is the encoded
+// hex threshold string.
+type TraceTransformFunc[T any] func(span T, ref TraceFieldRef, value string)
+
 // ============================================================================
 // EVALUATION OPTIONS
 // ============================================================================
@@ -318,6 +336,22 @@ type LogOption[T any] func(*logOptions[T])
 // in order: removes, redacts, renames, adds.
 func WithLogTransform[T any](fn LogTransformFunc[T]) LogOption[T] {
 	return func(o *logOptions[T]) {
+		o.transform = fn
+	}
+}
+
+// traceOptions holds optional configuration for trace evaluation.
+type traceOptions[T any] struct {
+	transform TraceTransformFunc[T]
+}
+
+// TraceOption configures optional behavior for EvaluateTrace.
+type TraceOption[T any] func(*traceOptions[T])
+
+// WithTraceTransform sets a transform function that is called after a sampling
+// decision to write the effective threshold back to the span's tracestate.
+func WithTraceTransform[T any](fn TraceTransformFunc[T]) TraceOption[T] {
+	return func(o *traceOptions[T]) {
 		o.transform = fn
 	}
 }
