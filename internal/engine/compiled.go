@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/flier/gohs/hyperscan"
@@ -197,6 +199,11 @@ func NewCompiler() *Compiler {
 // Compile compiles a set of proto policies into CompileResult with separate
 // CompiledMatchers for logs, metrics, and traces.
 func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompileResult, error) {
+	// Sort policies by ID for deterministic transform ordering per spec.
+	slices.SortFunc(policies, func(a, b *policyv1.Policy) int {
+		return cmp.Compare(a.GetId(), b.GetId())
+	})
+
 	logBuilder := newMatchersBuilder[LogField]()
 	metricBuilder := newMatchersBuilder[MetricField]()
 	traceBuilder := newMatchersBuilder[TraceField]()

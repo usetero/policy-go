@@ -3027,6 +3027,166 @@ func TestEvaluateLogTransformMultiplePolicies(t *testing.T) {
 	assert.Equal(t, "b", record.LogAttributes["tag2"], "tag2 from policy 2 should be present")
 }
 
+// TestEvaluateLogTransformOrderByPolicyID verifies that when multiple policies
+// match and both upsert the same attribute, transforms are applied in alphanumeric
+// order by policy ID — so the alphabetically last policy wins.
+// This is the scenario from conformance test logs_policy_ordering_determinism.
+func TestEvaluateLogTransformOrderByPolicyID(t *testing.T) {
+	// Intentionally list zzz first in the array and aaa second.
+	// After sorting by policy ID, aaa runs first, then zzz overwrites.
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "zzz-add-second",
+			Name: "ZZZ Add Second",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^.*$"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"tag"}},
+								},
+								Value:  "second",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "aaa-add-first",
+			Name: "AAA Add First",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^.*$"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"tag"}},
+								},
+								Value:  "first",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body:          []byte("hello world"),
+		LogAttributes: map[string]any{},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+
+	// aaa-add-first runs first (tag=first), then zzz-add-second runs second (tag=second).
+	// Alphabetically last policy wins because it overwrites with upsert=true.
+	assert.Equal(t, "second", record.LogAttributes["tag"],
+		"zzz-add-second should win because transforms are applied in alphanumeric order by policy ID")
+}
+
+// TestEvaluateLogTransformOrderByPolicyIDReversed is the mirror of
+// TestEvaluateLogTransformOrderByPolicyID — policies are listed in alphabetical
+// order in the input array. The result must be identical: zzz wins.
+func TestEvaluateLogTransformOrderByPolicyIDReversed(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "aaa-add-first",
+			Name: "AAA Add First",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^.*$"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"tag"}},
+								},
+								Value:  "first",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Id:   "zzz-add-second",
+			Name: "ZZZ Add Second",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^.*$"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field: &policyv1.LogAdd_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"tag"}},
+								},
+								Value:  "second",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body:          []byte("hello world"),
+		LogAttributes: map[string]any{},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+
+	// Same result regardless of input order — zzz-add-second always wins.
+	assert.Equal(t, "second", record.LogAttributes["tag"],
+		"zzz-add-second should win regardless of input array order")
+}
+
 // ============================================================================
 // DISABLED POLICY TESTS
 // ============================================================================
