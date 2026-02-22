@@ -3753,5 +3753,5 @@ func TestEvaluateTrace100PercentWritesZeroThreshold(t *testing.T) {
 
 	result := EvaluateTrace(eng, span, SimpleSpanMatcher, WithTraceTransform(transform))
 	assert.Equal(t, ResultKeepWithTransform, result)
-	assert.Equal(t, "0000", writtenValue, "100%% sampling should write threshold 0")
+	assert.Equal(t, "0", writtenValue, "100%% sampling should write threshold 0")
 }

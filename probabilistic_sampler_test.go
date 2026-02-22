@@ -232,8 +232,8 @@ func TestShouldSampleTraceHashSeedZero(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	result1, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
-	result2, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	result1, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	result2, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.Equal(t, result1, result2, "deterministic for same trace ID")
 }
 
@@ -246,8 +246,8 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 	}
 
 	// Same seed → same result
-	r1a, _ := shouldSampleTrace(policy1, span, SimpleSpanMatcher)
-	r1b, _ := shouldSampleTrace(policy1, span, SimpleSpanMatcher)
+	r1a, _, _ := shouldSampleTrace(policy1, span, SimpleSpanMatcher)
+	r1b, _, _ := shouldSampleTrace(policy1, span, SimpleSpanMatcher)
 	assert.Equal(t, r1a, r1b, "same seed should be deterministic")
 
 	// Different seeds may produce different results (test with many trace IDs)
@@ -256,8 +256,8 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 		s := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		r1, _ := shouldSampleTrace(policy1, s, SimpleSpanMatcher)
-		r2, _ := shouldSampleTrace(policy2, s, SimpleSpanMatcher)
+		r1, _, _ := shouldSampleTrace(policy1, s, SimpleSpanMatcher)
+		r2, _, _ := shouldSampleTrace(policy2, s, SimpleSpanMatcher)
 		if r1 != r2 {
 			differentCount++
 		}
@@ -273,7 +273,7 @@ func TestShouldSampleTraceHashSeedDistribution(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		if keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
 			kept++
 		}
 	}
@@ -298,7 +298,7 @@ func TestShouldSampleTraceProportional(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
-		if keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
 			kept++
 		}
 	}
@@ -320,7 +320,7 @@ func TestShouldSampleTraceProportionalNoThreshold(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
-		if keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
 			kept++
 		}
 	}
@@ -340,7 +340,7 @@ func TestShouldSampleTraceEqualizing(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
-		if keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
 			kept++
 		}
 	}
@@ -364,7 +364,7 @@ func TestShouldSampleTraceEqualizingHigherIncoming(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
-		if keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
 			kept++
 		}
 	}
@@ -377,7 +377,7 @@ func TestShouldSampleTraceFailClosed(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, true)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.False(t, keep, "fail_closed should drop when no randomness")
 }
 
@@ -386,7 +386,7 @@ func TestShouldSampleTraceFailOpen(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, false)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.True(t, keep, "fail_open should keep when no randomness")
 }
 
@@ -395,7 +395,7 @@ func TestShouldSampleTraceProportionalFailClosed(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL, 0, true)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.False(t, keep, "proportional fail_closed should drop when no randomness")
 }
 
@@ -404,7 +404,7 @@ func TestShouldSampleTraceEqualizingFailOpen(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING, 0, false)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.True(t, keep, "equalizing fail_open should keep when no randomness")
 }
 
@@ -419,14 +419,14 @@ func TestEncodeThreshold(t *testing.T) {
 		precision uint32
 		expected  string
 	}{
-		{"zero threshold", 0, 4, "0000"},
-		{"50% threshold", 0x80000000000000, 4, "8000"},
+		{"zero threshold", 0, 4, "0"},
+		{"50% threshold", 0x80000000000000, 4, "8"},
 		{"50% threshold precision 1", 0x80000000000000, 1, "8"},
-		{"50% threshold precision 14", 0x80000000000000, 14, "80000000000000"},
-		{"10% threshold", calculateRejectionThreshold(10), 4, "e6666666666668"},
-		{"full precision threshold", 0x123456789abcde, 4, "123456789abcde"},
-		{"precision 0 defaults to 4", 0x80000000000000, 0, "8000"},
-		{"precision > 14 clamped", 0x80000000000000, 20, "80000000000000"},
+		{"50% threshold precision 14", 0x80000000000000, 14, "8"},
+		{"10% threshold", calculateRejectionThreshold(10), 4, "e666"},
+		{"full precision threshold", 0x123456789abcde, 4, "1234"},
+		{"precision 0 defaults to 4", 0x80000000000000, 0, "8"},
+		{"precision > 14 clamped", 0x80000000000000, 20, "8"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -447,7 +447,7 @@ func TestShouldSampleTraceReturnsThreshold(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	_, threshold := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	_, threshold, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.Equal(t, calculateRejectionThreshold(50), threshold)
 }
 
@@ -457,7 +457,7 @@ func TestShouldSampleTrace100PercentReturnsZeroThreshold(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	keep, threshold := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, threshold, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.True(t, keep)
 	assert.Equal(t, uint64(0), threshold)
 }
@@ -472,7 +472,7 @@ func TestShouldSampleTraceEqualizingReturnsIncomingThreshold(t *testing.T) {
 		TraceState: traceState,
 	}
 
-	keep, threshold := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, threshold, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
 	assert.True(t, keep)
 	assert.Equal(t, uint64(0xe6666666666666), threshold, "should return incoming threshold when T_s > T_d")
 }
