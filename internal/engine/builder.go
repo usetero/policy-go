@@ -45,7 +45,7 @@ func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExist
 	if isExistence {
 		b.existenceChecks = append(b.existenceChecks, ExistenceCheck[T]{
 			Ref:         ref,
-			MustExist:   mustExist,
+			MustExist:   mustExist != negated, // XOR: negate inverts the existence requirement
 			PolicyID:    policyID,
 			PolicyIndex: policyIndex,
 			MatchIndex:  matcherIndex,

@@ -264,6 +264,82 @@ func TestEvaluateLogNegatedMatcher(t *testing.T) {
 	assert.Equal(t, ResultNoMatch, result)
 }
 
+// TestEvaluateLogExistsNegate covers all four combinations of exists + negate
+// per the spec. Negate inverts the existence check result with no exception.
+func TestEvaluateLogExistsNegate(t *testing.T) {
+	tests := []struct {
+		name      string
+		exists    bool
+		negate    bool
+		withBody  EvaluateResult // record that has a body
+		noBody    EvaluateResult // record that has no body
+	}{
+		{
+			name:     "exists:true negate:false — match if field present",
+			exists:   true,
+			negate:   false,
+			withBody: ResultDrop,
+			noBody:   ResultNoMatch,
+		},
+		{
+			name:     "exists:true negate:true — match if field absent",
+			exists:   true,
+			negate:   true,
+			withBody: ResultNoMatch,
+			noBody:   ResultDrop,
+		},
+		{
+			name:     "exists:false negate:false — match if field absent",
+			exists:   false,
+			negate:   false,
+			withBody: ResultNoMatch,
+			noBody:   ResultDrop,
+		},
+		{
+			name:     "exists:false negate:true — match if field present",
+			exists:   false,
+			negate:   true,
+			withBody: ResultDrop,
+			noBody:   ResultNoMatch,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewPolicyRegistry()
+			provider := newStaticProvider([]*policyv1.Policy{
+				{
+					Id:   "exists-check",
+					Name: "Exists Check",
+					Target: &policyv1.Policy_Log{
+						Log: &policyv1.LogTarget{
+							Match: []*policyv1.LogMatcher{
+								{
+									Field:  &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+									Match:  &policyv1.LogMatcher_Exists{Exists: tt.exists},
+									Negate: tt.negate,
+								},
+							},
+							Keep: "none",
+						},
+					},
+				},
+			})
+
+			_, err := registry.Register(provider)
+			require.NoError(t, err)
+
+			engine := NewPolicyEngine(registry)
+
+			withBody := &SimpleLogRecord{Body: []byte("hello")}
+			assert.Equal(t, tt.withBody, EvaluateLog(engine, withBody, SimpleLogMatcher), "record with body")
+
+			noBody := &SimpleLogRecord{}
+			assert.Equal(t, tt.noBody, EvaluateLog(engine, noBody, SimpleLogMatcher), "record without body")
+		})
+	}
+}
+
 func TestEvaluateLogMultipleMatchers(t *testing.T) {
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
