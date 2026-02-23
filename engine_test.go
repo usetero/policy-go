@@ -268,11 +268,11 @@ func TestEvaluateLogNegatedMatcher(t *testing.T) {
 // per the spec. Negate inverts the existence check result with no exception.
 func TestEvaluateLogExistsNegate(t *testing.T) {
 	tests := []struct {
-		name      string
-		exists    bool
-		negate    bool
-		withBody  EvaluateResult // record that has a body
-		noBody    EvaluateResult // record that has no body
+		name     string
+		exists   bool
+		negate   bool
+		withBody EvaluateResult // record that has a body
+		noBody   EvaluateResult // record that has no body
 	}{
 		{
 			name:     "exists:true negate:false — match if field present",
