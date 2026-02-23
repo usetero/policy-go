@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.10](https://github.com/usetero/policy-go/compare/v1.3.9...v1.3.10) (2026-02-23)
+
+
+### Bug Fixes
+
+* alphanumeric sort on snapshot compilation ([#43](https://github.com/usetero/policy-go/issues/43)) ([2ebabef](https://github.com/usetero/policy-go/commit/2ebabef010f1be25ab2d9d230dd28814a3ada2c9))
+* exists should be properly negated ([#44](https://github.com/usetero/policy-go/issues/44)) ([2aa0e65](https://github.com/usetero/policy-go/commit/2aa0e65ddf7c4c78db82f51e97a8fa754218e7da))
+* implement all sampling logic ([#41](https://github.com/usetero/policy-go/issues/41)) ([f315c3e](https://github.com/usetero/policy-go/commit/f315c3e11a261bc5f2b72b87a4619924b889c433))
+
 ## [1.3.9](https://github.com/usetero/policy-go/compare/v1.3.8...v1.3.9) (2026-02-20)
 
 
