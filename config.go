@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"time"
 )
@@ -180,14 +181,12 @@ type LoadedProvider struct {
 // Load creates and registers providers from the configuration.
 // Returns the loaded providers in the order they appear in the config.
 // Service metadata is required when the config contains HTTP or gRPC providers.
-// It can be set via WithServiceMetadata on the loader or via the service_metadata
-// field in the Config. WithServiceMetadata takes precedence over the config field.
+// It can be set via WithServiceMetadata on the loader (code defaults) or via the
+// service_metadata field in the Config. When both are provided, they are merged
+// with config values taking precedence over code, allowing users to override defaults.
 func (l *ConfigLoader) Load(config *Config) ([]LoadedProvider, error) {
-	// Resolve service metadata: programmatic takes precedence over config.
-	metadata := l.serviceMetadata
-	if metadata == nil && config.ServiceMetadata != nil {
-		metadata = config.ServiceMetadata.ToServiceMetadata()
-	}
+	// Resolve service metadata: merge code and config, config values take precedence.
+	metadata := mergeServiceMetadata(l.serviceMetadata, config.ServiceMetadata)
 
 	// Validate that service metadata is set and complete if any HTTP or gRPC providers are configured.
 	for _, pc := range config.Providers {
@@ -238,6 +237,56 @@ func (l *ConfigLoader) Load(config *Config) ([]LoadedProvider, error) {
 	}
 
 	return loaded, nil
+}
+
+// mergeServiceMetadata merges programmatic and config-based service metadata.
+// Config values take precedence over code, allowing users to override defaults.
+// Maps (ResourceAttributes, Labels) are merged, with config values winning on key conflicts.
+// If both are nil, returns nil.
+func mergeServiceMetadata(code *ServiceMetadata, cfg *ServiceMetadataConfig) *ServiceMetadata {
+	if code == nil && cfg == nil {
+		return nil
+	}
+	if cfg == nil {
+		return code
+	}
+	if code == nil {
+		return cfg.ToServiceMetadata()
+	}
+
+	merged := *code
+
+	// Merge resource attributes: code values first, then config values overwrite.
+	if len(cfg.ResourceAttributes) > 0 || len(code.ResourceAttributes) > 0 {
+		attrs := make(map[string]string)
+		maps.Copy(attrs, code.ResourceAttributes)
+		maps.Copy(attrs, cfg.ResourceAttributes)
+		merged.ResourceAttributes = attrs
+	}
+
+	// Merge labels: code values first, then config values overwrite.
+	if len(cfg.Labels) > 0 || len(code.Labels) > 0 {
+		labels := make(map[string]string)
+		maps.Copy(labels, code.Labels)
+		maps.Copy(labels, cfg.Labels)
+		merged.Labels = labels
+	}
+
+	// Config scalar fields override code when set.
+	if cfg.ServiceName != "" {
+		merged.ServiceName = cfg.ServiceName
+	}
+	if cfg.ServiceNamespace != "" {
+		merged.ServiceNamespace = cfg.ServiceNamespace
+	}
+	if cfg.ServiceInstanceID != "" {
+		merged.ServiceInstanceID = cfg.ServiceInstanceID
+	}
+	if cfg.ServiceVersion != "" {
+		merged.ServiceVersion = cfg.ServiceVersion
+	}
+
+	return &merged
 }
 
 func (l *ConfigLoader) createProvider(pc ProviderConfig) (PolicyProvider, error) {
