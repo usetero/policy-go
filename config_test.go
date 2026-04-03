@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -602,7 +603,7 @@ func TestConfigLoaderLoadHttp(t *testing.T) {
 	}
 
 	registry := NewPolicyRegistry()
-	loader := NewConfigLoader(registry)
+	loader := NewConfigLoader(registry).WithServiceMetadata(testServiceMetadata())
 
 	loaded, err := loader.Load(config)
 	require.NoError(t, err)
@@ -646,7 +647,7 @@ func TestConfigLoaderLoadHttpWithContentType(t *testing.T) {
 	}
 
 	registry := NewPolicyRegistry()
-	loader := NewConfigLoader(registry)
+	loader := NewConfigLoader(registry).WithServiceMetadata(testServiceMetadata())
 
 	loaded, err := loader.Load(config)
 	require.NoError(t, err)
@@ -695,7 +696,7 @@ func TestConfigLoaderLoadGrpc(t *testing.T) {
 	}
 
 	registry := NewPolicyRegistry()
-	loader := NewConfigLoader(registry)
+	loader := NewConfigLoader(registry).WithServiceMetadata(testServiceMetadata())
 
 	loaded, err := loader.Load(config)
 	require.NoError(t, err)
@@ -736,6 +737,341 @@ func TestStopAllAndUnregisterAll(t *testing.T) {
 	require.NoError(t, err)
 
 	// Should not panic
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func testServiceMetadata() *ServiceMetadata {
+	return &ServiceMetadata{
+		ServiceName:       "test-service",
+		ServiceNamespace:  "test-namespace",
+		ServiceInstanceID: "test-instance-1",
+		ServiceVersion:    "1.0.0",
+	}
+}
+
+func TestConfigLoaderLoadHttpRequiresServiceMetadata(t *testing.T) {
+	pollInterval := 0
+	config := &Config{
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              "http://example.com",
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry)
+
+	_, err := loader.Load(config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "service metadata is required for http providers")
+}
+
+func TestConfigLoaderLoadGrpcRequiresServiceMetadata(t *testing.T) {
+	pollInterval := 0
+	config := &Config{
+		Providers: []ProviderConfig{
+			{
+				Type:             "grpc",
+				ID:               "test-grpc",
+				URL:              "localhost:50051",
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry)
+
+	_, err := loader.Load(config)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "service metadata is required for grpc providers")
+}
+
+func TestConfigLoaderLoadValidatesServiceMetadataFields(t *testing.T) {
+	pollInterval := 0
+	config := &Config{
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              "http://example.com",
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		metadata *ServiceMetadata
+		wantErr  string
+	}{
+		{
+			name:     "missing service_name",
+			metadata: &ServiceMetadata{ServiceNamespace: "ns", ServiceInstanceID: "id", ServiceVersion: "v"},
+			wantErr:  "service_name is required",
+		},
+		{
+			name:     "missing service_namespace",
+			metadata: &ServiceMetadata{ServiceName: "svc", ServiceInstanceID: "id", ServiceVersion: "v"},
+			wantErr:  "service_namespace is required",
+		},
+		{
+			name:     "missing service_instance_id",
+			metadata: &ServiceMetadata{ServiceName: "svc", ServiceNamespace: "ns", ServiceVersion: "v"},
+			wantErr:  "service_instance_id is required",
+		},
+		{
+			name:     "missing service_version",
+			metadata: &ServiceMetadata{ServiceName: "svc", ServiceNamespace: "ns", ServiceInstanceID: "id"},
+			wantErr:  "service_version is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewPolicyRegistry()
+			loader := NewConfigLoader(registry).WithServiceMetadata(tt.metadata)
+
+			_, err := loader.Load(config)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestConfigLoaderLoadFileDoesNotRequireServiceMetadata(t *testing.T) {
+	policiesFile := filepath.Join(t.TempDir(), "policies.json")
+	err := os.WriteFile(policiesFile, []byte(`{"policies": []}`), 0644)
+	require.NoError(t, err)
+
+	config := &Config{
+		Providers: []ProviderConfig{
+			{
+				Type: "file",
+				ID:   "test-file",
+				Path: policiesFile,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry)
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func TestConfigLoaderWithServiceMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Parse request and verify metadata is present
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+
+		require.NotNil(t, req.ClientMetadata)
+		require.NotNil(t, req.ClientMetadata.ResourceAttributes)
+
+		// Verify required resource attributes
+		attrs := make(map[string]string)
+		for _, kv := range req.ClientMetadata.ResourceAttributes {
+			attrs[kv.Key] = kv.Value.GetStringValue()
+		}
+		assert.Equal(t, "my-service", attrs["service.name"])
+		assert.Equal(t, "production", attrs["service.namespace"])
+		assert.Equal(t, "instance-42", attrs["service.instance.id"])
+		assert.Equal(t, "2.0.0", attrs["service.version"])
+		assert.Equal(t, "extra-val", attrs["extra.attr"])
+
+		// Verify labels
+		labels := make(map[string]string)
+		for _, kv := range req.ClientMetadata.Labels {
+			labels[kv.Key] = kv.Value.GetStringValue()
+		}
+		assert.Equal(t, "us-east-1", labels["region"])
+
+		resp := &policyv1.SyncResponse{Hash: "test"}
+		respBytes, _ := proto.Marshal(resp)
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0
+	config := &Config{
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	metadata := &ServiceMetadata{
+		ServiceName:       "my-service",
+		ServiceNamespace:  "production",
+		ServiceInstanceID: "instance-42",
+		ServiceVersion:    "2.0.0",
+		ResourceAttributes: map[string]string{
+			"extra.attr": "extra-val",
+		},
+		Labels: map[string]string{
+			"region": "us-east-1",
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry).WithServiceMetadata(metadata)
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func TestParseConfigWithServiceMetadata(t *testing.T) {
+	jsonStr := `{
+		"service_metadata": {
+			"service_name": "my-service",
+			"service_namespace": "production",
+			"service_instance_id": "instance-001",
+			"service_version": "1.0.0",
+			"resource_attributes": {
+				"cloud.region": "us-east-1"
+			},
+			"labels": {
+				"team": "platform"
+			}
+		},
+		"policy_providers": [
+			{
+				"type": "file",
+				"id": "local",
+				"path": "/etc/policies.json"
+			}
+		]
+	}`
+
+	config, err := ParseConfig([]byte(jsonStr))
+	require.NoError(t, err)
+	require.NotNil(t, config.ServiceMetadata)
+	assert.Equal(t, "my-service", config.ServiceMetadata.ServiceName)
+	assert.Equal(t, "production", config.ServiceMetadata.ServiceNamespace)
+	assert.Equal(t, "instance-001", config.ServiceMetadata.ServiceInstanceID)
+	assert.Equal(t, "1.0.0", config.ServiceMetadata.ServiceVersion)
+	assert.Equal(t, "us-east-1", config.ServiceMetadata.ResourceAttributes["cloud.region"])
+	assert.Equal(t, "platform", config.ServiceMetadata.Labels["team"])
+}
+
+func TestConfigLoaderLoadWithConfigServiceMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+
+		require.NotNil(t, req.ClientMetadata)
+
+		attrs := make(map[string]string)
+		for _, kv := range req.ClientMetadata.ResourceAttributes {
+			attrs[kv.Key] = kv.Value.GetStringValue()
+		}
+		assert.Equal(t, "config-service", attrs["service.name"])
+		assert.Equal(t, "staging", attrs["service.namespace"])
+		assert.Equal(t, "config-instance", attrs["service.instance.id"])
+		assert.Equal(t, "3.0.0", attrs["service.version"])
+
+		resp := &policyv1.SyncResponse{Hash: "test"}
+		respBytes, _ := proto.Marshal(resp)
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0
+	config := &Config{
+		ServiceMetadata: &ServiceMetadataConfig{
+			ServiceName:       "config-service",
+			ServiceNamespace:  "staging",
+			ServiceInstanceID: "config-instance",
+			ServiceVersion:    "3.0.0",
+		},
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry)
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func TestConfigLoaderWithServiceMetadataOverridesConfig(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+
+		attrs := make(map[string]string)
+		for _, kv := range req.ClientMetadata.ResourceAttributes {
+			attrs[kv.Key] = kv.Value.GetStringValue()
+		}
+		// Programmatic metadata should win over config
+		assert.Equal(t, "programmatic-service", attrs["service.name"])
+
+		resp := &policyv1.SyncResponse{Hash: "test"}
+		respBytes, _ := proto.Marshal(resp)
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0
+	config := &Config{
+		ServiceMetadata: &ServiceMetadataConfig{
+			ServiceName:       "config-service",
+			ServiceNamespace:  "staging",
+			ServiceInstanceID: "config-instance",
+			ServiceVersion:    "3.0.0",
+		},
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry).WithServiceMetadata(&ServiceMetadata{
+		ServiceName:       "programmatic-service",
+		ServiceNamespace:  "production",
+		ServiceInstanceID: "prog-instance",
+		ServiceVersion:    "4.0.0",
+	})
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+
 	StopAll(loaded)
 	UnregisterAll(loaded)
 }
