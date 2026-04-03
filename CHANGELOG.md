@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/usetero/policy-go/compare/v1.3.10...v1.4.0) (2026-04-03)
+
+
+### Features
+
+* allow setting service metadata ([#54](https://github.com/usetero/policy-go/issues/54)) ([7e049c6](https://github.com/usetero/policy-go/commit/7e049c6c6119659fbd5d510313c382c21da8ec58))
+
+
+### Bug Fixes
+
+* config should be merged with code ([#56](https://github.com/usetero/policy-go/issues/56)) ([ec2b76a](https://github.com/usetero/policy-go/commit/ec2b76a13ea0f527bc0f94453ce7ac93ec0cefed))
+* remove overlay ([#57](https://github.com/usetero/policy-go/issues/57)) ([d95ef47](https://github.com/usetero/policy-go/commit/d95ef470687722ba25a4b5646bf617a95d25e6ce))
+
 ## [1.3.10](https://github.com/usetero/policy-go/compare/v1.3.9...v1.3.10) (2026-02-23)
 
 
