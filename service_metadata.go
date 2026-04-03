@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"fmt"
+
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
@@ -23,6 +25,23 @@ type ServiceMetadata struct {
 	Labels map[string]string
 	// ResourceAttributes are additional resource attributes beyond the required ones.
 	ResourceAttributes map[string]string
+}
+
+// Validate checks that all required fields are set.
+func (m *ServiceMetadata) Validate() error {
+	if m.ServiceName == "" {
+		return fmt.Errorf("service_name is required")
+	}
+	if m.ServiceNamespace == "" {
+		return fmt.Errorf("service_namespace is required")
+	}
+	if m.ServiceInstanceID == "" {
+		return fmt.Errorf("service_instance_id is required")
+	}
+	if m.ServiceVersion == "" {
+		return fmt.Errorf("service_version is required")
+	}
+	return nil
 }
 
 // ToProto converts ServiceMetadata to the proto ClientMetadata type.

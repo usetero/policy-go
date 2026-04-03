@@ -10,7 +10,33 @@ import (
 
 // Config represents the root configuration for policy providers.
 type Config struct {
-	Providers []ProviderConfig `json:"policy_providers" mapstructure:"policy_providers"`
+	Providers       []ProviderConfig       `json:"policy_providers" mapstructure:"policy_providers"`
+	ServiceMetadata *ServiceMetadataConfig `json:"service_metadata,omitempty" mapstructure:"service_metadata"`
+}
+
+// ServiceMetadataConfig is the JSON/mapstructure-friendly representation of ServiceMetadata.
+type ServiceMetadataConfig struct {
+	ServiceName        string            `json:"service_name" mapstructure:"service_name"`
+	ServiceNamespace   string            `json:"service_namespace" mapstructure:"service_namespace"`
+	ServiceInstanceID  string            `json:"service_instance_id" mapstructure:"service_instance_id"`
+	ServiceVersion     string            `json:"service_version" mapstructure:"service_version"`
+	ResourceAttributes map[string]string `json:"resource_attributes,omitempty" mapstructure:"resource_attributes"`
+	Labels             map[string]string `json:"labels,omitempty" mapstructure:"labels"`
+}
+
+// ToServiceMetadata converts a ServiceMetadataConfig to a ServiceMetadata.
+func (c *ServiceMetadataConfig) ToServiceMetadata() *ServiceMetadata {
+	if c == nil {
+		return nil
+	}
+	return &ServiceMetadata{
+		ServiceName:        c.ServiceName,
+		ServiceNamespace:   c.ServiceNamespace,
+		ServiceInstanceID:  c.ServiceInstanceID,
+		ServiceVersion:     c.ServiceVersion,
+		ResourceAttributes: c.ResourceAttributes,
+		Labels:             c.Labels,
+	}
 }
 
 // ProviderConfig represents a single provider configuration.
@@ -118,8 +144,9 @@ func (p *ProviderConfig) PollInterval() time.Duration {
 
 // ConfigLoader creates providers from a configuration.
 type ConfigLoader struct {
-	registry *PolicyRegistry
-	onError  func(error)
+	registry        *PolicyRegistry
+	onError         func(error)
+	serviceMetadata *ServiceMetadata
 }
 
 // NewConfigLoader creates a new ConfigLoader.
@@ -136,6 +163,13 @@ func (l *ConfigLoader) WithOnError(fn func(error)) *ConfigLoader {
 	return l
 }
 
+// WithServiceMetadata sets the service metadata for HTTP and gRPC providers.
+// Service metadata is required when loading HTTP or gRPC providers.
+func (l *ConfigLoader) WithServiceMetadata(metadata *ServiceMetadata) *ConfigLoader {
+	l.serviceMetadata = metadata
+	return l
+}
+
 // LoadedProvider holds information about a loaded provider.
 type LoadedProvider struct {
 	ID       string
@@ -145,7 +179,32 @@ type LoadedProvider struct {
 
 // Load creates and registers providers from the configuration.
 // Returns the loaded providers in the order they appear in the config.
+// Service metadata is required when the config contains HTTP or gRPC providers.
+// It can be set via WithServiceMetadata on the loader or via the service_metadata
+// field in the Config. WithServiceMetadata takes precedence over the config field.
 func (l *ConfigLoader) Load(config *Config) ([]LoadedProvider, error) {
+	// Resolve service metadata: programmatic takes precedence over config.
+	metadata := l.serviceMetadata
+	if metadata == nil && config.ServiceMetadata != nil {
+		metadata = config.ServiceMetadata.ToServiceMetadata()
+	}
+
+	// Validate that service metadata is set and complete if any HTTP or gRPC providers are configured.
+	for _, pc := range config.Providers {
+		if pc.Type == "http" || pc.Type == "grpc" {
+			if metadata == nil {
+				return nil, fmt.Errorf("service metadata is required for %s providers; set it in config or use WithServiceMetadata", pc.Type)
+			}
+			if err := metadata.Validate(); err != nil {
+				return nil, fmt.Errorf("invalid service metadata: %w", err)
+			}
+			break
+		}
+	}
+
+	// Use resolved metadata for provider creation.
+	l.serviceMetadata = metadata
+
 	loaded := make([]LoadedProvider, 0, len(config.Providers))
 
 	for i, pc := range config.Providers {
@@ -233,6 +292,10 @@ func (l *ConfigLoader) createHTTPProvider(pc ProviderConfig) *HttpProvider {
 		}
 	}
 
+	if l.serviceMetadata != nil {
+		opts = append(opts, WithServiceMetadata(l.serviceMetadata))
+	}
+
 	if l.onError != nil {
 		opts = append(opts, WithHTTPOnError(l.onError))
 	}
@@ -257,6 +320,10 @@ func (l *ConfigLoader) createGrpcProvider(pc ProviderConfig) *GrpcProvider {
 
 	// Default to insecure for now (TLS configuration can be added later)
 	opts = append(opts, WithGrpcInsecure())
+
+	if l.serviceMetadata != nil {
+		opts = append(opts, WithGrpcServiceMetadata(l.serviceMetadata))
+	}
 
 	if l.onError != nil {
 		opts = append(opts, WithGrpcOnError(l.onError))

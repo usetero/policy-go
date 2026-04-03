@@ -283,10 +283,22 @@ ref.AttrPath         // The attribute path (e.g., ["http", "method"])
 
 ### Config File
 
-Use a JSON configuration file to define providers:
+Use a JSON configuration file to define providers and service metadata:
 
 ```json
 {
+  "service_metadata": {
+    "service_name": "my-service",
+    "service_namespace": "production",
+    "service_instance_id": "instance-001",
+    "service_version": "1.0.0",
+    "resource_attributes": {
+      "cloud.region": "us-east-1"
+    },
+    "labels": {
+      "team": "platform"
+    }
+  },
   "policy_providers": [
     {
       "type": "file",
@@ -298,7 +310,16 @@ Use a JSON configuration file to define providers:
 }
 ```
 
+Service metadata is required when using HTTP or gRPC providers. The four
+required fields are `service_name`, `service_namespace`, `service_instance_id`,
+and `service_version`. The `resource_attributes` and `labels` fields are
+optional.
+
 ### Loading Config
+
+Service metadata can be set in the config file (as shown above) or
+programmatically via `WithServiceMetadata`. The programmatic option takes
+precedence over the config file.
 
 ```go
 config, err := policy.LoadConfig("config.json")
@@ -310,6 +331,9 @@ loader := policy.NewConfigLoader(registry).
     WithOnError(func(err error) {
         log.Printf("Provider error: %v", err)
     })
+
+// Optionally override service metadata from config programmatically:
+// loader.WithServiceMetadata(&policy.ServiceMetadata{...})
 
 providers, err := loader.Load(config)
 if err != nil {
@@ -610,8 +634,8 @@ zero-allocation evaluation:
 ### Provider Support
 
 - [x] File provider with hot reload
-- [ ] HTTP provider (poll-based)
-- [ ] gRPC provider (streaming)
+- [x] HTTP provider (poll-based)
+- [x] gRPC provider (streaming)
 
 ### Additional Features
 
