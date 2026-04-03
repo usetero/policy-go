@@ -1098,18 +1098,18 @@ func TestConfigLoaderMergesCodeAndConfigMetadata(t *testing.T) {
 		assert.Equal(t, "9.9.9", attrs["service.version"])
 
 		// Verify resource attributes are merged (config wins on conflict)
-		assert.Equal(t, "us-east-1", attrs["cloud.region"])    // from config
-		assert.Equal(t, "code-val", attrs["code.attr"])         // from code
-		assert.Equal(t, "config-wins", attrs["shared.attr"])    // config wins on conflict
+		assert.Equal(t, "us-east-1", attrs["cloud.region"])  // from config
+		assert.Equal(t, "code-val", attrs["code.attr"])      // from code
+		assert.Equal(t, "config-wins", attrs["shared.attr"]) // config wins on conflict
 
 		// Verify labels are merged (config wins on conflict)
 		labels := make(map[string]string)
 		for _, kv := range req.ClientMetadata.Labels {
 			labels[kv.Key] = kv.Value.GetStringValue()
 		}
-		assert.Equal(t, "platform", labels["team"])         // from config
-		assert.Equal(t, "code-env", labels["env"])           // from code
-		assert.Equal(t, "config-wins", labels["shared"])     // config wins on conflict
+		assert.Equal(t, "platform", labels["team"])      // from config
+		assert.Equal(t, "code-env", labels["env"])       // from code
+		assert.Equal(t, "config-wins", labels["shared"]) // config wins on conflict
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
