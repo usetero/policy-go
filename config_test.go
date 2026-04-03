@@ -1024,7 +1024,7 @@ func TestConfigLoaderLoadWithConfigServiceMetadata(t *testing.T) {
 	UnregisterAll(loaded)
 }
 
-func TestConfigLoaderWithServiceMetadataOverridesConfig(t *testing.T) {
+func TestConfigLoaderConfigOverridesCode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req policyv1.SyncRequest
@@ -1034,8 +1034,11 @@ func TestConfigLoaderWithServiceMetadataOverridesConfig(t *testing.T) {
 		for _, kv := range req.ClientMetadata.ResourceAttributes {
 			attrs[kv.Key] = kv.Value.GetStringValue()
 		}
-		// Programmatic metadata should win over config
-		assert.Equal(t, "programmatic-service", attrs["service.name"])
+		// Config metadata should win over code
+		assert.Equal(t, "config-service", attrs["service.name"])
+		assert.Equal(t, "staging", attrs["service.namespace"])
+		assert.Equal(t, "config-instance", attrs["service.instance.id"])
+		assert.Equal(t, "3.0.0", attrs["service.version"])
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
@@ -1067,6 +1070,161 @@ func TestConfigLoaderWithServiceMetadataOverridesConfig(t *testing.T) {
 		ServiceNamespace:  "production",
 		ServiceInstanceID: "prog-instance",
 		ServiceVersion:    "4.0.0",
+	})
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func TestConfigLoaderMergesCodeAndConfigMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+
+		require.NotNil(t, req.ClientMetadata)
+
+		// Verify required resource attributes overridden by config
+		attrs := make(map[string]string)
+		for _, kv := range req.ClientMetadata.ResourceAttributes {
+			attrs[kv.Key] = kv.Value.GetStringValue()
+		}
+		assert.Equal(t, "config-service", attrs["service.name"])
+		assert.Equal(t, "config-ns", attrs["service.namespace"])
+		assert.Equal(t, "config-instance", attrs["service.instance.id"])
+		assert.Equal(t, "9.9.9", attrs["service.version"])
+
+		// Verify resource attributes are merged (config wins on conflict)
+		assert.Equal(t, "us-east-1", attrs["cloud.region"])    // from config
+		assert.Equal(t, "code-val", attrs["code.attr"])         // from code
+		assert.Equal(t, "config-wins", attrs["shared.attr"])    // config wins on conflict
+
+		// Verify labels are merged (config wins on conflict)
+		labels := make(map[string]string)
+		for _, kv := range req.ClientMetadata.Labels {
+			labels[kv.Key] = kv.Value.GetStringValue()
+		}
+		assert.Equal(t, "platform", labels["team"])         // from config
+		assert.Equal(t, "code-env", labels["env"])           // from code
+		assert.Equal(t, "config-wins", labels["shared"])     // config wins on conflict
+
+		resp := &policyv1.SyncResponse{Hash: "test"}
+		respBytes, _ := proto.Marshal(resp)
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0
+	config := &Config{
+		ServiceMetadata: &ServiceMetadataConfig{
+			ServiceName:       "config-service",
+			ServiceNamespace:  "config-ns",
+			ServiceInstanceID: "config-instance",
+			ServiceVersion:    "9.9.9",
+			ResourceAttributes: map[string]string{
+				"cloud.region": "us-east-1",
+				"shared.attr":  "config-wins",
+			},
+			Labels: map[string]string{
+				"team":   "platform",
+				"shared": "config-wins",
+			},
+		},
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry).WithServiceMetadata(&ServiceMetadata{
+		ServiceName:       "my-service",
+		ServiceNamespace:  "production",
+		ServiceInstanceID: "instance-1",
+		ServiceVersion:    "1.0.0",
+		ResourceAttributes: map[string]string{
+			"code.attr":   "code-val",
+			"shared.attr": "code-loses",
+		},
+		Labels: map[string]string{
+			"env":    "code-env",
+			"shared": "code-loses",
+		},
+	})
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+
+	StopAll(loaded)
+	UnregisterAll(loaded)
+}
+
+func TestConfigLoaderCodeRequiredFieldsConfigAttrsOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+
+		require.NotNil(t, req.ClientMetadata)
+
+		attrs := make(map[string]string)
+		for _, kv := range req.ClientMetadata.ResourceAttributes {
+			attrs[kv.Key] = kv.Value.GetStringValue()
+		}
+		// Required fields from code
+		assert.Equal(t, "my-service", attrs["service.name"])
+		assert.Equal(t, "production", attrs["service.namespace"])
+		assert.Equal(t, "instance-1", attrs["service.instance.id"])
+		assert.Equal(t, "1.0.0", attrs["service.version"])
+		// Extra attrs from config only
+		assert.Equal(t, "us-east-1", attrs["cloud.region"])
+
+		labels := make(map[string]string)
+		for _, kv := range req.ClientMetadata.Labels {
+			labels[kv.Key] = kv.Value.GetStringValue()
+		}
+		assert.Equal(t, "platform", labels["team"])
+
+		resp := &policyv1.SyncResponse{Hash: "test"}
+		respBytes, _ := proto.Marshal(resp)
+		w.Write(respBytes)
+	}))
+	defer server.Close()
+
+	pollInterval := 0
+	config := &Config{
+		ServiceMetadata: &ServiceMetadataConfig{
+			// Only set optional fields in config — no required fields
+			ResourceAttributes: map[string]string{
+				"cloud.region": "us-east-1",
+			},
+			Labels: map[string]string{
+				"team": "platform",
+			},
+		},
+		Providers: []ProviderConfig{
+			{
+				Type:             "http",
+				ID:               "test-http",
+				URL:              server.URL,
+				PollIntervalSecs: &pollInterval,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry).WithServiceMetadata(&ServiceMetadata{
+		ServiceName:       "my-service",
+		ServiceNamespace:  "production",
+		ServiceInstanceID: "instance-1",
+		ServiceVersion:    "1.0.0",
 	})
 
 	loaded, err := loader.Load(config)

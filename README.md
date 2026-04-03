@@ -317,9 +317,10 @@ optional.
 
 ### Loading Config
 
-Service metadata can be set in the config file (as shown above) or
-programmatically via `WithServiceMetadata`. The programmatic option takes
-precedence over the config file.
+Service metadata can be set in the config file (as shown above), programmatically
+via `WithServiceMetadata`, or both. When both are provided, they are merged with
+config values taking precedence, allowing users to override code defaults. This
+lets you set required fields in code and optional attributes/labels in config:
 
 ```go
 config, err := policy.LoadConfig("config.json")
@@ -328,12 +329,15 @@ if err != nil {
 }
 
 loader := policy.NewConfigLoader(registry).
+    WithServiceMetadata(&policy.ServiceMetadata{
+        ServiceName:       "my-service",
+        ServiceNamespace:  "production",
+        ServiceInstanceID: "instance-001",
+        ServiceVersion:    "1.0.0",
+    }).
     WithOnError(func(err error) {
         log.Printf("Provider error: %v", err)
     })
-
-// Optionally override service metadata from config programmatically:
-// loader.WithServiceMetadata(&policy.ServiceMetadata{...})
 
 providers, err := loader.Load(config)
 if err != nil {
