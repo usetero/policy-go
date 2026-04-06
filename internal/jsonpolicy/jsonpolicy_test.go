@@ -393,6 +393,9 @@ func TestParserParseKeepValues(t *testing.T) {
 		{"sample 100%", `{"percentage": 100}`, "100%"},
 		{"rate limit per second", `"3/s"`, "3/s"},
 		{"rate limit per minute", `"100/m"`, "100/m"},
+		{"rate limit 1 per 5 seconds", `"1/5s"`, "1/5s"},
+		{"rate limit 1 per 300 seconds", `"1/300s"`, "1/300s"},
+		{"rate limit 10 per 5 minutes", `"10/5m"`, "10/5m"},
 	}
 
 	parser := NewParser()
