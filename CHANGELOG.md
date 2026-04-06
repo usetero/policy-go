@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/usetero/policy-go/compare/v1.4.0...v1.5.0) (2026-04-06)
+
+
+### Features
+
+* add support for arbitrary rate limit windows ([#58](https://github.com/usetero/policy-go/issues/58)) ([5d1f85d](https://github.com/usetero/policy-go/commit/5d1f85de1a63f05998f7687460dfb0e41099b68c))
+
 ## [1.4.0](https://github.com/usetero/policy-go/compare/v1.3.10...v1.4.0) (2026-04-03)
 
 
