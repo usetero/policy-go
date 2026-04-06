@@ -926,8 +926,10 @@ func (p *Parser) convertKeep(k KeepValue) (string, error) {
 			if len(s) > 0 && s[len(s)-1] == '%' {
 				return s, nil
 			}
-			if strings.HasSuffix(s, "/s") || strings.HasSuffix(s, "/m") {
-				return s, nil
+			if s[len(s)-1] == 's' || s[len(s)-1] == 'm' {
+				if strings.Contains(s, "/") {
+					return s, nil
+				}
 			}
 			return "", NewParseError("keep", fmt.Sprintf("unknown value: %s", s))
 		}

@@ -22,11 +22,12 @@ const (
 )
 
 // Keep represents a compiled keep action with its parameters.
-// Parsed from the proto's keep string field (e.g., "all", "none", "50%", "100/s")
+// Parsed from the proto's keep string field (e.g., "all", "none", "50%", "100/s", "10/5m")
 // or from TraceSamplingConfig for trace policies.
 type Keep struct {
 	Action            KeepAction
 	Value             float64
+	Duration          uint32 // duration multiplier for rate limits (default 1)
 	SamplingMode      policyv1.SamplingMode
 	HashSeed          uint32
 	SamplingPrecision uint32 // 1-14, default 4
@@ -69,19 +70,47 @@ func ParseKeep(s string) (Keep, error) {
 		}
 		return Keep{Action: KeepSample, Value: val}, nil
 	}
-	if strings.HasSuffix(s, "/s") {
-		val, err := strconv.ParseFloat(strings.TrimSuffix(s, "/s"), 64)
-		if err != nil {
-			return Keep{}, fmt.Errorf("invalid keep rate %q: %w", s, err)
+	// Rate limit: N/s, N/m, N/Ds, N/Dm
+	if idx := strings.Index(s, "/"); idx > 0 {
+		countStr := s[:idx]
+		windowStr := s[idx+1:]
+		if len(windowStr) == 0 {
+			return Keep{}, fmt.Errorf("invalid keep value %q: missing window unit", s)
 		}
-		return Keep{Action: KeepRatePerSecond, Value: val}, nil
-	}
-	if strings.HasSuffix(s, "/m") {
-		val, err := strconv.ParseFloat(strings.TrimSuffix(s, "/m"), 64)
-		if err != nil {
-			return Keep{}, fmt.Errorf("invalid keep rate %q: %w", s, err)
+
+		unit := windowStr[len(windowStr)-1]
+		if unit != 's' && unit != 'm' {
+			return Keep{}, fmt.Errorf("invalid keep value %q: window must end with 's' or 'm'", s)
 		}
-		return Keep{Action: KeepRatePerMinute, Value: val}, nil
+
+		// Parse count — must be a positive integer
+		count, err := strconv.ParseUint(countStr, 10, 32)
+		if err != nil {
+			return Keep{}, fmt.Errorf("invalid keep rate %q: count must be a positive integer: %w", s, err)
+		}
+		if count == 0 {
+			return Keep{}, fmt.Errorf("invalid keep rate %q: count must be a positive integer", s)
+		}
+
+		// Parse duration multiplier (the part between '/' and the unit)
+		var duration uint32 = 1
+		durStr := windowStr[:len(windowStr)-1]
+		if len(durStr) > 0 {
+			dur, err := strconv.ParseUint(durStr, 10, 32)
+			if err != nil {
+				return Keep{}, fmt.Errorf("invalid keep rate %q: duration must be a positive integer: %w", s, err)
+			}
+			if dur == 0 {
+				return Keep{}, fmt.Errorf("invalid keep rate %q: duration must be a positive integer", s)
+			}
+			duration = uint32(dur)
+		}
+
+		action := KeepRatePerSecond
+		if unit == 'm' {
+			action = KeepRatePerMinute
+		}
+		return Keep{Action: action, Value: float64(count), Duration: duration}, nil
 	}
 	return Keep{}, fmt.Errorf("invalid keep value %q", s)
 }

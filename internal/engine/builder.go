@@ -77,11 +77,15 @@ func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExist
 func (b *matchersBuilder[T]) finalizePolicy(policyID string, policyIndex int, keep Keep, matcherCount int, sampleKey *FieldRef[T], stats *PolicyStats, transforms []TransformOp) {
 	// Create rate limiter if needed
 	var rateLimiter *RateLimiter
+	duration := keep.Duration
+	if duration == 0 {
+		duration = 1
+	}
 	switch keep.Action {
 	case KeepRatePerSecond:
-		rateLimiter = NewRateLimiterPerSecond(uint32(keep.Value))
+		rateLimiter = NewRateLimiter(uint32(keep.Value), duration*1_000)
 	case KeepRatePerMinute:
-		rateLimiter = NewRateLimiterPerMinute(uint32(keep.Value))
+		rateLimiter = NewRateLimiter(uint32(keep.Value), duration*60_000)
 	}
 
 	compiled := &CompiledPolicy[T]{
