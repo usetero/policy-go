@@ -42,7 +42,7 @@ type PolicyRegistry struct {
 	metricSnapshot *MetricSnapshot
 	traceSnapshot  *TraceSnapshot
 	compiler       *engine.Compiler
-	onRecompile    func() // for testing
+	onRecompile    func(error)
 }
 
 // NewPolicyRegistry creates a new PolicyRegistry.
@@ -76,10 +76,14 @@ func (r *PolicyRegistry) Register(provider PolicyProvider) (ProviderHandle, erro
 // Unregister removes a provider from the registry.
 func (r *PolicyRegistry) Unregister(handle ProviderHandle) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	delete(r.providers, handle.id)
-	r.recompileLocked()
+	compileErr := r.recompileLocked()
+	onRecompile := r.onRecompile
+	r.mu.Unlock()
+
+	if onRecompile != nil {
+		onRecompile(compileErr)
+	}
 }
 
 // Snapshot returns the current read-only snapshot of compiled log policies.
@@ -133,8 +137,10 @@ func (r *PolicyRegistry) CollectStats() []PolicyStatsSnapshot {
 }
 
 // SetOnRecompile sets a callback that is invoked after recompilation.
-// Used for testing to know when policies have been updated.
-func (r *PolicyRegistry) SetOnRecompile(fn func()) {
+// The callback receives nil on success or the compilation error on failure.
+// The callback is invoked without holding the registry lock, so it is safe
+// to call LogSnapshot/MetricSnapshot/TraceSnapshot from within the callback.
+func (r *PolicyRegistry) SetOnRecompile(fn func(error)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onRecompile = fn
@@ -142,17 +148,22 @@ func (r *PolicyRegistry) SetOnRecompile(fn func()) {
 
 func (r *PolicyRegistry) onProviderUpdate(id ProviderId, policies []*policyv1.Policy) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	r.providers[id] = &providerEntry{
 		policies: policies,
 	}
-	r.recompileLocked()
+	compileErr := r.recompileLocked()
+	onRecompile := r.onRecompile
+	r.mu.Unlock()
+
+	if onRecompile != nil {
+		onRecompile(compileErr)
+	}
 }
 
 // recompileLocked recompiles the policies and updates the snapshots.
-// INVARIANT: A lock MUST be acquired.
-func (r *PolicyRegistry) recompileLocked() {
+// Returns nil on success or the compilation error.
+// INVARIANT: A write lock MUST be held by the caller.
+func (r *PolicyRegistry) recompileLocked() error {
 	// Collect all enabled policies from all providers
 	var allPolicies []*policyv1.Policy
 	for _, entry := range r.providers {
@@ -173,8 +184,7 @@ func (r *PolicyRegistry) recompileLocked() {
 	// Compile
 	result, err := r.compiler.Compile(allPolicies, r.stats)
 	if err != nil {
-		// TODO: Log error or expose it somehow
-		return
+		return err
 	}
 
 	// Create new snapshots
@@ -184,7 +194,5 @@ func (r *PolicyRegistry) recompileLocked() {
 	r.metricSnapshot = newPolicySnapshot(result.Metrics, r.stats)
 	r.traceSnapshot = newPolicySnapshot(result.Traces, r.stats)
 
-	if r.onRecompile != nil {
-		r.onRecompile()
-	}
+	return nil
 }
