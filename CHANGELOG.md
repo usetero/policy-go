@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/usetero/policy-go/compare/v1.5.0...v1.5.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* lock correctly for reading snapshots during recompilation ([#60](https://github.com/usetero/policy-go/issues/60)) ([1deac91](https://github.com/usetero/policy-go/commit/1deac919536e183a92ddaa3df36ffa21f89925f3))
+
 ## [1.5.0](https://github.com/usetero/policy-go/compare/v1.4.0...v1.5.0) (2026-04-06)
 
 
