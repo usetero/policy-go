@@ -34,15 +34,16 @@ type providerEntry struct {
 // It recompiles the Hyperscan database when policies change
 // and produces read-only snapshots for evaluation.
 type PolicyRegistry struct {
-	mu             sync.RWMutex
-	nextId         atomic.Uint64
-	providers      map[ProviderId]*providerEntry
-	stats          map[string]*engine.PolicyStats
-	logSnapshot    *LogSnapshot
-	metricSnapshot *MetricSnapshot
-	traceSnapshot  *TraceSnapshot
-	compiler       *engine.Compiler
-	onRecompile    func(error)
+	mu                        sync.RWMutex
+	nextId                    atomic.Uint64
+	providers                 map[ProviderId]*providerEntry
+	stats                     map[string]*engine.PolicyStats
+	includeZeroHitPolicyStats bool
+	logSnapshot               *LogSnapshot
+	metricSnapshot            *MetricSnapshot
+	traceSnapshot             *TraceSnapshot
+	compiler                  *engine.Compiler
+	onRecompile               func(error)
 }
 
 // NewPolicyRegistry creates a new PolicyRegistry.
@@ -131,9 +132,22 @@ func (r *PolicyRegistry) CollectStats() []PolicyStatsSnapshot {
 
 	snapshots := make([]PolicyStatsSnapshot, 0, len(r.stats))
 	for id, stats := range r.stats {
-		snapshots = append(snapshots, stats.Snapshot(id))
+		snapshot := stats.Snapshot(id)
+		if !r.includeZeroHitPolicyStats && isZeroPolicyStatsSnapshot(snapshot) {
+			continue
+		}
+		snapshots = append(snapshots, snapshot)
 	}
 	return snapshots
+}
+
+// SetIncludeZeroHitPolicyStats controls whether CollectStats includes policies
+// that have zero counters in the current collection window.
+// Default: false.
+func (r *PolicyRegistry) SetIncludeZeroHitPolicyStats(enabled bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.includeZeroHitPolicyStats = enabled
 }
 
 // SetOnRecompile sets a callback that is invoked after recompilation.
@@ -195,4 +209,17 @@ func (r *PolicyRegistry) recompileLocked() error {
 	r.traceSnapshot = newPolicySnapshot(result.Traces, r.stats)
 
 	return nil
+}
+
+func isZeroPolicyStatsSnapshot(s PolicyStatsSnapshot) bool {
+	return s.MatchHits == 0 &&
+		s.MatchMisses == 0 &&
+		s.RemoveHits == 0 &&
+		s.RemoveMisses == 0 &&
+		s.RedactHits == 0 &&
+		s.RedactMisses == 0 &&
+		s.RenameHits == 0 &&
+		s.RenameMisses == 0 &&
+		s.AddHits == 0 &&
+		s.AddMisses == 0
 }

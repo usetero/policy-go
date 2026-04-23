@@ -11,8 +11,9 @@ import (
 
 // Config represents the root configuration for policy providers.
 type Config struct {
-	Providers       []ProviderConfig       `json:"policy_providers" mapstructure:"policy_providers"`
-	ServiceMetadata *ServiceMetadataConfig `json:"service_metadata,omitempty" mapstructure:"service_metadata"`
+	Providers                 []ProviderConfig       `json:"policy_providers" mapstructure:"policy_providers"`
+	ServiceMetadata           *ServiceMetadataConfig `json:"service_metadata,omitempty" mapstructure:"service_metadata"`
+	IncludeZeroHitPolicyStats bool                   `json:"include_zero_hit_policy_stats,omitempty" mapstructure:"include_zero_hit_policy_stats"`
 }
 
 // ServiceMetadataConfig is the JSON/mapstructure-friendly representation of ServiceMetadata.
@@ -185,6 +186,8 @@ type LoadedProvider struct {
 // service_metadata field in the Config. When both are provided, they are merged
 // with config values taking precedence over code, allowing users to override defaults.
 func (l *ConfigLoader) Load(config *Config) ([]LoadedProvider, error) {
+	l.registry.SetIncludeZeroHitPolicyStats(config.IncludeZeroHitPolicyStats)
+
 	// Resolve service metadata: merge code and config, config values take precedence.
 	metadata := mergeServiceMetadata(l.serviceMetadata, config.ServiceMetadata)
 

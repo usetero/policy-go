@@ -75,15 +75,21 @@ func traversePath(m map[string]any, path []string) []byte {
 }
 
 func main() {
+	token := os.Getenv("TERO_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("TERO_AUTH_TOKEN is required")
+	}
+
 	// Create a registry to manage policies
 	registry := policy.NewPolicyRegistry()
+	// registry.SetIncludeZeroHitPolicyStats(true)
 
 	// Create a gRPC provider connecting to Tero
-	provider := policy.NewHttpProvider("https://sync.usetero.com/v1/policy/sync",
+	provider := policy.NewHttpProvider("https://sync.usetero.dev/v1/policy/sync",
 		policy.WithHTTPPollInterval(30*time.Second),
 		policy.WithContentType(policy.ContentTypeJSON),
 		policy.WithHeaders(map[string]string{
-			"Authorization": "Bearer tero_sk_xBvF7OBOkM9fhwoWB3TD_mA7ayxjzyEN-acMoyfZyfw=",
+			"Authorization": "Bearer " + token,
 		}),
 		policy.WithServiceMetadata(&policy.ServiceMetadata{
 			ServiceName:       "example-service",
@@ -92,6 +98,7 @@ func main() {
 			ServiceVersion:    "1.0.0",
 			SupportedStages: []policyv1.PolicyStage{
 				policyv1.PolicyStage_POLICY_STAGE_LOG_FILTER,
+				policyv1.PolicyStage_POLICY_STAGE_LOG_TRANSFORM,
 			},
 		}),
 		policy.WithHTTPOnError(func(err error) {
@@ -110,8 +117,23 @@ func main() {
 	defer handle.Unregister()
 	defer provider.Stop()
 
-	fmt.Println("Connected to gRPC policy server at localhost:50051")
+	fmt.Println("Connected to HTTP policy server at https://sync.usetero.dev/v1/policy/sync")
 	fmt.Println("Waiting for policies...")
+	fmt.Println()
+
+	// Register() already performs an initial synchronous load via Subscribe().
+	snapshot := registry.LogSnapshot()
+	loadedCount := 0
+	if snapshot != nil {
+		fmt.Println("Loaded log policies:")
+		for id := range snapshot.Iter() {
+			fmt.Printf("  - %s\n", id)
+			loadedCount++
+		}
+	}
+	if loadedCount == 0 {
+		fmt.Println("No log policies currently loaded")
+	}
 	fmt.Println()
 
 	// Create an engine for evaluation
@@ -158,7 +180,7 @@ func main() {
 	fmt.Println("=============")
 	stats := registry.CollectStats()
 	if len(stats) == 0 {
-		fmt.Println("No policies loaded (server may not have any policies)")
+		fmt.Println("No policy stats collected yet")
 	}
 	for _, s := range stats {
 		fmt.Printf("%-30s match_hits=%d match_misses=%d\n", s.PolicyID, s.MatchHits, s.MatchMisses)

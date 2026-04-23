@@ -97,6 +97,23 @@ func TestParseConfigFileProvider(t *testing.T) {
 	assert.Equal(t, "/etc/policies.json", p.Path)
 }
 
+func TestParseConfigIncludeZeroHitPolicyStats(t *testing.T) {
+	json := `{
+		"include_zero_hit_policy_stats": true,
+		"policy_providers": [
+			{
+				"type": "file",
+				"id": "local-policies",
+				"path": "/etc/policies.json"
+			}
+		]
+	}`
+
+	config, err := ParseConfig([]byte(json))
+	require.NoError(t, err)
+	assert.True(t, config.IncludeZeroHitPolicyStats)
+}
+
 func TestParseConfigFileProviderWithPollInterval(t *testing.T) {
 	json := `{
 		"policy_providers": [
@@ -383,6 +400,49 @@ func TestConfigLoaderLoad(t *testing.T) {
 
 	_, ok := snapshot.GetPolicy("test-policy")
 	assert.True(t, ok, "expected to find test-policy in snapshot")
+}
+
+func TestConfigLoaderLoadIncludeZeroHitPolicyStats(t *testing.T) {
+	policiesFile := filepath.Join(t.TempDir(), "policies.json")
+	policiesContent := `{
+		"policies": [
+			{
+				"id": "test-policy",
+				"name": "Test Policy",
+				"log": {
+					"match": [{"log_field": "severity_text", "exact": "INFO"}],
+					"keep": "all"
+				}
+			}
+		]
+	}`
+	err := os.WriteFile(policiesFile, []byte(policiesContent), 0644)
+	require.NoError(t, err)
+
+	config := &Config{
+		IncludeZeroHitPolicyStats: true,
+		Providers: []ProviderConfig{
+			{
+				Type: "file",
+				ID:   "test-provider",
+				Path: policiesFile,
+			},
+		},
+	}
+
+	registry := NewPolicyRegistry()
+	loader := NewConfigLoader(registry)
+
+	loaded, err := loader.Load(config)
+	require.NoError(t, err)
+	defer UnregisterAll(loaded)
+	defer StopAll(loaded)
+
+	stats := registry.CollectStats()
+	require.Len(t, stats, 1)
+	assert.Equal(t, "test-policy", stats[0].PolicyID)
+	assert.Equal(t, uint64(0), stats[0].MatchHits)
+	assert.Equal(t, uint64(0), stats[0].MatchMisses)
 }
 
 func TestConfigLoaderLoadWithPollInterval(t *testing.T) {
