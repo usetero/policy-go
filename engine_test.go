@@ -2491,6 +2491,115 @@ func TestEvaluateLogTransformNotAppliedOnDrop(t *testing.T) {
 	assert.Equal(t, []byte("debug message"), record.Body)
 }
 
+func TestEvaluateLogRateLimitWinnerWithKeepAllTransform(t *testing.T) {
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "log_event_policy:019dac79-9807-74dc-a92a-8d9ceee85675:primary",
+			Name: "request_resource_product_reviews_success",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{
+								LogAttribute: &policyv1.AttributePath{Path: []string{"event", "name"}},
+							},
+							Match: &policyv1.LogMatcher_Exact{Exact: "proxy.access"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{
+								LogAttribute: &policyv1.AttributePath{Path: []string{"url", "path"}},
+							},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^/api/product-reviews"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "\" 200 "},
+						},
+					},
+					Keep: "1/300s",
+				},
+			},
+		},
+		{
+			Id:   "log_event_policy:019dac79-9807-74dc-a92a-8d9ceee85675:transform",
+			Name: "request_resource_product_reviews_success",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{
+								LogAttribute: &policyv1.AttributePath{Path: []string{"event", "name"}},
+							},
+							Match: &policyv1.LogMatcher_Exact{Exact: "proxy.access"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{
+								LogAttribute: &policyv1.AttributePath{Path: []string{"url", "path"}},
+							},
+							Match: &policyv1.LogMatcher_Regex{Regex: "^/api/product-reviews"},
+						},
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "\" 200 "},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Add: []*policyv1.LogAdd{
+							{
+								Field:  &policyv1.LogAdd_LogField{LogField: policyv1.LogField_LOG_FIELD_SEVERITY_TEXT},
+								Value:  "debug",
+								Upsert: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+
+	engine := NewPolicyEngine(registry)
+
+	// First matching record is under rate limit, so transforms from matched policies run.
+	first := &SimpleLogRecord{
+		Body:         []byte("GET /api/product-reviews/123 \" 200 OK"),
+		SeverityText: []byte("info"),
+		LogAttributes: map[string]any{
+			"event": map[string]any{
+				"name": "proxy.access",
+			},
+			"url": map[string]any{
+				"path": "/api/product-reviews/123",
+			},
+		},
+	}
+	firstResult := EvaluateLog(engine, first, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, firstResult)
+	assert.Equal(t, []byte("debug"), first.SeverityText)
+
+	// Second immediate matching record exceeds 1/300s and is dropped;
+	// transforms must not be applied when dropped.
+	second := &SimpleLogRecord{
+		Body:         []byte("GET /api/product-reviews/456 \" 200 OK"),
+		SeverityText: []byte("info"),
+		LogAttributes: map[string]any{
+			"event": map[string]any{
+				"name": "proxy.access",
+			},
+			"url": map[string]any{
+				"path": "/api/product-reviews/456",
+			},
+		},
+	}
+	secondResult := EvaluateLog(engine, second, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultDrop, secondResult)
+	assert.Equal(t, []byte("info"), second.SeverityText, "transform should not run when rate-limited policy drops the record")
+}
+
 func TestEvaluateLogNoTransformReturnsKeep(t *testing.T) {
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
