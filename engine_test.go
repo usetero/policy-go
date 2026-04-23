@@ -2859,6 +2859,7 @@ func TestEvaluateLogTransformStatsRecorded(t *testing.T) {
 
 func TestEvaluateLogTransformStatsResetAfterCollect(t *testing.T) {
 	registry := NewPolicyRegistry()
+	registry.SetIncludeZeroHitPolicyStats(true)
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
 			Id:   "stats-reset",
