@@ -4101,3 +4101,240 @@ func TestEvaluateTrace100PercentWritesZeroThreshold(t *testing.T) {
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, "0", writtenValue, "100%% sampling should write threshold 0")
 }
+
+// buildTargetedRedactPolicy constructs a single-policy provider that redacts
+// the named log attribute via the given regex/replacement.
+func buildTargetedRedactPolicy(id, attr, regex, replacement string) *staticProvider {
+	return newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   id,
+			Name: id,
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogAttribute{
+								LogAttribute: &policyv1.AttributePath{Path: []string{attr}},
+							},
+							Match: &policyv1.LogMatcher_Exists{Exists: true},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field: &policyv1.LogRedact_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{attr}},
+								},
+								Replacement: replacement,
+								Regex:       &regex,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestEvaluateLogTransformRedactRegexAttribute(t *testing.T) {
+	registry := NewPolicyRegistry()
+	_, err := registry.Register(buildTargetedRedactPolicy(
+		"redact-auth-header", "authorization", `(?i)^(bearer\s+).+$`, "$1[REDACTED]",
+	))
+	require.NoError(t, err)
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		LogAttributes: map[string]any{"authorization": "Bearer abcdef1234"},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, "Bearer [REDACTED]", record.LogAttributes["authorization"])
+}
+
+func TestEvaluateLogTransformRedactRegexNoMatchIsNoop(t *testing.T) {
+	registry := NewPolicyRegistry()
+	_, err := registry.Register(buildTargetedRedactPolicy(
+		"redact-cc", "card", `\b\d{16}\b`, "[CC]",
+	))
+	require.NoError(t, err)
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		LogAttributes: map[string]any{"card": "no card here"},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, "no card here", record.LogAttributes["card"], "value should be unchanged when regex does not match")
+}
+
+func TestEvaluateLogTransformRedactRegexNonStringIsNoop(t *testing.T) {
+	regex := `\d+`
+	registry := NewPolicyRegistry()
+	// Match on body (string), redact a non-string attribute. The redact must
+	// be a no-op because the attribute value is not a string.
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "redact-num",
+			Name: "Redact Num",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Exists{Exists: true},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field: &policyv1.LogRedact_LogAttribute{
+									LogAttribute: &policyv1.AttributePath{Path: []string{"count"}},
+								},
+								Replacement: "[N]",
+								Regex:       &regex,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		Body:          []byte("hello"),
+		LogAttributes: map[string]any{"count": 42},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, 42, record.LogAttributes["count"], "non-string value must be left untouched")
+}
+
+func TestEvaluateLogTransformRedactRegexMultipleMatches(t *testing.T) {
+	registry := NewPolicyRegistry()
+	_, err := registry.Register(buildTargetedRedactPolicy(
+		"redact-emails", "msg", `\w+@\w+\.\w+`, "[email]",
+	))
+	require.NoError(t, err)
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{
+		LogAttributes: map[string]any{"msg": "from a@b.com to c@d.org"},
+	}
+
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, "from [email] to [email]", record.LogAttributes["msg"])
+}
+
+func TestEvaluateLogTransformRedactRegexBody(t *testing.T) {
+	regex := `password=\S+`
+	registry := NewPolicyRegistry()
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "redact-body-regex",
+			Name: "Redact Body Regex",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Contains{Contains: "password"},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field:       &policyv1.LogRedact_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+								Replacement: "password=[REDACTED]",
+								Regex:       &regex,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{Body: []byte("user=alice password=hunter2 host=x")}
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	assert.Equal(t, ResultKeepWithTransform, result)
+	assert.Equal(t, []byte("user=alice password=[REDACTED] host=x"), record.Body)
+}
+
+func TestEvaluateLogTransformRedactRegexStatsRecordMiss(t *testing.T) {
+	registry := NewPolicyRegistry()
+	_, err := registry.Register(buildTargetedRedactPolicy(
+		"redact-stats", "msg", `secret-\d+`, "[REDACTED]",
+	))
+	require.NoError(t, err)
+	engine := NewPolicyEngine(registry)
+
+	record := &SimpleLogRecord{LogAttributes: map[string]any{"msg": "nothing to redact"}}
+	result := EvaluateLog(engine, record, SimpleLogMatcher, WithLogTransform(SimpleLogTransformer))
+	require.Equal(t, ResultKeepWithTransform, result)
+
+	stats := registry.CollectStats()
+	var snap *PolicyStatsSnapshot
+	for i := range stats {
+		if stats[i].PolicyID == "redact-stats" {
+			snap = &stats[i]
+			break
+		}
+	}
+	require.NotNil(t, snap)
+	assert.Equal(t, uint64(0), snap.RedactHits, "regex no-match should not count as hit")
+	assert.Equal(t, uint64(1), snap.RedactMisses, "regex no-match should count as miss")
+}
+
+func TestCompileInvalidRedactRegexFails(t *testing.T) {
+	registry := NewPolicyRegistry()
+	var compileErr error
+	registry.SetOnRecompile(func(err error) {
+		compileErr = err
+	})
+
+	bad := `[`
+	provider := newStaticProvider([]*policyv1.Policy{
+		{
+			Id:   "bad-regex",
+			Name: "Bad Regex",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+							Match: &policyv1.LogMatcher_Exists{Exists: true},
+						},
+					},
+					Keep: "all",
+					Transform: &policyv1.LogTransform{
+						Redact: []*policyv1.LogRedact{
+							{
+								Field:       &policyv1.LogRedact_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+								Replacement: "x",
+								Regex:       &bad,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	_, err := registry.Register(provider)
+	require.NoError(t, err)
+	require.Error(t, compileErr, "invalid regex must surface as a compile error")
+	assert.Contains(t, compileErr.Error(), "bad-regex")
+}

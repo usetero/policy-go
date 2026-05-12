@@ -91,7 +91,8 @@ func (LogField) EnumDescriptor() ([]byte, []int) {
 // LogTarget defines matching and actions for logs.
 type LogTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Matchers to identify which logs this policy applies to (AND logic)
+	// Matchers to identify which logs this policy applies to (AND logic).
+	// Implementations MUST reject policies with an empty match list.
 	Match []*LogMatcher `protobuf:"bytes,1,rep,name=match,proto3" json:"match,omitempty"`
 	// The keep field controls whether matching telemetry survives. It unifies
 	// dropping, sampling, and rate limiting into a single concept: what percentage
@@ -102,8 +103,13 @@ type LogTarget struct {
 	//	"all"  - Keep everything (default, can be omitted)
 	//	"none" - Drop everything
 	//	"N%"   - Keep N percent (0-100), e.g. "50%"
-	//	"N/s"  - Keep at most N per second, e.g. "100/s"
-	//	"N/m"  - Keep at most N per minute, e.g. "1000/m"
+	//	"N/s"  - Keep at most N per second (shorthand for "N/1s"), e.g. "100/s"
+	//	"N/m"  - Keep at most N per minute (shorthand for "N/1m"), e.g. "1000/m"
+	//	"N/Ds" - Keep at most N per D-second window, e.g. "1/5s"
+	//	"N/Dm" - Keep at most N per D-minute window, e.g. "1/5m"
+	//
+	// For rate limiting, both N and D must be positive integers. Fractional
+	// values are invalid and should be rejected by implementations.
 	Keep string `protobuf:"bytes,2,opt,name=keep,proto3" json:"keep,omitempty"`
 	// Transform operations to apply
 	Transform *LogTransform `protobuf:"bytes,3,opt,name=transform,proto3" json:"transform,omitempty"`
@@ -112,7 +118,7 @@ type LogTarget struct {
 	// keep/drop decision. Use for lifecycle events (request_id, trace_id, job_id)
 	// to avoid sampling individual log lines independently.
 	//
-	// Only applies when keep is a sampling value (N%, N/s, N/m).
+	// Only applies when keep is a sampling value (N%, N/s, N/m, N/Ds, N/Dm).
 	// Example: sample_key = log_attribute["request_id"] with keep = "10%" means
 	// 10% of requests are kept, with all logs from each kept request preserved.
 	SampleKey     *LogSampleKey `protobuf:"bytes,4,opt,name=sample_key,json=sampleKey,proto3" json:"sample_key,omitempty"`
@@ -776,8 +782,16 @@ type LogRedact struct {
 	//	*LogRedact_ResourceAttribute
 	//	*LogRedact_ScopeAttribute
 	Field isLogRedact_Field `protobuf_oneof:"field"`
-	// Replacement value (e.g., "[REDACTED]")
-	Replacement   string `protobuf:"bytes,10,opt,name=replacement,proto3" json:"replacement,omitempty"`
+	// Replacement value (e.g., "[REDACTED]"). When regex is set, this is
+	// interpreted as a replacement template.
+	Replacement string `protobuf:"bytes,10,opt,name=replacement,proto3" json:"replacement,omitempty"`
+	// Optional RE2 regular expression for targeted replacement. If unset, the
+	// entire field value is replaced. If set and no match is present, no
+	// modification is applied. If set and a match is present, all non-overlapping
+	// instances of the full regular expression match are replaced. Capture groups
+	// may be referenced from the replacement string, but do not change the
+	// replacement range.
+	Regex         *string `protobuf:"bytes,11,opt,name=regex,proto3,oneof" json:"regex,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -858,6 +872,13 @@ func (x *LogRedact) GetScopeAttribute() *AttributePath {
 func (x *LogRedact) GetReplacement() string {
 	if x != nil {
 		return x.Replacement
+	}
+	return ""
+}
+
+func (x *LogRedact) GetRegex() string {
+	if x != nil && x.Regex != nil {
+		return *x.Regex
 	}
 	return ""
 }
@@ -1219,15 +1240,17 @@ const file_tero_policy_v1_log_proto_rawDesc = "" +
 	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
 	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
 	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttributeB\a\n" +
-	"\x05field\"\xcf\x02\n" +
+	"\x05field\"\xf4\x02\n" +
 	"\tLogRedact\x127\n" +
 	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
 	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
 	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
 	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12 \n" +
 	"\vreplacement\x18\n" +
-	" \x01(\tR\vreplacementB\a\n" +
-	"\x05field\"\xf8\x02\n" +
+	" \x01(\tR\vreplacement\x12\x19\n" +
+	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x88\x01\x01B\a\n" +
+	"\x05fieldB\b\n" +
+	"\x06_regex\"\xf8\x02\n" +
 	"\tLogRename\x12@\n" +
 	"\x0efrom_log_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\ffromLogField\x12M\n" +
 	"\x12from_log_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x10fromLogAttribute\x12W\n" +

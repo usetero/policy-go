@@ -442,9 +442,14 @@ type Profile struct {
 	SampleType *ValueType `protobuf:"bytes,1,opt,name=sample_type,json=sampleType,proto3" json:"sample_type,omitempty"`
 	// The set of samples recorded in this profile.
 	Samples []*Sample `protobuf:"bytes,2,rep,name=samples,proto3" json:"samples,omitempty"`
-	// Time of collection (UTC) represented as nanoseconds past the epoch.
+	// Time of collection. Value is UNIX Epoch time in nanoseconds since 00:00:00
+	// UTC on 1 January 1970.
 	TimeUnixNano uint64 `protobuf:"fixed64,3,opt,name=time_unix_nano,json=timeUnixNano,proto3" json:"time_unix_nano,omitempty"`
-	// Duration of the profile, if a duration makes sense.
+	// Duration of the profile. For instant profiles like live heap snapshot, the
+	// duration can be zero but it may be preferable to set time_unix_nano to the
+	// process start time and duration_nano to the relative time when the profile
+	// was gathered. This ensures Sample.timestamps_unix_nano values such as
+	// allocation timestamp fall into the profile time range.
 	DurationNano uint64 `protobuf:"varint,4,opt,name=duration_nano,json=durationNano,proto3" json:"duration_nano,omitempty"`
 	// The kind of events between sampled occurrences.
 	// e.g [ "cpu","cycles" ] or [ "heap","bytes" ]
@@ -719,7 +724,11 @@ func (x *ValueType) GetUnitStrindex() int32 {
 // both fields are populated, they MUST contain the same number of elements, and
 // the elements at the same index MUST refer to the same event.
 //
-// Examples of different ways of representing a sample with the total value of 10:
+// For the purposes of efficiently representing aggregated data observations, a Sample is regarded
+// as having a shared identity and an associated collection of per-observation data points.
+// Samples having the same identity SHOULD be combined by inserting timestamps and values to the data arrays.
+//
+// Examples of different ways ('shapes') of representing a sample with the total value of 10:
 //
 // Report of a stacktrace at 10 timestamps (consumers must assume the value is 1 for each point):
 //
@@ -735,19 +744,24 @@ func (x *ValueType) GetUnitStrindex() int32 {
 //
 //	values: [2, 2, 3, 3]
 //	timestamps_unix_nano: [1, 2, 3, 4]
+//
+// All Samples for a Profile SHOULD have the same shape, i.e. all data observation series should consistently
+// adopt the same data recording style.
 type Sample struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Reference to stack in ProfilesDictionary.stack_table.
 	StackIndex int32 `protobuf:"varint,1,opt,name=stack_index,json=stackIndex,proto3" json:"stack_index,omitempty"`
-	// The type and unit of each value is defined by Profile.sample_type.
-	Values []int64 `protobuf:"varint,2,rep,packed,name=values,proto3" json:"values,omitempty"`
 	// References to attributes in ProfilesDictionary.attribute_table. [optional]
-	AttributeIndices []int32 `protobuf:"varint,3,rep,packed,name=attribute_indices,json=attributeIndices,proto3" json:"attribute_indices,omitempty"`
+	AttributeIndices []int32 `protobuf:"varint,2,rep,packed,name=attribute_indices,json=attributeIndices,proto3" json:"attribute_indices,omitempty"`
 	// Reference to link in ProfilesDictionary.link_table. [optional]
 	// It can be unset / set to 0 if no link exists, as link_table[0] is always a 'null' default value.
-	LinkIndex int32 `protobuf:"varint,4,opt,name=link_index,json=linkIndex,proto3" json:"link_index,omitempty"`
-	// Timestamps associated with Sample represented in nanoseconds. These
-	// timestamps should fall within the Profile's time range.
+	LinkIndex int32 `protobuf:"varint,3,opt,name=link_index,json=linkIndex,proto3" json:"link_index,omitempty"`
+	// The type and unit of each value is defined by Profile.sample_type.
+	Values []int64 `protobuf:"varint,4,rep,packed,name=values,proto3" json:"values,omitempty"`
+	// Timestamps associated with Sample. Value is UNIX Epoch time in nanoseconds
+	// since 00:00:00 UTC on 1 January 1970. The timestamps should fall within the
+	// [Profile.time_unix_nano, Profile.time_unix_nano + Profile.duration_nano)
+	// time range.
 	TimestampsUnixNano []uint64 `protobuf:"fixed64,5,rep,packed,name=timestamps_unix_nano,json=timestampsUnixNano,proto3" json:"timestamps_unix_nano,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
@@ -790,13 +804,6 @@ func (x *Sample) GetStackIndex() int32 {
 	return 0
 }
 
-func (x *Sample) GetValues() []int64 {
-	if x != nil {
-		return x.Values
-	}
-	return nil
-}
-
 func (x *Sample) GetAttributeIndices() []int32 {
 	if x != nil {
 		return x.AttributeIndices
@@ -809,6 +816,13 @@ func (x *Sample) GetLinkIndex() int32 {
 		return x.LinkIndex
 	}
 	return 0
+}
+
+func (x *Sample) GetValues() []int64 {
+	if x != nil {
+		return x.Values
+	}
+	return nil
 }
 
 func (x *Sample) GetTimestampsUnixNano() []uint64 {
@@ -1296,11 +1310,11 @@ const file_opentelemetry_proto_profiles_v1development_profiles_proto_rawDesc = "
 	"\runit_strindex\x18\x02 \x01(\x05R\funitStrindex\"\xbf\x01\n" +
 	"\x06Sample\x12\x1f\n" +
 	"\vstack_index\x18\x01 \x01(\x05R\n" +
-	"stackIndex\x12\x16\n" +
-	"\x06values\x18\x02 \x03(\x03R\x06values\x12+\n" +
-	"\x11attribute_indices\x18\x03 \x03(\x05R\x10attributeIndices\x12\x1d\n" +
+	"stackIndex\x12+\n" +
+	"\x11attribute_indices\x18\x02 \x03(\x05R\x10attributeIndices\x12\x1d\n" +
 	"\n" +
-	"link_index\x18\x04 \x01(\x05R\tlinkIndex\x120\n" +
+	"link_index\x18\x03 \x01(\x05R\tlinkIndex\x12\x16\n" +
+	"\x06values\x18\x04 \x03(\x03R\x06values\x120\n" +
 	"\x14timestamps_unix_nano\x18\x05 \x03(\x06R\x12timestampsUnixNano\"\xca\x01\n" +
 	"\aMapping\x12!\n" +
 	"\fmemory_start\x18\x01 \x01(\x04R\vmemoryStart\x12!\n" +

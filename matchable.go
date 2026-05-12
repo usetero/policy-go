@@ -65,7 +65,7 @@ func SimpleLogTransformer(r *SimpleLogRecord, op TransformOp) bool {
 	case TransformRemove:
 		return simpleLogRemove(r, op.Ref)
 	case TransformRedact:
-		return simpleLogRedact(r, op.Ref, op.Value)
+		return simpleLogRedact(r, op)
 	case TransformRename:
 		return simpleLogRename(r, op.Ref, op.To, op.Upsert)
 	case TransformAdd:
@@ -109,40 +109,73 @@ func simpleLogRemove(r *SimpleLogRecord, ref LogFieldRef) bool {
 	return exists
 }
 
-func simpleLogRedact(r *SimpleLogRecord, ref LogFieldRef, replacement string) bool {
-	val := []byte(replacement)
+func simpleLogRedact(r *SimpleLogRecord, op TransformOp) bool {
+	ref := op.Ref
 	if ref.IsField() {
-		switch ref.Field {
-		case LogFieldBody:
-			hit := r.Body != nil
-			r.Body = val
-			return hit
-		case LogFieldSeverityText:
-			hit := r.SeverityText != nil
-			r.SeverityText = val
-			return hit
-		case LogFieldTraceID:
-			hit := r.TraceID != nil
-			r.TraceID = val
-			return hit
-		case LogFieldSpanID:
-			hit := r.SpanID != nil
-			r.SpanID = val
-			return hit
-		case LogFieldEventName:
-			hit := r.EventName != nil
-			r.EventName = val
-			return hit
-		}
-		return false
+		return simpleLogRedactField(r, ref.Field, op)
 	}
 	attrs := simpleLogAttrs(r, ref)
 	if attrs == nil {
 		return false
 	}
-	_, exists := getPath(attrs, ref.AttrPath)
-	setPath(attrs, ref.AttrPath, replacement)
-	return exists
+	cur, exists := getPath(attrs, ref.AttrPath)
+	if !exists {
+		return false
+	}
+	if op.Regex != nil {
+		// Targeted redaction: requires a string value and a match.
+		curStr, ok := cur.(string)
+		if !ok {
+			return false
+		}
+		if !op.Regex.MatchString(curStr) {
+			return false
+		}
+		setPath(attrs, ref.AttrPath, op.Regex.ReplaceAllString(curStr, op.Value))
+		return true
+	}
+	setPath(attrs, ref.AttrPath, op.Value)
+	return true
+}
+
+// simpleLogRedactField redacts a fixed log field. Fixed fields are stored as
+// []byte and treated as strings for regex redaction.
+func simpleLogRedactField(r *SimpleLogRecord, field LogField, op TransformOp) bool {
+	target := simpleLogFieldPtr(r, field)
+	if target == nil {
+		return false
+	}
+	if *target == nil {
+		return false
+	}
+	if op.Regex != nil {
+		curStr := string(*target)
+		if !op.Regex.MatchString(curStr) {
+			return false
+		}
+		*target = []byte(op.Regex.ReplaceAllString(curStr, op.Value))
+		return true
+	}
+	*target = []byte(op.Value)
+	return true
+}
+
+// simpleLogFieldPtr returns a pointer to the backing []byte for a fixed log
+// field, or nil if the field is not redactable.
+func simpleLogFieldPtr(r *SimpleLogRecord, field LogField) *[]byte {
+	switch field {
+	case LogFieldBody:
+		return &r.Body
+	case LogFieldSeverityText:
+		return &r.SeverityText
+	case LogFieldTraceID:
+		return &r.TraceID
+	case LogFieldSpanID:
+		return &r.SpanID
+	case LogFieldEventName:
+		return &r.EventName
+	}
+	return nil
 }
 
 func simpleLogRename(r *SimpleLogRecord, ref LogFieldRef, to string, upsert bool) bool {

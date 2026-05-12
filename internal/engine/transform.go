@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"fmt"
+	"regexp"
+
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -17,22 +20,24 @@ const (
 // TransformOp is a single compiled transform operation.
 type TransformOp struct {
 	Kind   TransformKind
-	Ref    LogFieldRef // target field (remove/redact/add) or source field (rename)
-	Value  string      // replacement string (redact) or value to set (add)
-	To     string      // new field name (rename only)
-	Upsert bool        // overwrite if target exists (rename/add)
+	Ref    LogFieldRef    // target field (remove/redact/add) or source field (rename)
+	Value  string         // replacement string (redact) or value to set (add)
+	To     string         // new field name (rename only)
+	Upsert bool           // overwrite if target exists (rename/add)
+	Regex  *regexp.Regexp // optional compiled regex for targeted redaction (redact only)
 }
 
 // compileLogTransform converts a proto LogTransform into a flat slice of TransformOps.
 // Operations are ordered: removes, redacts, renames, adds (matching proto field order).
-func compileLogTransform(t *policyv1.LogTransform) []TransformOp {
+// Returns an error if any redact regex fails to compile.
+func compileLogTransform(t *policyv1.LogTransform) ([]TransformOp, error) {
 	if t == nil {
-		return nil
+		return nil, nil
 	}
 
 	n := len(t.GetRemove()) + len(t.GetRedact()) + len(t.GetRename()) + len(t.GetAdd())
 	if n == 0 {
-		return nil
+		return nil, nil
 	}
 
 	ops := make([]TransformOp, 0, n)
@@ -44,12 +49,20 @@ func compileLogTransform(t *policyv1.LogTransform) []TransformOp {
 		})
 	}
 
-	for _, r := range t.GetRedact() {
-		ops = append(ops, TransformOp{
+	for i, r := range t.GetRedact() {
+		op := TransformOp{
 			Kind:  TransformRedact,
 			Ref:   fieldRefFromLogRedact(r),
 			Value: r.GetReplacement(),
-		})
+		}
+		if r.Regex != nil {
+			re, err := regexp.Compile(r.GetRegex())
+			if err != nil {
+				return nil, fmt.Errorf("redact[%d]: invalid regex %q: %w", i, r.GetRegex(), err)
+			}
+			op.Regex = re
+		}
+		ops = append(ops, op)
 	}
 
 	for _, r := range t.GetRename() {
@@ -70,7 +83,7 @@ func compileLogTransform(t *policyv1.LogTransform) []TransformOp {
 		})
 	}
 
-	return ops
+	return ops, nil
 }
 
 // fieldRefFromLogRemove extracts a FieldRef from a proto LogRemove.

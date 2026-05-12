@@ -49,6 +49,7 @@ type LogRedact struct {
 	ResourceAttribute *AttributePath `json:"resource_attribute,omitempty"`
 	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
 	Replacement       string         `json:"replacement"`
+	Regex             *string        `json:"regex,omitempty"`
 }
 
 // LogRename specifies a field to rename.

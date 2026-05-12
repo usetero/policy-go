@@ -340,7 +340,7 @@ func (p *Parser) convertLogRemove(r LogRemove) (*policyv1.LogRemove, error) {
 }
 
 func (p *Parser) convertLogRedact(r LogRedact) (*policyv1.LogRedact, error) {
-	result := &policyv1.LogRedact{Replacement: r.Replacement}
+	result := &policyv1.LogRedact{Replacement: r.Replacement, Regex: r.Regex}
 	field, err := resolveFieldSelector("redact", r.LogField, r.LogAttribute, r.ResourceAttribute, r.ScopeAttribute)
 	if err != nil {
 		return nil, err

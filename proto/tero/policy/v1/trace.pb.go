@@ -215,15 +215,21 @@ const (
 	// to make deterministic sampling decisions. This is the default mode.
 	// Suitable when you want consistent sampling across multiple collectors.
 	SamplingMode_SAMPLING_MODE_HASH_SEED SamplingMode = 1
-	// proportional mode: Respects existing sampling probability in tracestate.
-	// Adjusts the effective probability to achieve the target percentage
-	// relative to the incoming probability. For example, if incoming spans
-	// are already sampled at 50% and target is 10%, this mode will sample
-	// 20% of incoming spans to achieve 10% overall.
+	// proportional mode: Multiplies the incoming probability by the configured
+	// percentage to compute the output threshold. This reduces traffic by a
+	// fixed factor regardless of arriving thresholds.
+	//
+	//	T_o = ProbabilityToThreshold(percentage/100 * ThresholdToProbability(T_s))
+	//
+	// For example, if incoming spans are sampled at 50% and percentage is 10%,
+	// the output probability is 0.1 * 0.5 = 5%.
 	SamplingMode_SAMPLING_MODE_PROPORTIONAL SamplingMode = 2
-	// equalizing mode: Attempts to achieve the target percentage by preferentially
-	// sampling spans that have been sampled at higher rates. This helps balance
-	// the sampling across different sources while respecting existing thresholds.
+	// equalizing mode: Aims to make all spans have an equal threshold after
+	// passing this stage. When the incoming threshold T_s is already more
+	// restrictive than the configured target T_d, the span is kept with T_s
+	// unchanged. Otherwise, spans are selected using the target threshold T_d.
+	// This preferentially keeps rare spans while applying a hard cutoff to
+	// over-sampled spans.
 	SamplingMode_SAMPLING_MODE_EQUALIZING SamplingMode = 3
 )
 
@@ -273,7 +279,8 @@ func (SamplingMode) EnumDescriptor() ([]byte, []int) {
 // TraceTarget defines matching and sampling actions for traces/spans.
 type TraceTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Matchers to identify which spans this policy applies to (AND logic)
+	// Matchers to identify which spans this policy applies to (AND logic).
+	// Implementations MUST reject policies with an empty match list.
 	Match []*TraceMatcher `protobuf:"bytes,1,rep,name=match,proto3" json:"match,omitempty"`
 	// The keep field controls whether matching spans are sampled.
 	// For traces, this uses probabilistic sampling with tracestate support.

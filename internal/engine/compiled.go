@@ -233,7 +233,10 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				logBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
-			transforms := compileLogTransform(log.GetTransform())
+			transforms, err := compileLogTransform(log.GetTransform())
+			if err != nil {
+				return nil, fmt.Errorf("policy %s: %w", id, err)
+			}
 			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats, transforms)
 		}
 
