@@ -288,70 +288,193 @@ const (
 	TransformAdd    = engine.TransformAdd
 )
 
-// ============================================================================
-// MATCH FUNCTIONS
-// ============================================================================
-
-// LogMatchFunc extracts field values from a log record of type T.
-// Consumers implement this function to bridge their record type to the policy engine.
-type LogMatchFunc[T any] func(record T, ref LogFieldRef) []byte
-
-// MetricMatchFunc extracts field values from a metric of type T.
-// Consumers implement this function to bridge their record type to the policy engine.
-type MetricMatchFunc[T any] func(record T, ref MetricFieldRef) []byte
-
-// TraceMatchFunc extracts field values from a span of type T.
-// Consumers implement this function to bridge their record type to the policy engine.
-type TraceMatchFunc[T any] func(record T, ref TraceFieldRef) []byte
-
-// ============================================================================
-// TRANSFORM FUNCTIONS
-// ============================================================================
-
-// LogTransformFunc applies a single transform operation to a log record of type T.
-// Consumers implement this function to bridge their record type to the policy engine.
-// Returns true if the targeted field was present (hit), false if absent (miss).
-type LogTransformFunc[T any] func(record T, op TransformOp) bool
-
-// TraceTransformFunc writes a sampling threshold value to a span of type T.
-// Called after a sampling decision to write the effective `th` value back to tracestate.
-// The ref identifies the target field (SpanSamplingThreshold) and value is the encoded
-// hex threshold string.
-type TraceTransformFunc[T any] func(span T, ref TraceFieldRef, value string)
-
-// ============================================================================
-// EVALUATION OPTIONS
-// ============================================================================
-
-// logOptions holds optional configuration for log evaluation.
-type logOptions[T any] struct {
-	transform LogTransformFunc[T]
+// ApplyLogTransform applies a single TransformOp to a record via the
+// LogConsumer primitives. The engine calls this for every op on a matched
+// policy; it's exposed publicly so tests can exercise the spec semantics
+// directly without going through the full evaluation path.
+func ApplyLogTransform[T any](rec T, op TransformOp, c *LogAccessor[T]) bool {
+	return engine.ApplyLogTransform(rec, op, c)
 }
 
-// LogOption configures optional behavior for EvaluateLog.
-type LogOption[T any] func(*logOptions[T])
+// ============================================================================
+// CONSUMER ACCESSORS
+// ============================================================================
 
-// WithLogTransform sets a transform function that is called for each transform
-// operation on the winning policy. The function is called once per TransformOp,
-// in order: removes, redacts, renames, adds.
-func WithLogTransform[T any](fn LogTransformFunc[T]) LogOption[T] {
-	return func(o *logOptions[T]) {
-		o.transform = fn
+// Consumers bridge a user record type T to the policy engine via accessor
+// functions. Instead of implementing an interface, consumers simply configure
+// the accessors they need using the constructor and option functions below.
+// The engine builds every high-level behavior — pattern matching, existence
+// checks, redact with regex templates, rename with upsert, add-or-overwrite —
+// on top of these primitives. New spec features that extend TransformOp are
+// absorbed by the library without touching consumers.
+type (
+	// LogAccessor provides accessor functions for log records.
+	// Use NewLogConsumer to configure it with your Value/Exists/Set/ Delete/Move functions.
+	LogAccessor[T any] = engine.LogAccessor[T]
+
+	// MetricAccessor provides accessor functions for metric records.
+	// Use NewMetricConsumer to configure it with your Value/Exists functions.
+	MetricAccessor[T any] = engine.MetricAccessor[T]
+
+	// TraceAccessor provides accessor functions for span records.
+	// Use NewTraceConsumer to configure it with your Value/Exists/Set functions.
+	TraceAccessor[T any] = engine.TraceAccessor[T]
+)
+
+// ============================================================================
+// LOG CONSUMER ACCESSORS
+// ============================================================================
+
+// NewLogConsumer creates a LogAccessor configured with the provided accessor functions.
+// All functions are optional; nil functions will cause panics if called.
+// Example:
+//
+//	consumer := policy.NewLogConsumer(
+//		policy.WithLogValue(func(r *MyLogRecord, ref policy.LogFieldRef) []byte {
+//			// return field value
+//		}),
+//		policy.WithLogExists(func(r *MyLogRecord, ref policy.LogFieldRef) bool {
+//			// return whether field exists
+//		}),
+//		policy.WithLogSet(func(r *MyLogRecord, ref policy.LogFieldRef, value string) {
+//			// set field value
+//		}),
+//		policy.WithLogDelete(func(r *MyLogRecord, ref policy.LogFieldRef) bool {
+//			// delete field
+//			return true
+//		}),
+//		policy.WithLogMove(func(r *MyLogRecord, from, to policy.LogFieldRef) {
+//			// move value from to
+//		}),
+//	)
+func NewLogConsumer[T any](opts ...LogAccessorOption[T]) *LogAccessor[T] {
+	a := &LogAccessor[T]{}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// LogAccessorOption configures a LogAccessor.
+type LogAccessorOption[T any] func(*LogAccessor[T])
+
+// WithLogValue sets the Value accessor function.
+// The function should return nil when the field is absent OR when its
+// underlying value is not a string — the engine relies on this for
+// regex-redact's "non-string is a no-op" rule.
+func WithLogValue[T any](f func(T, LogFieldRef) []byte) LogAccessorOption[T] {
+	return func(a *LogAccessor[T]) {
+		a.Value = f
 	}
 }
 
-// traceOptions holds optional configuration for trace evaluation.
-type traceOptions[T any] struct {
-	transform TraceTransformFunc[T]
-}
-
-// TraceOption configures optional behavior for EvaluateTrace.
-type TraceOption[T any] func(*traceOptions[T])
-
-// WithTraceTransform sets a transform function that is called after a sampling
-// decision to write the effective threshold back to the span's tracestate.
-func WithTraceTransform[T any](fn TraceTransformFunc[T]) TraceOption[T] {
-	return func(o *traceOptions[T]) {
-		o.transform = fn
+// WithLogExists sets the Exists accessor function.
+func WithLogExists[T any](f func(T, LogFieldRef) bool) LogAccessorOption[T] {
+	return func(a *LogAccessor[T]) {
+		a.Exists = f
 	}
 }
+
+// WithLogSet sets the Set accessor function.
+func WithLogSet[T any](f func(T, LogFieldRef, string)) LogAccessorOption[T] {
+	return func(a *LogAccessor[T]) {
+		a.Set = f
+	}
+}
+
+// WithLogDelete sets the Delete accessor function.
+func WithLogDelete[T any](f func(T, LogFieldRef) bool) LogAccessorOption[T] {
+	return func(a *LogAccessor[T]) {
+		a.Delete = f
+	}
+}
+
+// WithLogMove sets the Move accessor function.
+func WithLogMove[T any](f func(T, LogFieldRef, LogFieldRef)) LogAccessorOption[T] {
+	return func(a *LogAccessor[T]) {
+		a.Move = f
+	}
+}
+
+// ============================================================================
+// METRIC CONSUMER ACCESSORS
+// ============================================================================
+
+// NewMetricConsumer creates a MetricAccessor configured with the provided
+// accessor functions.
+func NewMetricConsumer[T any](opts ...MetricAccessorOption[T]) *MetricAccessor[T] {
+	a := &MetricAccessor[T]{}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// MetricAccessorOption configures a MetricAccessor.
+type MetricAccessorOption[T any] func(*MetricAccessor[T])
+
+// WithMetricValue sets the Value accessor function.
+func WithMetricValue[T any](f func(T, MetricFieldRef) []byte) MetricAccessorOption[T] {
+	return func(a *MetricAccessor[T]) {
+		a.Value = f
+	}
+}
+
+// WithMetricExists sets the Exists accessor function.
+func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricAccessorOption[T] {
+	return func(a *MetricAccessor[T]) {
+		a.Exists = f
+	}
+}
+
+// ============================================================================
+// TRACE CONSUMER ACCESSORS
+// ============================================================================
+
+// NewTraceConsumer creates a TraceAccessor configured with the provided
+// accessor functions. Use this for span records where you need to write
+// the sampling threshold back to tracestate after a sampling decision.
+func NewTraceConsumer[T any](opts ...TraceAccessorOption[T]) *TraceAccessor[T] {
+	a := &TraceAccessor[T]{}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// TraceAccessorOption configures a TraceAccessor.
+type TraceAccessorOption[T any] func(*TraceAccessor[T])
+
+// WithTraceValue sets the Value accessor function.
+func WithTraceValue[T any](f func(T, TraceFieldRef) []byte) TraceAccessorOption[T] {
+	return func(a *TraceAccessor[T]) {
+		a.Value = f
+	}
+}
+
+// WithTraceExists sets the Exists accessor function.
+func WithTraceExists[T any](f func(T, TraceFieldRef) bool) TraceAccessorOption[T] {
+	return func(a *TraceAccessor[T]) {
+		a.Exists = f
+	}
+}
+
+// WithTraceSet sets the Set accessor function.
+func WithTraceSet[T any](f func(T, TraceFieldRef, string)) TraceAccessorOption[T] {
+	return func(a *TraceAccessor[T]) {
+		a.Set = f
+	}
+}
+
+// ============================================================================
+// LOG CONSUMER TYPE ALIASES
+// ============================================================================
+
+// LogConsumer is a type alias for LogAccessor for backward compatibility.
+type LogConsumer[T any] = LogAccessor[T]
+
+// MetricConsumer is a type alias for MetricAccessor for backward compatibility.
+type MetricConsumer[T any] = MetricAccessor[T]
+
+// TraceConsumer is a type alias for TraceAccessor for backward compatibility.
+type TraceConsumer[T any] = TraceAccessor[T]

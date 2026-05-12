@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/usetero/policy-go"
+	"github.com/usetero/policy-go/internal/engine"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -21,32 +22,64 @@ type ExampleLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-// ExampleLogMatcher is the LogMatchFunc implementation for ExampleLogRecord.
-func ExampleLogMatcher(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
+// ExampleLogConsumer adapts ExampleLogRecord to the policy engine. The
+// example only does matching, so Set/Delete/Move are no-ops.
+type ExampleLogConsumer struct{}
+
+func (ExampleLogConsumer) Value(r *ExampleLogRecord, ref engine.LogFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
-		case policy.LogFieldBody:
+		case engine.LogFieldBody:
 			return r.Body
-		case policy.LogFieldSeverityText:
+		case engine.LogFieldSeverityText:
 			return r.SeverityText
 		default:
 			return nil
 		}
 	}
+	return traversePath(exampleAttrs(r, ref), ref.AttrPath)
+}
 
-	// Attribute lookup
-	var attrs map[string]any
+func (ExampleLogConsumer) Exists(r *ExampleLogRecord, ref engine.LogFieldRef) bool {
+	if ref.IsField() {
+		return traversePath(exampleAttrs(r, ref), ref.AttrPath) != nil
+	}
+	return pathExists(exampleAttrs(r, ref), ref.AttrPath)
+}
+
+func pathExists(m map[string]any, path []string) bool {
+	if len(path) == 0 || m == nil {
+		return false
+	}
+	cur := any(m)
+	for _, seg := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return false
+		}
+		cur, ok = m[seg]
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (ExampleLogConsumer) Set(*ExampleLogRecord, engine.LogFieldRef, string)              {}
+func (ExampleLogConsumer) Delete(*ExampleLogRecord, engine.LogFieldRef) bool              { return false }
+func (ExampleLogConsumer) Move(*ExampleLogRecord, engine.LogFieldRef, engine.LogFieldRef) {}
+
+func exampleAttrs(r *ExampleLogRecord, ref engine.LogFieldRef) map[string]any {
 	switch {
 	case ref.IsRecordAttr():
-		attrs = r.LogAttributes
+		return r.LogAttributes
 	case ref.IsResourceAttr():
-		attrs = r.ResourceAttributes
+		return r.ResourceAttributes
 	case ref.IsScopeAttr():
-		attrs = r.ScopeAttributes
+		return r.ScopeAttributes
 	default:
 		return nil
 	}
-	return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -59,8 +92,6 @@ func traversePath(m map[string]any, path []string) []byte {
 	}
 	if len(path) == 1 {
 		switch v := val.(type) {
-		case []byte:
-			return v
 		case string:
 			return []byte(v)
 		default:
@@ -171,7 +202,14 @@ func main() {
 	fmt.Println("Evaluating log records:")
 	fmt.Println("========================")
 	for _, ex := range examples {
-		result := policy.EvaluateLog(eng, ex.record, ExampleLogMatcher)
+		result := policy.EvaluateLog(eng, ex.record, engine.NewLogConsumer(
+			engine.WithLogValue(func(r *ExampleLogRecord, ref engine.LogFieldRef) []byte {
+				return (ExampleLogConsumer{}).Value(r, ref)
+			}),
+			engine.WithLogExists(func(r *ExampleLogRecord, ref engine.LogFieldRef) bool {
+				return (ExampleLogConsumer{}).Exists(r, ref)
+			}),
+		))
 		fmt.Printf("%-30s -> %s\n", ex.name, result)
 	}
 

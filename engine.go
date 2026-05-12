@@ -71,17 +71,12 @@ func NewPolicyEngine(registry *PolicyRegistry) *PolicyEngine {
 // LOG EVALUATION
 // ============================================================================
 
-// EvaluateLog checks a log record against the current policies and returns the result.
-// This method uses index-based arrays instead of maps for better performance.
-//
-// The match function is called to extract field values from the record.
-// Optional behaviors can be provided via LogOption functions (e.g., WithLogTransform).
-func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts ...LogOption[T]) EvaluateResult {
-	var options logOptions[T]
-	for _, opt := range opts {
-		opt(&options)
-	}
-
+// EvaluateLog checks a log record against the current policies and returns
+// the result. The accessor's Value/Exists methods drive matching; if the
+// winning policy has transforms, the engine applies them via the accessor's
+// Set/Delete/Move functions. Consumers that don't want mutation can leave
+// those functions nil (or set them as no-ops).
+func EvaluateLog[T any](e *PolicyEngine, record T, c *engine.LogAccessor[T]) EvaluateResult {
 	snapshot := e.registry.LogSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -122,8 +117,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 			continue
 		}
 
-		value := match(record, check.Ref)
-		exists := value != nil || len(value) > 0
+		exists := c.Exists(record, check.Ref)
 
 		if check.MustExist && !exists {
 			disqualified[check.PolicyIndex] = true
@@ -139,7 +133,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 		key := entry.Key
 		db := entry.Database
 
-		value := match(record, key.Ref)
+		value := c.Value(record, key.Ref)
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified
 			// unless this is a negated match (which would succeed on absence)
@@ -215,10 +209,10 @@ func EvaluateLog[T any](e *PolicyEngine, record T, match LogMatchFunc[T], opts .
 	}
 
 	// Apply the keep action, with transforms from all matched policies
-	return applyKeepActionLog(e, bestPolicy, matchers, state.matchedIndices[:state.matchedCount], record, match, &options)
+	return applyKeepActionLog(e, bestPolicy, matchers, state.matchedIndices[:state.matchedCount], record, c)
 }
 
-func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], matchers *engine.CompiledMatchers[engine.LogField], matchedIndices []int, record T, match LogMatchFunc[T], options *logOptions[T]) EvaluateResult {
+func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[engine.LogField], matchers *engine.CompiledMatchers[engine.LogField], matchedIndices []int, record T, c *engine.LogAccessor[T]) EvaluateResult {
 	dropped := false
 
 	switch policy.Keep.Action {
@@ -226,7 +220,7 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 		dropped = true
 
 	case KeepSample:
-		if !shouldSampleLog(policy, record, match) {
+		if !shouldSampleLog(policy, record, c) {
 			dropped = true
 		}
 
@@ -245,7 +239,9 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 		return ResultDrop
 	}
 
-	// Apply transforms from all matching policies
+	// Apply transforms from all matching policies. The library owns the full
+	// spec semantics in ApplyLogTransform; the consumer only sees the
+	// primitive Set/Delete/Move calls.
 	hasTransforms := false
 	for _, idx := range matchedIndices {
 		p := matchers.PolicyByIndex(idx)
@@ -253,15 +249,13 @@ func applyKeepActionLog[T any](e *PolicyEngine, policy *engine.CompiledPolicy[en
 			continue
 		}
 		hasTransforms = true
-		if options.transform != nil {
-			for _, op := range p.Transforms {
-				hit := options.transform(record, op)
-				if p.Stats != nil {
-					if hit {
-						p.Stats.RecordTransformHit(op.Kind)
-					} else {
-						p.Stats.RecordTransformMiss(op.Kind)
-					}
+		for _, op := range p.Transforms {
+			hit := engine.ApplyLogTransform(record, op, c)
+			if p.Stats != nil {
+				if hit {
+					p.Stats.RecordTransformHit(op.Kind)
+				} else {
+					p.Stats.RecordTransformMiss(op.Kind)
 				}
 			}
 		}
@@ -295,12 +289,9 @@ func recordMatchStats[T engine.FieldType](matchers *engine.CompiledMatchers[T], 
 // METRIC EVALUATION
 // ============================================================================
 
-// EvaluateMetric checks a metric against the current policies and returns the result.
-// This method uses index-based arrays instead of maps for better performance.
-//
-// The match function is called to extract field values from the metric.
-// Consumers provide this function to bridge their metric type to the policy engine.
-func EvaluateMetric[T any](e *PolicyEngine, metric T, match MetricMatchFunc[T]) EvaluateResult {
+// EvaluateMetric checks a metric against the current policies and returns
+// the result. The consumer's Value/Exists methods drive matching.
+func EvaluateMetric[T any](e *PolicyEngine, metric T, c *engine.MetricAccessor[T]) EvaluateResult {
 	snapshot := e.registry.MetricSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -341,8 +332,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, match MetricMatchFunc[T]) 
 			continue
 		}
 
-		value := match(metric, check.Ref)
-		exists := value != nil || len(value) > 0
+		exists := c.Exists(metric, check.Ref)
 
 		if check.MustExist && !exists {
 			disqualified[check.PolicyIndex] = true
@@ -358,7 +348,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, match MetricMatchFunc[T]) 
 		key := entry.Key
 		db := entry.Database
 
-		value := match(metric, key.Ref)
+		value := c.Value(metric, key.Ref)
 		if len(value) == 0 {
 			if !key.Negated {
 				for _, patternRef := range db.PatternIndex() {
@@ -457,15 +447,11 @@ func applyKeepActionMetric(policy *engine.CompiledPolicy[engine.MetricField], ma
 // TRACE EVALUATION
 // ============================================================================
 
-// EvaluateTrace checks a span against the current policies and returns the result.
-// This method uses index-based arrays instead of maps for better performance.
-//
-// The match function is called to extract field values from the span.
-// Consumers provide this function to bridge their span type to the policy engine.
-//
-// Optional TraceOption parameters can be provided to enable threshold write-back
-// after sampling decisions. Use WithTraceTransform to receive the effective threshold.
-func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T], opts ...TraceOption[T]) EvaluateResult {
+// EvaluateTrace checks a span against the current policies and returns
+// the result. The consumer's Value/Exists methods drive matching; after a
+// sampling decision, the engine writes the effective threshold back through
+// the consumer's Set method (using SpanSamplingThreshold() as the ref).
+func EvaluateTrace[T any](e *PolicyEngine, span T, c *engine.TraceAccessor[T]) EvaluateResult {
 	snapshot := e.registry.TraceSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -506,8 +492,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T], opts
 			continue
 		}
 
-		value := match(span, check.Ref)
-		exists := value != nil || len(value) > 0
+		exists := c.Exists(span, check.Ref)
 
 		if check.MustExist && !exists {
 			disqualified[check.PolicyIndex] = true
@@ -523,7 +508,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T], opts
 		key := entry.Key
 		db := entry.Database
 
-		value := match(span, key.Ref)
+		value := c.Value(span, key.Ref)
 		if len(value) == 0 {
 			if !key.Negated {
 				for _, patternRef := range db.PatternIndex() {
@@ -588,15 +573,10 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, match TraceMatchFunc[T], opts
 		return ResultNoMatch
 	}
 
-	var options traceOptions[T]
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	return applyKeepActionTrace(bestPolicy, matchers, state.matchedIndices[:state.matchedCount], span, match, &options)
+	return applyKeepActionTrace(bestPolicy, matchers, state.matchedIndices[:state.matchedCount], span, c)
 }
 
-func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], matchers *engine.CompiledMatchers[engine.TraceField], matchedIndices []int, span T, match TraceMatchFunc[T], options *traceOptions[T]) EvaluateResult {
+func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], matchers *engine.CompiledMatchers[engine.TraceField], matchedIndices []int, span T, c *engine.TraceAccessor[T]) EvaluateResult {
 	dropped := false
 	var effectiveThreshold uint64
 	writeThreshold := false
@@ -606,7 +586,7 @@ func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField
 		dropped = true
 
 	case KeepSample:
-		keep, threshold, hasThreshold := shouldSampleTrace(policy, span, match)
+		keep, threshold, hasThreshold := shouldSampleTrace(policy, span, c)
 		if !keep {
 			dropped = true
 		}
@@ -630,13 +610,12 @@ func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField
 		return ResultDrop
 	}
 
-	// Write the effective threshold back to the span if a transform function is provided.
-	// Per W3C spec, only write threshold when sampling probability is known (i.e. randomness
-	// was successfully derived). When randomness couldn't be derived (e.g. empty traceId with
-	// fail_closed=false), the threshold must be erased.
-	if options.transform != nil && writeThreshold {
+	// Write the effective threshold back to the span. Per W3C spec, only
+	// write threshold when sampling probability is known (i.e. randomness
+	// was successfully derived).
+	if writeThreshold {
 		encoded := encodeThreshold(effectiveThreshold, policy.Keep.SamplingPrecision)
-		options.transform(span, engine.SpanSamplingThreshold(), encoded)
+		c.Set(span, engine.SpanSamplingThreshold(), encoded)
 		return ResultKeepWithTransform
 	}
 

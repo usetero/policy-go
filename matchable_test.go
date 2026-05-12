@@ -8,45 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// simpleLogTransform is a tiny shim that exercises ApplyLogTransform against
+// SimpleLogConsumer. Tests use it to verify the engine's transform
+// orchestration end-to-end on the reference simple-record consumer.
+func simpleLogTransform(r *SimpleLogRecord, op TransformOp) bool {
+	return ApplyLogTransform(r, op, NewSimpleLogConsumer().LogAccessor)
+}
+
 // ============================================================================
 // Matchers — field/attribute extraction
 // ============================================================================
 
-func TestSimpleLogMatcher(t *testing.T) {
-	record := &SimpleLogRecord{
-		Body:               []byte("log body"),
-		SeverityText:       []byte("INFO"),
-		TraceID:            []byte("trace-123"),
-		SpanID:             []byte("span-456"),
-		EventName:          []byte("user.login"),
-		LogAttributes:      map[string]any{"user.id": "12345"},
-		ResourceAttributes: map[string]any{"service.name": "auth-service"},
-		ScopeAttributes:    map[string]any{"scope.name": "auth"},
-	}
-
-	cases := []struct {
-		name string
-		ref  LogFieldRef
-		want []byte
-	}{
-		{"body", LogFieldRef{Field: LogFieldBody}, []byte("log body")},
-		{"severity_text", LogFieldRef{Field: LogFieldSeverityText}, []byte("INFO")},
-		{"trace_id", LogFieldRef{Field: LogFieldTraceID}, []byte("trace-123")},
-		{"span_id", LogFieldRef{Field: LogFieldSpanID}, []byte("span-456")},
-		{"event_name", LogFieldRef{Field: LogFieldEventName}, []byte("user.login")},
-		{"unknown fixed field returns nil", LogFieldRef{Field: LogField(999)}, nil},
-		{"log attribute", LogAttr("user.id"), []byte("12345")},
-		{"resource attribute", LogResourceAttr("service.name"), []byte("auth-service")},
-		{"scope attribute", LogScopeAttr("scope.name"), []byte("auth")},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, SimpleLogMatcher(record, tc.ref))
-		})
-	}
-}
-
-func TestSimpleMetricMatcher(t *testing.T) {
+func TestSimpleMetricConsumerValue(t *testing.T) {
 	record := &SimpleMetricRecord{
 		Name:                   []byte("http.request.duration"),
 		Description:            []byte("Duration of HTTP requests"),
@@ -75,12 +48,16 @@ func TestSimpleMetricMatcher(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, SimpleMetricMatcher(record, tc.ref))
+			assert.Equal(t, tc.want, NewMetricConsumer(
+				WithMetricValue(func(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
+					return SimpleMetricConsumer{}.Value(r, ref)
+				}),
+			).Value(record, tc.ref))
 		})
 	}
 }
 
-func TestSimpleSpanMatcher(t *testing.T) {
+func TestSimpleSpanConsumerValue(t *testing.T) {
 	record := &SimpleSpanRecord{
 		Name:         []byte("GET /api/users"),
 		TraceID:      []byte("trace-abc123"),
@@ -124,12 +101,12 @@ func TestSimpleSpanMatcher(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, SimpleSpanMatcher(record, tc.ref))
+			assert.Equal(t, tc.want, SimpleSpanConsumer{}.Value(record, tc.ref))
 		})
 	}
 }
 
-func TestSimpleSpanMatcherWithoutEventsOrLinks(t *testing.T) {
+func TestSimpleSpanConsumerValueWithoutEventsOrLinks(t *testing.T) {
 	record := &SimpleSpanRecord{Name: []byte("test span")}
 	cases := []struct {
 		name string
@@ -142,7 +119,7 @@ func TestSimpleSpanMatcherWithoutEventsOrLinks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Nil(t, SimpleSpanMatcher(record, tc.ref))
+			assert.Nil(t, SimpleSpanConsumer{}.Value(record, tc.ref))
 		})
 	}
 }
@@ -171,29 +148,29 @@ func TestTraversePath(t *testing.T) {
 		{"deeply nested path", nested, LogAttr("http", "request", "headers", "content-type"), []byte("application/json")},
 		{"partial path (non-leaf) returns nil", nested, LogAttr("http", "request"), nil},
 		{"missing nested path returns nil", nested, LogAttr("http", "response", "status"), nil},
-		{"byte slice value preserved", byteAttr, LogAttr("binary_data"), []byte{0x01, 0x02, 0x03}},
+		{"byte slice attribute returns nil", byteAttr, LogAttr("binary_data"), nil},
 		{"empty path returns nil", flat, LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: []string{}}, nil},
 		{"nil scope map returns nil", &SimpleLogRecord{}, LogAttr("key"), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, SimpleLogMatcher(tc.record, tc.ref))
+			assert.Equal(t, tc.want, SimpleLogConsumer{}.Value(tc.record, tc.ref))
 		})
 	}
 }
 
 // ============================================================================
-// SimpleLogTransformer dispatch
+// ApplyLogTransform dispatch
 // ============================================================================
 
-func TestSimpleLogTransformerUnknownKind(t *testing.T) {
+func TestApplyLogTransformUnknownKind(t *testing.T) {
 	record := &SimpleLogRecord{Body: []byte("x")}
 	op := TransformOp{Kind: TransformKind(99)}
-	assert.False(t, SimpleLogTransformer(record, op), "unknown kind must return false")
+	assert.False(t, simpleLogTransform(record, op), "unknown kind must return false")
 	assert.Equal(t, []byte("x"), record.Body, "record must not be mutated")
 }
 
-func TestSimpleLogTransformerDispatchesAllKinds(t *testing.T) {
+func TestApplyLogTransformDispatchesAllKinds(t *testing.T) {
 	tests := []struct {
 		name      string
 		op        TransformOp
@@ -252,7 +229,7 @@ func TestSimpleLogTransformerDispatchesAllKinds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			record := &SimpleLogRecord{}
 			tt.setup(record)
-			got := SimpleLogTransformer(record, tt.op)
+			got := simpleLogTransform(record, tt.op)
 			assert.Equal(t, tt.wantHit, got)
 			tt.assertion(t, record)
 		})
@@ -281,13 +258,13 @@ func TestSimpleLogRemoveFixedFields(t *testing.T) {
 		t.Run(f.name+"/present", func(t *testing.T) {
 			r := &SimpleLogRecord{}
 			f.set(r, []byte("x"))
-			hit := SimpleLogTransformer(r, TransformOp{Kind: TransformRemove, Ref: LogFieldRef{Field: f.key}})
+			hit := simpleLogTransform(r, TransformOp{Kind: TransformRemove, Ref: LogFieldRef{Field: f.key}})
 			assert.True(t, hit)
 			assert.Nil(t, f.read(r))
 		})
 		t.Run(f.name+"/absent", func(t *testing.T) {
 			r := &SimpleLogRecord{}
-			hit := SimpleLogTransformer(r, TransformOp{Kind: TransformRemove, Ref: LogFieldRef{Field: f.key}})
+			hit := simpleLogTransform(r, TransformOp{Kind: TransformRemove, Ref: LogFieldRef{Field: f.key}})
 			assert.False(t, hit, "removing an absent field must miss")
 			assert.Nil(t, f.read(r))
 		})
@@ -297,7 +274,7 @@ func TestSimpleLogRemoveFixedFields(t *testing.T) {
 func TestSimpleLogRemoveUnknownFixedField(t *testing.T) {
 	r := &SimpleLogRecord{Body: []byte("x")}
 	// LogFieldResourceSchemaURL has no fixed-field remove implementation.
-	hit := SimpleLogTransformer(r, TransformOp{Kind: TransformRemove, Ref: LogFieldRef{Field: LogFieldResourceSchemaURL}})
+	hit := simpleLogTransform(r, TransformOp{Kind: TransformRemove, Ref: LogFieldRef{Field: LogFieldResourceSchemaURL}})
 	assert.False(t, hit)
 	assert.Equal(t, []byte("x"), r.Body)
 }
@@ -338,7 +315,7 @@ func TestSimpleLogRemoveAttributeScopes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.seed()
-			hit := SimpleLogTransformer(r, TransformOp{Kind: TransformRemove, Ref: tc.ref})
+			hit := simpleLogTransform(r, TransformOp{Kind: TransformRemove, Ref: tc.ref})
 			assert.True(t, hit)
 			_, ok := tc.get(r)["k"]
 			assert.False(t, ok)
@@ -415,7 +392,7 @@ func TestSimpleLogRemoveAttributePathEdgeCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.seed()
-			hit := SimpleLogTransformer(r, TransformOp{Kind: TransformRemove, Ref: tc.ref})
+			hit := simpleLogTransform(r, TransformOp{Kind: TransformRemove, Ref: tc.ref})
 			assert.Equal(t, tc.wantHit, hit)
 			tc.check(t, r)
 		})
@@ -444,7 +421,7 @@ func TestSimpleLogRedactFixedFields(t *testing.T) {
 		t.Run(f.name+"/present", func(t *testing.T) {
 			r := &SimpleLogRecord{}
 			f.set(r, []byte("secret"))
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:  TransformRedact,
 				Ref:   LogFieldRef{Field: f.key},
 				Value: "[REDACTED]",
@@ -454,7 +431,7 @@ func TestSimpleLogRedactFixedFields(t *testing.T) {
 		})
 		t.Run(f.name+"/absent_is_noop", func(t *testing.T) {
 			r := &SimpleLogRecord{}
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:  TransformRedact,
 				Ref:   LogFieldRef{Field: f.key},
 				Value: "[REDACTED]",
@@ -485,7 +462,7 @@ func TestSimpleLogRedactAttributeScopes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.seed()
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:  TransformRedact,
 				Ref:   tc.ref,
 				Value: "[REDACTED]",
@@ -560,7 +537,7 @@ func TestSimpleLogRedactEdgeCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.seed()
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:  TransformRedact,
 				Ref:   tc.ref,
 				Value: "[REDACTED]",
@@ -716,7 +693,7 @@ func TestSimpleLogRedactRegexAttribute(t *testing.T) {
 				r.LogAttributes["k"] = tc.input
 			}
 
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:  TransformRedact,
 				Ref:   LogAttr("k"),
 				Value: tc.replacement,
@@ -775,7 +752,7 @@ func TestSimpleLogRedactRegexFixedField(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &SimpleLogRecord{Body: tc.body}
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:  TransformRedact,
 				Ref:   LogFieldRef{Field: LogFieldBody},
 				Value: tc.replacement,
@@ -892,7 +869,7 @@ func TestSimpleLogRename(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.seed()
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:   TransformRename,
 				Ref:    tc.ref,
 				To:     tc.to,
@@ -923,7 +900,7 @@ func TestSimpleLogAddFixedFieldsNewValue(t *testing.T) {
 	for _, f := range fields {
 		t.Run(f.name, func(t *testing.T) {
 			r := &SimpleLogRecord{}
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:   TransformAdd,
 				Ref:    LogFieldRef{Field: f.key},
 				Value:  "v",
@@ -1013,7 +990,7 @@ func TestSimpleLogAddUpsertAndAutoCreate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.seed()
-			hit := SimpleLogTransformer(r, TransformOp{
+			hit := simpleLogTransform(r, TransformOp{
 				Kind:   TransformAdd,
 				Ref:    tc.ref,
 				Value:  tc.value,

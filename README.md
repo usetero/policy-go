@@ -65,9 +65,11 @@ type LogRecord struct {
     ResourceAttributes map[string]any
 }
 
-// Implement a match function to extract field values
-func matchLog(r *LogRecord, ref policy.LogFieldRef) []byte {
-    // Handle field lookups
+// Implement a consumer to extract values and optionally apply transforms.
+// This example only evaluates policies, so writes are no-ops.
+type LogConsumer struct{}
+
+func (LogConsumer) Value(r *LogRecord, ref policy.LogFieldRef) []byte {
     if ref.IsField() {
         switch ref.Field {
         case policy.LogFieldBody:
@@ -81,17 +83,31 @@ func matchLog(r *LogRecord, ref policy.LogFieldRef) []byte {
         }
     }
 
-    // Handle attribute lookups
-    var attrs map[string]any
+    return traversePath(logAttrs(r, ref), ref.AttrPath)
+}
+
+func (c LogConsumer) Exists(r *LogRecord, ref policy.LogFieldRef) bool {
+    if ref.IsField() {
+        return c.Value(r, ref) != nil
+    }
+    return existsPath(logAttrs(r, ref), ref.AttrPath)
+}
+
+func (LogConsumer) Set(*LogRecord, policy.LogFieldRef, string) {}
+func (c LogConsumer) Delete(r *LogRecord, ref policy.LogFieldRef) bool {
+    return c.Exists(r, ref)
+}
+func (LogConsumer) Move(*LogRecord, policy.LogFieldRef, policy.LogFieldRef) {}
+
+func logAttrs(r *LogRecord, ref policy.LogFieldRef) map[string]any {
     switch {
     case ref.IsResourceAttr():
-        attrs = r.ResourceAttributes
+        return r.ResourceAttributes
     case ref.IsRecordAttr():
-        attrs = r.LogAttributes
+        return r.LogAttributes
     default:
         return nil
     }
-    return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -106,8 +122,6 @@ func traversePath(m map[string]any, path []string) []byte {
         switch v := val.(type) {
         case string:
             return []byte(v)
-        case []byte:
-            return v
         }
         return nil
     }
@@ -115,6 +129,24 @@ func traversePath(m map[string]any, path []string) []byte {
         return traversePath(nested, path[1:])
     }
     return nil
+}
+
+func existsPath(m map[string]any, path []string) bool {
+    if len(path) == 0 || m == nil {
+        return false
+    }
+    cur := any(m)
+    for _, seg := range path {
+        nested, ok := cur.(map[string]any)
+        if !ok {
+            return false
+        }
+        cur, ok = nested[seg]
+        if !ok {
+            return false
+        }
+    }
+    return true
 }
 
 func main() {
@@ -151,7 +183,7 @@ func main() {
         },
     }
 
-    result := policy.EvaluateLog(engine, record, matchLog)
+    result := policy.EvaluateLog(engine, record, LogConsumer{})
     fmt.Printf("Result: %s\n", result) // "drop" if matched by policy
 }
 ```
@@ -184,19 +216,21 @@ to the registry and automatically uses the latest snapshot for each evaluation.
 engine := policy.NewPolicyEngine(registry)
 
 // Evaluate logs
-result := policy.EvaluateLog(engine, logRecord, matchLogFunc)
+result := policy.EvaluateLog(engine, logRecord, logConsumer)
 
 // Evaluate metrics
-result := policy.EvaluateMetric(engine, metricRecord, matchMetricFunc)
+result := policy.EvaluateMetric(engine, metricRecord, metricConsumer)
 
 // Evaluate traces/spans
-result := policy.EvaluateTrace(engine, spanRecord, matchTraceFunc)
+result := policy.EvaluateTrace(engine, spanRecord, traceConsumer)
 
 switch result {
 case policy.ResultNoMatch:
     // No policy matched - pass through
 case policy.ResultKeep:
     // Matched a keep policy (or under rate limit)
+case policy.ResultKeepWithTransform:
+    // Matched a keep policy and transforms/trace threshold write-back ran
 case policy.ResultDrop:
     // Matched a drop policy (or over rate limit)
 case policy.ResultSample:
@@ -204,27 +238,38 @@ case policy.ResultSample:
 }
 ```
 
-### Match Functions
+### Consumers
 
-Instead of implementing an interface, you provide a match function that extracts
-field values from your telemetry types. This allows maximum flexibility in how
-you represent your data.
+Consumers adapt your telemetry types to the engine. `Value` returns a string
+field value as bytes for pattern matching. `Exists` reports field presence even
+when the value is not a string. Log and trace consumers also expose write
+primitives used for log transforms and trace sampling threshold write-back.
 
 ```go
-// LogMatchFunc extracts values from log records
-type LogMatchFunc[T any] func(record T, ref LogFieldRef) []byte
+type LogConsumer[T any] interface {
+    Value(record T, ref LogFieldRef) []byte
+    Exists(record T, ref LogFieldRef) bool
+    Set(record T, ref LogFieldRef, value string)
+    Delete(record T, ref LogFieldRef) bool
+    Move(record T, from, to LogFieldRef)
+}
 
-// MetricMatchFunc extracts values from metrics
-type MetricMatchFunc[T any] func(record T, ref MetricFieldRef) []byte
+type MetricConsumer[T any] interface {
+    Value(record T, ref MetricFieldRef) []byte
+    Exists(record T, ref MetricFieldRef) bool
+}
 
-// TraceMatchFunc extracts values from spans
-type TraceMatchFunc[T any] func(record T, ref TraceFieldRef) []byte
+type TraceConsumer[T any] interface {
+    Value(record T, ref TraceFieldRef) []byte
+    Exists(record T, ref TraceFieldRef) bool
+    Set(record T, ref TraceFieldRef, value string)
+}
 ```
 
-Example match function for logs:
+Example log consumer value lookup:
 
 ```go
-func matchLog(r *MyLogRecord, ref policy.LogFieldRef) []byte {
+func (MyLogConsumer) Value(r *MyLogRecord, ref policy.LogFieldRef) []byte {
     // Handle field lookups
     if ref.IsField() {
         switch ref.Field {

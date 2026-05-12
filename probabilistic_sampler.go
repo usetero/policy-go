@@ -48,7 +48,7 @@ func probabilisticSample(input []byte, percentage float64) bool {
 //   - hash_seed (default): R >= T using hash(traceID, seed) for randomness
 //   - proportional: adjusts threshold based on incoming tracestate probability
 //   - equalizing: keeps spans already at or below target rate, applies T to others
-func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, match TraceMatchFunc[T]) (bool, uint64, bool) {
+func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], span T, c *engine.TraceAccessor[T]) (bool, uint64, bool) {
 	percentage := policy.Keep.Value
 	if percentage >= 100 {
 		return true, 0, true // threshold 0 = keep everything
@@ -65,7 +65,7 @@ func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], 
 	// a simple test, and they should erase the threshold when it is apparently
 	// inconsistent."
 	traceStateRef := engine.SpanTraceState()
-	traceState := match(span, traceStateRef)
+	traceState := c.Value(span, traceStateRef)
 	if len(traceState) > 0 {
 		rv, rvOK := parseTracestateRandomness(traceState)
 		th, thOK := parseTracestateThreshold(traceState)
@@ -76,26 +76,26 @@ func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], 
 
 	switch policy.Keep.SamplingMode {
 	case policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL:
-		return shouldSampleTraceProportional(percentage, failOpen, span, match)
+		return shouldSampleTraceProportional(percentage, failOpen, span, c)
 	case policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING:
-		return shouldSampleTraceEqualizing(percentage, failOpen, span, match)
+		return shouldSampleTraceEqualizing(percentage, failOpen, span, c)
 	default:
 		// hash_seed mode (UNSPECIFIED or HASH_SEED)
-		return shouldSampleTraceHashSeed(percentage, policy.Keep.HashSeed, failOpen, span, match)
+		return shouldSampleTraceHashSeed(percentage, policy.Keep.HashSeed, failOpen, span, c)
 	}
 }
 
 // shouldSampleTraceHashSeed implements hash_seed sampling mode.
 // When seed is non-zero, hashes traceID with the seed for deterministic randomness.
 // When seed is zero, uses existing behavior (tracestate rv or trace ID).
-func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen bool, span T, match TraceMatchFunc[T]) (bool, uint64, bool) {
+func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen bool, span T, c *engine.TraceAccessor[T]) (bool, uint64, bool) {
 	var randomness uint64
 	var ok bool
 
 	if seed != 0 {
-		randomness, ok = getTraceRandomnessWithSeed(span, match, seed)
+		randomness, ok = getTraceRandomnessWithSeed(span, c, seed)
 	} else {
-		randomness, ok = getTraceRandomness(span, match)
+		randomness, ok = getTraceRandomness(span, c)
 	}
 
 	if !ok {
@@ -112,14 +112,14 @@ func shouldSampleTraceHashSeed[T any](percentage float64, seed uint32, failOpen 
 // the target percentage relative to the incoming rate.
 //
 // Per OTel spec: T_o = ProbabilityToThreshold(p * ThresholdToProbability(T_s))
-func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) (bool, uint64, bool) {
-	randomness, ok := getTraceRandomness(span, match)
+func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, span T, c *engine.TraceAccessor[T]) (bool, uint64, bool) {
+	randomness, ok := getTraceRandomness(span, c)
 	if !ok {
 		return failOpen, 0, false
 	}
 
 	// Get incoming threshold from tracestate
-	traceState := match(span, engine.SpanTraceState())
+	traceState := c.Value(span, engine.SpanTraceState())
 	incomingThreshold := uint64(0) // T_s=0 means probability 1.0 (no prior sampling)
 	if len(traceState) > 0 {
 		if th, thOK := parseTracestateThreshold(traceState); thOK {
@@ -151,14 +151,14 @@ func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, spa
 //   - If T_s > T_d: keep (can't lower threshold)
 //   - If R >= T_d: keep with outbound threshold T_d
 //   - Otherwise: drop
-func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span T, match TraceMatchFunc[T]) (bool, uint64, bool) {
-	randomness, ok := getTraceRandomness(span, match)
+func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span T, c *engine.TraceAccessor[T]) (bool, uint64, bool) {
+	randomness, ok := getTraceRandomness(span, c)
 	if !ok {
 		return failOpen, 0, false
 	}
 
 	// Get incoming threshold from tracestate
-	traceState := match(span, engine.SpanTraceState())
+	traceState := c.Value(span, engine.SpanTraceState())
 	incomingThreshold := uint64(0) // T_s=0 means probability 1.0
 	if len(traceState) > 0 {
 		if th, thOK := parseTracestateThreshold(traceState); thOK {
@@ -181,7 +181,7 @@ func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span 
 // When the sample key is the trace_id field, it uses OTel consistent probability sampling
 // (same algorithm as trace sampling) for consistent keep/drop decisions across logs and traces.
 // For other sample keys, it hashes the value first to produce well-distributed randomness.
-func shouldSampleLog[T any](policy *engine.CompiledPolicy[engine.LogField], record T, match LogMatchFunc[T]) bool {
+func shouldSampleLog[T any](policy *engine.CompiledPolicy[engine.LogField], record T, c *engine.LogAccessor[T]) bool {
 	percentage := policy.Keep.Value
 	if percentage >= 100 {
 		return true
@@ -193,7 +193,7 @@ func shouldSampleLog[T any](policy *engine.CompiledPolicy[engine.LogField], reco
 	// Get the value to sample on
 	var sampleInput []byte
 	if policy.SampleKey != nil {
-		sampleInput = match(record, *policy.SampleKey)
+		sampleInput = c.Value(record, *policy.SampleKey)
 	}
 
 	// If no sample key or the field is empty, we can't do consistent sampling
@@ -226,10 +226,10 @@ func hashProbabilisticSample(input []byte, percentage float64) bool {
 // getTraceRandomness extracts the 56-bit randomness value for sampling.
 // It first checks for explicit randomness in tracestate (rv sub-key),
 // then falls back to the least-significant 56 bits of the trace ID.
-func getTraceRandomness[T any](span T, match TraceMatchFunc[T]) (uint64, bool) {
+func getTraceRandomness[T any](span T, c *engine.TraceAccessor[T]) (uint64, bool) {
 	// Try to get explicit randomness from tracestate first
 	traceStateRef := engine.SpanTraceState()
-	traceState := match(span, traceStateRef)
+	traceState := c.Value(span, traceStateRef)
 	if len(traceState) > 0 {
 		if rv, ok := parseTracestateRandomness(traceState); ok {
 			return rv, true
@@ -238,7 +238,7 @@ func getTraceRandomness[T any](span T, match TraceMatchFunc[T]) (uint64, bool) {
 
 	// Fall back to trace ID
 	traceIDRef := engine.SpanTraceID()
-	traceID := match(span, traceIDRef)
+	traceID := c.Value(span, traceIDRef)
 	if len(traceID) == 0 {
 		return 0, false
 	}
@@ -250,9 +250,9 @@ func getTraceRandomness[T any](span T, match TraceMatchFunc[T]) (uint64, bool) {
 
 // getTraceRandomnessWithSeed hashes the trace ID with a seed using FNV-64a
 // to produce deterministic 56-bit randomness.
-func getTraceRandomnessWithSeed[T any](span T, match TraceMatchFunc[T], seed uint32) (uint64, bool) {
+func getTraceRandomnessWithSeed[T any](span T, c *engine.TraceAccessor[T], seed uint32) (uint64, bool) {
 	traceIDRef := engine.SpanTraceID()
-	traceID := match(span, traceIDRef)
+	traceID := c.Value(span, traceIDRef)
 	if len(traceID) == 0 {
 		return 0, false
 	}
