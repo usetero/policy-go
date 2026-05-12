@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/usetero/policy-go/compare/v1.5.1...v1.6.0) (2026-04-23)
+
+
+### Features
+
+* optionally include stats ([#62](https://github.com/usetero/policy-go/issues/62)) ([644745b](https://github.com/usetero/policy-go/commit/644745b27deb260e83deded2e2c70f69d52b0ccf))
+
 ## [1.5.1](https://github.com/usetero/policy-go/compare/v1.5.0...v1.5.1) (2026-04-07)
 
 
