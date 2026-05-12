@@ -18,10 +18,7 @@ type BenchLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-// BenchLogConsumer is the LogConsumer implementation for BenchLogRecord.
-type BenchLogConsumer struct{}
-
-func (BenchLogConsumer) Value(r *BenchLogRecord, ref policy.LogFieldRef) []byte {
+func benchGetValue(r *BenchLogRecord, ref policy.LogFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
 		case policy.LogFieldBody:
@@ -35,9 +32,9 @@ func (BenchLogConsumer) Value(r *BenchLogRecord, ref policy.LogFieldRef) []byte 
 	return traversePath(benchLogAttrs(r, ref), ref.AttrPath)
 }
 
-func (c BenchLogConsumer) Exists(r *BenchLogRecord, ref policy.LogFieldRef) bool {
+func benchHasValue(r *BenchLogRecord, ref policy.LogFieldRef) bool {
 	if ref.IsField() {
-		return c.Value(r, ref) != nil
+		return benchGetValue(r, ref) != nil
 	}
 	attrs := benchLogAttrs(r, ref)
 	if attrs == nil || len(ref.AttrPath) == 0 {
@@ -47,7 +44,7 @@ func (c BenchLogConsumer) Exists(r *BenchLogRecord, ref policy.LogFieldRef) bool
 	return ok
 }
 
-func (BenchLogConsumer) Set(r *BenchLogRecord, ref policy.LogFieldRef, value string) {
+func benchSetValue(r *BenchLogRecord, ref policy.LogFieldRef, value string) {
 	if ref.IsField() {
 		switch ref.Field {
 		case policy.LogFieldBody:
@@ -64,7 +61,7 @@ func (BenchLogConsumer) Set(r *BenchLogRecord, ref policy.LogFieldRef, value str
 	attrs[ref.AttrPath[0]] = value
 }
 
-func (BenchLogConsumer) Delete(r *BenchLogRecord, ref policy.LogFieldRef) bool {
+func benchDeleteValue(r *BenchLogRecord, ref policy.LogFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
 		case policy.LogFieldBody:
@@ -88,7 +85,7 @@ func (BenchLogConsumer) Delete(r *BenchLogRecord, ref policy.LogFieldRef) bool {
 	return exists
 }
 
-func (BenchLogConsumer) Move(r *BenchLogRecord, from, to policy.LogFieldRef) {
+func benchMoveValue(r *BenchLogRecord, from, to policy.LogFieldRef) {
 	fromAttrs := benchLogAttrs(r, from)
 	val := fromAttrs[from.AttrPath[0]]
 	delete(fromAttrs, from.AttrPath[0])
@@ -96,90 +93,15 @@ func (BenchLogConsumer) Move(r *BenchLogRecord, from, to policy.LogFieldRef) {
 	toAttrs[to.AttrPath[0]] = val
 }
 
-// benchLogConsumer creates a LogAccessor configured for BenchLogRecord
-// with the standard Value/Exists/Set/Delete/Move implementations used by benchmarks.
-func benchLogConsumer() *policy.LogAccessor[*BenchLogRecord] {
-	return policy.NewLogConsumer(
-		policy.WithLogValue(func(r *BenchLogRecord, ref policy.LogFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case policy.LogFieldBody:
-					return r.Body
-				case policy.LogFieldSeverityText:
-					return r.SeverityText
-				default:
-					return nil
-				}
-			}
-			return traversePath(benchLogAttrs(r, ref), ref.AttrPath)
-		}),
-		policy.WithLogExists(func(r *BenchLogRecord, ref policy.LogFieldRef) bool {
-			if ref.IsField() {
-				return traversePath(benchLogAttrs(r, ref), ref.AttrPath) != nil
-			}
-			attrs := benchLogAttrs(r, ref)
-			if attrs == nil || len(ref.AttrPath) == 0 {
-				return false
-			}
-			cur := any(attrs)
-			for _, seg := range ref.AttrPath {
-				m, ok := cur.(map[string]any)
-				if !ok {
-					return false
-				}
-				cur, ok = m[seg]
-				if !ok {
-					return false
-				}
-			}
-			return true
-		}),
-		policy.WithLogSet(func(r *BenchLogRecord, ref policy.LogFieldRef, value string) {
-			if ref.IsField() {
-				switch ref.Field {
-				case policy.LogFieldBody:
-					r.Body = []byte(value)
-				case policy.LogFieldSeverityText:
-					r.SeverityText = []byte(value)
-				}
-				return
-			}
-			attrs := benchLogEnsureAttrs(r, ref)
-			if attrs == nil {
-				return
-			}
-			attrs[ref.AttrPath[0]] = value
-		}),
-		policy.WithLogDelete(func(r *BenchLogRecord, ref policy.LogFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case policy.LogFieldBody:
-					hit := r.Body != nil
-					r.Body = nil
-					return hit
-				case policy.LogFieldSeverityText:
-					hit := r.SeverityText != nil
-					r.SeverityText = nil
-					return hit
-				}
-				return false
-			}
-			attrs := benchLogAttrs(r, ref)
-			if attrs == nil {
-				return false
-			}
-			key := ref.AttrPath[0]
-			_, exists := attrs[key]
-			delete(attrs, key)
-			return exists
-		}),
-		policy.WithLogMove(func(r *BenchLogRecord, from, to policy.LogFieldRef) {
-			fromAttrs := benchLogAttrs(r, from)
-			val := fromAttrs[from.AttrPath[0]]
-			delete(fromAttrs, from.AttrPath[0])
-			toAttrs := benchLogEnsureAttrs(r, to)
-			toAttrs[to.AttrPath[0]] = val
-		}),
+// benchLogAccessor returns a LogAccessor for BenchLogRecord wired with the
+// bench* accessor functions.
+func benchLogAccessor() *policy.LogAccessor[*BenchLogRecord] {
+	return policy.NewLogAccessor[*BenchLogRecord](
+		policy.WithLogValue(benchGetValue),
+		policy.WithLogExists(benchHasValue),
+		policy.WithLogSet(benchSetValue),
+		policy.WithLogDelete(benchDeleteValue),
+		policy.WithLogMove(benchMoveValue),
 	)
 }
 
@@ -234,7 +156,7 @@ func BenchmarkEvaluateNoMatch(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -353,7 +275,7 @@ func BenchmarkTransformRemove(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogConsumer())
+		policy.EvaluateLog(engine, r, benchLogAccessor())
 	}
 }
 
@@ -371,7 +293,7 @@ func BenchmarkTransformRedact(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogConsumer())
+		policy.EvaluateLog(engine, r, benchLogAccessor())
 	}
 }
 
@@ -390,7 +312,7 @@ func BenchmarkTransformRename(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogConsumer())
+		policy.EvaluateLog(engine, r, benchLogAccessor())
 	}
 }
 
@@ -409,7 +331,7 @@ func BenchmarkTransformAdd(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogConsumer())
+		policy.EvaluateLog(engine, r, benchLogAccessor())
 	}
 }
 
@@ -444,7 +366,7 @@ func BenchmarkTransformMixed(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogConsumer())
+		policy.EvaluateLog(engine, r, benchLogAccessor())
 	}
 }
 
@@ -462,7 +384,7 @@ func BenchmarkTransformManyRedacts(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogConsumer())
+		policy.EvaluateLog(engine, r, benchLogAccessor())
 	}
 }
 
@@ -500,7 +422,7 @@ func BenchmarkTransformParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			r := newBenchTransformRecord()
-			policy.EvaluateLog(engine, r, benchLogConsumer())
+			policy.EvaluateLog(engine, r, benchLogAccessor())
 		}
 	})
 }
@@ -527,7 +449,7 @@ func BenchmarkTransformNoMatch(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -543,7 +465,7 @@ func BenchmarkEvaluateMatchBody(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -559,7 +481,7 @@ func BenchmarkEvaluateMatchSeverity(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -578,7 +500,7 @@ func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -597,7 +519,7 @@ func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -615,7 +537,7 @@ func BenchmarkEvaluateParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			policy.EvaluateLog(engine, record, benchLogConsumer())
+			policy.EvaluateLog(engine, record, benchLogAccessor())
 		}
 	})
 }
@@ -674,7 +596,7 @@ func BenchmarkEvaluateMixedWorkload(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for _, record := range records {
-			policy.EvaluateLog(engine, record, benchLogConsumer())
+			policy.EvaluateLog(engine, record, benchLogAccessor())
 		}
 	}
 }
@@ -700,7 +622,7 @@ func BenchmarkStatsCollection(b *testing.B) {
 		SeverityText: []byte("INFO"),
 	}
 	for i := 0; i < 1000; i++ {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 
 	b.ReportAllocs()
@@ -727,7 +649,7 @@ func BenchmarkEvaluateLongBody(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }
 
@@ -754,6 +676,6 @@ func BenchmarkEvaluateWithManyAttributes(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogConsumer())
+		policy.EvaluateLog(engine, record, benchLogAccessor())
 	}
 }

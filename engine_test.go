@@ -19,12 +19,11 @@ type recordingSpanConsumer struct {
 
 func newRecordingSpanConsumer(onSet func(*SimpleSpanRecord, TraceFieldRef, string)) *recordingSpanConsumer {
 	c := &recordingSpanConsumer{onSet: onSet}
-	s := SimpleSpanConsumer{}
-	c.TraceAccessor = NewTraceConsumer(
-		WithTraceValue(s.Value),
-		WithTraceExists(s.Exists),
+	c.TraceAccessor = NewTraceAccessor(
+		WithTraceValue(SimpleSpanGetValue),
+		WithTraceExists(SimpleSpanHasValue),
 		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-			s.Set(r, ref, value)
+			SimpleSpanSetValue(r, ref, value)
 			if c.onSet != nil {
 				c.onSet(r, ref, value)
 			}
@@ -33,211 +32,8 @@ func newRecordingSpanConsumer(onSet func(*SimpleSpanRecord, TraceFieldRef, strin
 	return c
 }
 
-func (c *recordingSpanConsumer) Set(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-	if c.onSet != nil {
-		c.onSet(r, ref, value)
-	}
-}
-
-// noOpLogConsumer is a LogAccessor that implements no-op behavior for Set/Delete/Move.
-type noOpLogConsumer struct {
-	*LogAccessor[*SimpleLogRecord]
-}
-
-func newNoOpLogConsumer() *noOpLogConsumer {
-	return &noOpLogConsumer{
-		LogAccessor: NewLogConsumer(
-			WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
-				if ref.IsField() {
-					switch ref.Field {
-					case LogFieldBody:
-						return r.Body
-					case LogFieldSeverityText:
-						return r.SeverityText
-					default:
-						return nil
-					}
-				}
-				return nil
-			}),
-			WithLogExists(func(r *SimpleLogRecord, ref LogFieldRef) bool {
-				if ref.IsField() {
-					switch ref.Field {
-					case LogFieldBody:
-						return r.Body != nil
-					case LogFieldSeverityText:
-						return r.SeverityText != nil
-					default:
-						return false
-					}
-				}
-				return false
-			}),
-			WithLogSet(func(r *SimpleLogRecord, ref LogFieldRef, value string) {}),
-			WithLogDelete(func(r *SimpleLogRecord, ref LogFieldRef) bool {
-				if ref.IsField() {
-					return r.Body != nil || r.SeverityText != nil
-				}
-				return false
-			}),
-			WithLogMove(func(r *SimpleLogRecord, from, to LogFieldRef) {}),
-		),
-	}
-}
-
 func isTraceKept(result EvaluateResult) bool {
 	return result == ResultKeep || result == ResultKeepWithTransform
-}
-
-// simpleLogConsumer creates a LogAccessor configured for SimpleLogRecord.
-func simpleLogConsumer() *LogAccessor[*SimpleLogRecord] {
-	return NewLogConsumer(
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case LogFieldBody:
-					return r.Body
-				case LogFieldSeverityText:
-					return r.SeverityText
-				case LogFieldTraceID:
-					return r.TraceID
-				case LogFieldSpanID:
-					return r.SpanID
-				case LogFieldEventName:
-					return r.EventName
-				default:
-					return nil
-				}
-			}
-			return traversePath(simpleLogAttrs(r, ref), ref.AttrPath)
-		}),
-		WithLogExists(func(r *SimpleLogRecord, ref LogFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case LogFieldBody:
-					return r.Body != nil
-				case LogFieldSeverityText:
-					return r.SeverityText != nil
-				case LogFieldTraceID:
-					return r.TraceID != nil
-				case LogFieldSpanID:
-					return r.SpanID != nil
-				case LogFieldEventName:
-					return r.EventName != nil
-				default:
-					return false
-				}
-			}
-			attrs := simpleLogAttrs(r, ref)
-			if attrs == nil || len(ref.AttrPath) == 0 {
-				return false
-			}
-			cur := any(attrs)
-			for _, seg := range ref.AttrPath {
-				m, ok := cur.(map[string]any)
-				if !ok {
-					return false
-				}
-				cur, ok = m[seg]
-				if !ok {
-					return false
-				}
-			}
-			return true
-		}),
-	)
-}
-
-// simpleMetricConsumer creates a MetricAccessor configured for SimpleMetricRecord.
-func simpleMetricConsumer() *MetricAccessor[*SimpleMetricRecord] {
-	return NewMetricConsumer(
-		WithMetricValue(func(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case MetricFieldName:
-					return r.Name
-				case MetricFieldDescription:
-					return r.Description
-				case MetricFieldUnit:
-					return r.Unit
-				case MetricFieldAggregationTemporality:
-					return r.AggregationTemporality
-				case MetricFieldScopeName:
-					return r.ScopeName
-				case MetricFieldScopeVersion:
-					return r.ScopeVersion
-				case MetricFieldResourceSchemaURL:
-					return r.ResourceSchemaURL
-				case MetricFieldScopeSchemaURL:
-					return r.ScopeSchemaURL
-				case MetricFieldType:
-					return r.Type
-				default:
-					return nil
-				}
-			}
-			var attrs map[string]any
-			switch {
-			case ref.IsRecordAttr():
-				attrs = r.DatapointAttributes
-			case ref.IsResourceAttr():
-				attrs = r.ResourceAttributes
-			case ref.IsScopeAttr():
-				attrs = r.ScopeAttributes
-			}
-			return traversePath(attrs, ref.AttrPath)
-		}),
-		WithMetricExists(func(r *SimpleMetricRecord, ref MetricFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case MetricFieldName:
-					return r.Name != nil
-				case MetricFieldDescription:
-					return r.Description != nil
-				case MetricFieldUnit:
-					return r.Unit != nil
-				case MetricFieldAggregationTemporality:
-					return r.AggregationTemporality != nil
-				case MetricFieldScopeName:
-					return r.ScopeName != nil
-				case MetricFieldScopeVersion:
-					return r.ScopeVersion != nil
-				case MetricFieldResourceSchemaURL:
-					return r.ResourceSchemaURL != nil
-				case MetricFieldScopeSchemaURL:
-					return r.ScopeSchemaURL != nil
-				case MetricFieldType:
-					return r.Type != nil
-				default:
-					return false
-				}
-			}
-			var attrs map[string]any
-			switch {
-			case ref.IsRecordAttr():
-				attrs = r.DatapointAttributes
-			case ref.IsResourceAttr():
-				attrs = r.ResourceAttributes
-			case ref.IsScopeAttr():
-				attrs = r.ScopeAttributes
-			}
-			if attrs == nil || len(ref.AttrPath) == 0 {
-				return false
-			}
-			cur := any(attrs)
-			for _, seg := range ref.AttrPath {
-				m, ok := cur.(map[string]any)
-				if !ok {
-					return false
-				}
-				cur, ok = m[seg]
-				if !ok {
-					return false
-				}
-			}
-			return true
-		}),
-	)
 }
 
 // staticProvider is a simple provider for testing that returns static policies.
@@ -307,7 +103,7 @@ func TestEvaluateLogDropDebugLogs(t *testing.T) {
 		Body: []byte("this is a debug message"),
 	}
 
-	result := EvaluateLog(engine, record, NewLogConsumer(
+	result := EvaluateLog(engine, record, NewLogAccessor(
 		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
@@ -368,7 +164,7 @@ func TestEvaluateLogKeepAll(t *testing.T) {
 		SeverityText: []byte("INFO"),
 	}
 
-	result := EvaluateLog(engine, record, NewLogConsumer(
+	result := EvaluateLog(engine, record, NewLogAccessor(
 		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
@@ -428,7 +224,7 @@ func TestEvaluateLogNoMatch(t *testing.T) {
 		Body: []byte("normal message"),
 	}
 
-	result := EvaluateLog(engine, record, NewLogConsumer(
+	result := EvaluateLog(engine, record, NewLogAccessor(
 		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
@@ -493,7 +289,7 @@ func TestEvaluateLogWithResourceAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -531,7 +327,7 @@ func TestEvaluateLogWithLogAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -565,14 +361,14 @@ func TestEvaluateLogNegatedMatcher(t *testing.T) {
 	normalLog := &SimpleLogRecord{
 		Body: []byte("normal application message"),
 	}
-	result := EvaluateLog(engine, normalLog, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, normalLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result)
 
 	// Debug log should NOT match the negated rule
 	debugLog := &SimpleLogRecord{
 		Body: []byte("debug information here"),
 	}
-	result = EvaluateLog(engine, debugLog, NewSimpleLogConsumer().LogAccessor)
+	result = EvaluateLog(engine, debugLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -644,10 +440,10 @@ func TestEvaluateLogExistsNegate(t *testing.T) {
 			engine := NewPolicyEngine(registry)
 
 			withBody := &SimpleLogRecord{Body: []byte("hello")}
-			assert.Equal(t, tt.withBody, EvaluateLog(engine, withBody, NewSimpleLogConsumer().LogAccessor), "record with body")
+			assert.Equal(t, tt.withBody, EvaluateLog(engine, withBody, NewSimpleLogAccessor()), "record with body")
 
 			noBody := &SimpleLogRecord{}
-			assert.Equal(t, tt.noBody, EvaluateLog(engine, noBody, NewSimpleLogConsumer().LogAccessor), "record without body")
+			assert.Equal(t, tt.noBody, EvaluateLog(engine, noBody, NewSimpleLogAccessor()), "record without body")
 		})
 	}
 }
@@ -690,7 +486,7 @@ func TestEvaluateLogMultipleMatchers(t *testing.T) {
 			"service.name": "api-gateway",
 		},
 	}
-	result := EvaluateLog(engine, matchingLog, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, matchingLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Only matches body condition - should not match
@@ -700,7 +496,7 @@ func TestEvaluateLogMultipleMatchers(t *testing.T) {
 			"service.name": "web-frontend",
 		},
 	}
-	result = EvaluateLog(engine, partialLog, NewSimpleLogConsumer().LogAccessor)
+	result = EvaluateLog(engine, partialLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -742,7 +538,7 @@ func TestEvaluateLogRegexMultipleEndOffsets(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result, "regex with multiple end-offsets must still match correctly")
 }
 
@@ -779,7 +575,7 @@ func TestEvaluateMetricDropByName(t *testing.T) {
 		Name: []byte("system.debug.count"),
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -812,7 +608,7 @@ func TestEvaluateMetricKeepAll(t *testing.T) {
 		Name: []byte("system.cpu.utilization"),
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultKeep, result)
 }
 
@@ -845,7 +641,7 @@ func TestEvaluateMetricNoMatch(t *testing.T) {
 		Name: []byte("system.cpu.utilization"),
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -883,7 +679,7 @@ func TestEvaluateMetricWithResourceAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -921,7 +717,7 @@ func TestEvaluateMetricWithDatapointAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -955,7 +751,7 @@ func TestEvaluateMetricByType(t *testing.T) {
 		Type: []byte("histogram"),
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -991,7 +787,7 @@ func TestEvaluateMetricByAggregationTemporality(t *testing.T) {
 		AggregationTemporality: []byte("delta"),
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1033,7 +829,7 @@ func TestEvaluateMetricMultipleMatchers(t *testing.T) {
 			"env": "test",
 		},
 	}
-	result := EvaluateMetric(engine, matchingMetric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, matchingMetric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Only matches name condition - should not match
@@ -1043,7 +839,7 @@ func TestEvaluateMetricMultipleMatchers(t *testing.T) {
 			"env": "production",
 		},
 	}
-	result = EvaluateMetric(engine, partialMetric, NewSimpleMetricConsumer().MetricAccessor)
+	result = EvaluateMetric(engine, partialMetric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -1080,7 +876,7 @@ func TestEvaluateTraceDropByName(t *testing.T) {
 		Name: []byte("GET /healthcheck"),
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1113,7 +909,7 @@ func TestEvaluateTraceKeepAll(t *testing.T) {
 		Name: []byte("GET /api/users"),
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 }
 
@@ -1146,7 +942,7 @@ func TestEvaluateTraceNoMatch(t *testing.T) {
 		Name: []byte("GET /api/users"),
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -1180,7 +976,7 @@ func TestEvaluateTraceBySpanKind(t *testing.T) {
 		Kind: []byte("client"),
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1214,7 +1010,7 @@ func TestEvaluateTraceBySpanStatus(t *testing.T) {
 		Status: []byte("error"),
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 }
 
@@ -1252,7 +1048,7 @@ func TestEvaluateTraceWithResourceAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1290,7 +1086,7 @@ func TestEvaluateTraceWithSpanAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1324,7 +1120,7 @@ func TestEvaluateTraceWithEventName(t *testing.T) {
 		EventNames: [][]byte{[]byte("exception")},
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 }
 
@@ -1363,7 +1159,7 @@ func TestEvaluateTraceWithEventAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1397,7 +1193,7 @@ func TestEvaluateTraceWithLinkTraceID(t *testing.T) {
 		LinkTraceIDs: [][]byte{[]byte("test-trace-123")},
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 }
 
@@ -1435,7 +1231,7 @@ func TestEvaluateTraceMultipleMatchers(t *testing.T) {
 		Name: []byte("GET /health"),
 		Kind: []byte("client"),
 	}
-	result := EvaluateTrace(engine, matchingSpan, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, matchingSpan, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Only matches kind condition - should not match
@@ -1443,7 +1239,7 @@ func TestEvaluateTraceMultipleMatchers(t *testing.T) {
 		Name: []byte("GET /api/users"),
 		Kind: []byte("client"),
 	}
-	result = EvaluateTrace(engine, partialSpan, NewSimpleSpanConsumer().TraceAccessor)
+	result = EvaluateTrace(engine, partialSpan, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -1477,14 +1273,14 @@ func TestEvaluateTraceNegatedMatcher(t *testing.T) {
 	normalSpan := &SimpleSpanRecord{
 		Name: []byte("GET /api/users"),
 	}
-	result := EvaluateTrace(engine, normalSpan, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, normalSpan, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// Health span should NOT match the negated rule
 	healthSpan := &SimpleSpanRecord{
 		Name: []byte("GET /health"),
 	}
-	result = EvaluateTrace(engine, healthSpan, NewSimpleSpanConsumer().TraceAccessor)
+	result = EvaluateTrace(engine, healthSpan, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -1549,25 +1345,25 @@ func TestMixedTelemetryPolicies(t *testing.T) {
 
 	// Log evaluation
 	log := &SimpleLogRecord{Body: []byte("debug message")}
-	assert.Equal(t, ResultDrop, EvaluateLog(engine, log, NewSimpleLogConsumer().LogAccessor))
+	assert.Equal(t, ResultDrop, EvaluateLog(engine, log, NewSimpleLogAccessor()))
 
 	// Metric evaluation
 	metric := &SimpleMetricRecord{Name: []byte("app.debug.count")}
-	assert.Equal(t, ResultDrop, EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor))
+	assert.Equal(t, ResultDrop, EvaluateMetric(engine, metric, NewSimpleMetricAccessor()))
 
 	// Trace evaluation
 	span := &SimpleSpanRecord{Name: []byte("GET /health")}
-	assert.Equal(t, ResultDrop, EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor))
+	assert.Equal(t, ResultDrop, EvaluateTrace(engine, span, NewSimpleSpanAccessor()))
 
 	// Non-matching records should return NoMatch
 	normalLog := &SimpleLogRecord{Body: []byte("normal message")}
-	assert.Equal(t, ResultNoMatch, EvaluateLog(engine, normalLog, NewSimpleLogConsumer().LogAccessor))
+	assert.Equal(t, ResultNoMatch, EvaluateLog(engine, normalLog, NewSimpleLogAccessor()))
 
 	normalMetric := &SimpleMetricRecord{Name: []byte("app.request.count")}
-	assert.Equal(t, ResultNoMatch, EvaluateMetric(engine, normalMetric, NewSimpleMetricConsumer().MetricAccessor))
+	assert.Equal(t, ResultNoMatch, EvaluateMetric(engine, normalMetric, NewSimpleMetricAccessor()))
 
 	normalSpan := &SimpleSpanRecord{Name: []byte("GET /api/users")}
-	assert.Equal(t, ResultNoMatch, EvaluateTrace(engine, normalSpan, NewSimpleSpanConsumer().TraceAccessor))
+	assert.Equal(t, ResultNoMatch, EvaluateTrace(engine, normalSpan, NewSimpleSpanAccessor()))
 }
 
 // ============================================================================
@@ -1620,12 +1416,12 @@ func TestMostRestrictivePolicyWins(t *testing.T) {
 
 	// Log matches both policies - drop (none) should win over keep (all)
 	log := &SimpleLogRecord{Body: []byte("debug error occurred")}
-	result := EvaluateLog(engine, log, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, log, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result, "more restrictive policy (drop) should win")
 
 	// Log only matches keep policy
 	debugOnlyLog := &SimpleLogRecord{Body: []byte("debug message")}
-	result = EvaluateLog(engine, debugOnlyLog, NewSimpleLogConsumer().LogAccessor)
+	result = EvaluateLog(engine, debugOnlyLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result)
 }
 
@@ -1664,7 +1460,7 @@ func TestStatsCollection(t *testing.T) {
 		SeverityText: []byte("DEBUG"),
 	}
 
-	EvaluateLog(engine, debugLog, NewSimpleLogConsumer().LogAccessor)
+	EvaluateLog(engine, debugLog, NewSimpleLogAccessor())
 
 	// Collect stats
 	stats := registry.CollectStats()
@@ -1736,17 +1532,17 @@ func TestMatchHitMissTracking(t *testing.T) {
 
 	// Record 1: "health check ok" (INFO) — matches both policies, should be dropped
 	healthLog := &SimpleLogRecord{Body: []byte("health check ok"), SeverityText: []byte("INFO")}
-	result := EvaluateLog(engine, healthLog, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, healthLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Record 2: "user action logged" (INFO) — matches only keep-info, should be kept
 	userLog := &SimpleLogRecord{Body: []byte("user action logged"), SeverityText: []byte("INFO")}
-	result = EvaluateLog(engine, userLog, NewSimpleLogConsumer().LogAccessor)
+	result = EvaluateLog(engine, userLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result)
 
 	// Record 3: "database error" (ERROR) — matches neither, no match
 	errorLog := &SimpleLogRecord{Body: []byte("database error"), SeverityText: []byte("ERROR")}
-	result = EvaluateLog(engine, errorLog, NewSimpleLogConsumer().LogAccessor)
+	result = EvaluateLog(engine, errorLog, NewSimpleLogAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 
 	// Collect stats and verify
@@ -1815,7 +1611,7 @@ func TestMatchHitMissTracking_AllKept(t *testing.T) {
 
 	// This log matches both keep-all policies → kept, both get match hit
 	log := &SimpleLogRecord{Body: []byte("user action"), SeverityText: []byte("INFO")}
-	result := EvaluateLog(engine, log, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, log, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result)
 
 	stats := registry.CollectStats()
@@ -1858,7 +1654,7 @@ func TestMatchHitMissTracking_NoMatch(t *testing.T) {
 
 	// ERROR log doesn't match the INFO policy
 	log := &SimpleLogRecord{Body: []byte("error"), SeverityText: []byte("ERROR")}
-	result := EvaluateLog(engine, log, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, log, NewSimpleLogAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 
 	stats := registry.CollectStats()
@@ -1917,13 +1713,13 @@ func TestSamplingWithSampleKey(t *testing.T) {
 	}
 
 	// Run multiple times to verify determinism
-	result1a := EvaluateLog(engine, record1, NewSimpleLogConsumer().LogAccessor)
-	result1b := EvaluateLog(engine, record1, NewSimpleLogConsumer().LogAccessor)
-	result1c := EvaluateLog(engine, record1, NewSimpleLogConsumer().LogAccessor)
+	result1a := EvaluateLog(engine, record1, NewSimpleLogAccessor())
+	result1b := EvaluateLog(engine, record1, NewSimpleLogAccessor())
+	result1c := EvaluateLog(engine, record1, NewSimpleLogAccessor())
 
-	result2a := EvaluateLog(engine, record2, NewSimpleLogConsumer().LogAccessor)
-	result2b := EvaluateLog(engine, record2, NewSimpleLogConsumer().LogAccessor)
-	result2c := EvaluateLog(engine, record2, NewSimpleLogConsumer().LogAccessor)
+	result2a := EvaluateLog(engine, record2, NewSimpleLogAccessor())
+	result2b := EvaluateLog(engine, record2, NewSimpleLogAccessor())
+	result2c := EvaluateLog(engine, record2, NewSimpleLogAccessor())
 
 	// Same trace_id should always produce the same result
 	assert.Equal(t, result1a, result1b, "same trace_id should produce consistent result")
@@ -1975,7 +1771,7 @@ func TestSamplingDistribution(t *testing.T) {
 				"request_id": string(rune('a'+i%26)) + string(rune('0'+i%10)) + string(rune(i)),
 			},
 		}
-		result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+		result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 		if result == ResultKeep {
 			kept++
 		} else if result == ResultDrop {
@@ -2024,7 +1820,7 @@ func TestSamplingWithoutSampleKey(t *testing.T) {
 		// No TraceID set
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result, "record without sample key value should be kept")
 }
 
@@ -2062,7 +1858,7 @@ func TestSampling100Percent(t *testing.T) {
 			Body:    []byte("test message"),
 			TraceID: []byte("trace-" + string(rune('a'+i))),
 		}
-		result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+		result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 		assert.Equal(t, ResultKeep, result, "100%% sampling should keep all records")
 	}
 }
@@ -2101,7 +1897,7 @@ func TestSampling0Percent(t *testing.T) {
 			Body:    []byte("test message"),
 			TraceID: []byte("trace-" + string(rune('a'+i))),
 		}
-		result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+		result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 		assert.Equal(t, ResultDrop, result, "0%% sampling should drop all records")
 	}
 }
@@ -2148,7 +1944,7 @@ func TestEvaluateMetricSampling(t *testing.T) {
 		Name: []byte("system.cpu.usage"),
 	}
 
-	result := EvaluateMetric(engine, metric, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, metric, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultKeep, result)
 }
 
@@ -2192,13 +1988,13 @@ func TestEvaluateTraceSamplingDeterministic(t *testing.T) {
 	}
 
 	// Run multiple times to verify determinism
-	result1a := EvaluateTrace(engine, span1, NewSimpleSpanConsumer().TraceAccessor)
-	result1b := EvaluateTrace(engine, span1, NewSimpleSpanConsumer().TraceAccessor)
-	result1c := EvaluateTrace(engine, span1, NewSimpleSpanConsumer().TraceAccessor)
+	result1a := EvaluateTrace(engine, span1, NewSimpleSpanAccessor())
+	result1b := EvaluateTrace(engine, span1, NewSimpleSpanAccessor())
+	result1c := EvaluateTrace(engine, span1, NewSimpleSpanAccessor())
 
-	result2a := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
-	result2b := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
-	result2c := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
+	result2a := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
+	result2b := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
+	result2c := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
 
 	// Same trace ID should always produce the same result
 	assert.Equal(t, result1a, result1b, "same trace ID should produce consistent result")
@@ -2255,7 +2051,7 @@ func TestEvaluateTraceSamplingDistribution(t *testing.T) {
 			Name:    []byte("GET /api/users"),
 			TraceID: traceID,
 		}
-		result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+		result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 		if isTraceKept(result) {
 			kept++
 		} else if result == ResultDrop {
@@ -2301,7 +2097,7 @@ func TestEvaluateTraceSamplingNoTraceID(t *testing.T) {
 		// No TraceID set
 	}
 
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result, "span without trace ID should be dropped (fail_closed=true)")
 }
 
@@ -2337,7 +2133,7 @@ func TestEvaluateTraceSampling100Percent(t *testing.T) {
 			Name:    []byte("GET /api/users"),
 			TraceID: []byte(fmt.Sprintf("trace-%d", i)),
 		}
-		result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+		result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 		assert.Equal(t, ResultKeepWithTransform, result, "100%% sampling should keep all spans")
 	}
 }
@@ -2375,7 +2171,7 @@ func TestEvaluateTraceSampling0Percent(t *testing.T) {
 			Name:    []byte("GET /api/users"),
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+		result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 		assert.Equal(t, ResultDrop, result, "0%% sampling should drop all spans")
 	}
 }
@@ -2421,8 +2217,8 @@ func TestEvaluateTraceSamplingWithTracestateRandomness(t *testing.T) {
 		TraceState: []byte("ot=rv:7fffffffffffff"), // Just below 50% threshold
 	}
 
-	resultKept := EvaluateTrace(engine, spanKept, NewSimpleSpanConsumer().TraceAccessor)
-	resultDropped := EvaluateTrace(engine, spanDropped, NewSimpleSpanConsumer().TraceAccessor)
+	resultKept := EvaluateTrace(engine, spanKept, NewSimpleSpanAccessor())
+	resultDropped := EvaluateTrace(engine, spanDropped, NewSimpleSpanAccessor())
 
 	assert.Equal(t, ResultKeepWithTransform, resultKept, "span with rv at threshold should be kept")
 	assert.Equal(t, ResultDrop, resultDropped, "span with rv below threshold should be dropped")
@@ -2474,9 +2270,9 @@ func TestEvaluateTraceSamplingConsistentAcrossSpans(t *testing.T) {
 	}
 
 	// All spans from the same trace should have the same sampling decision
-	result1 := EvaluateTrace(engine, span1, NewSimpleSpanConsumer().TraceAccessor)
-	result2 := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
-	result3 := EvaluateTrace(engine, span3, NewSimpleSpanConsumer().TraceAccessor)
+	result1 := EvaluateTrace(engine, span1, NewSimpleSpanAccessor())
+	result2 := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
+	result3 := EvaluateTrace(engine, span3, NewSimpleSpanAccessor())
 
 	assert.Equal(t, result1, result2, "spans from same trace should have same sampling decision")
 	assert.Equal(t, result2, result3, "spans from same trace should have same sampling decision")
@@ -2518,12 +2314,12 @@ func TestLogRateLimitingPerSecond(t *testing.T) {
 
 	// First 3 requests should be kept (under limit)
 	for i := 0; i < 3; i++ {
-		result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+		result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 		assert.Equal(t, ResultKeep, result, "request %d should be kept (under rate limit)", i+1)
 	}
 
 	// 4th request should be dropped (over limit)
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result, "request 4 should be dropped (over rate limit)")
 }
 
@@ -2559,12 +2355,12 @@ func TestLogRateLimitingPerMinute(t *testing.T) {
 
 	// First 5 requests should be kept (under limit)
 	for i := 0; i < 5; i++ {
-		result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+		result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 		assert.Equal(t, ResultKeep, result, "request %d should be kept (under rate limit)", i+1)
 	}
 
 	// 6th request should be dropped (over limit)
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result, "request 6 should be dropped (over rate limit)")
 }
 
@@ -2614,7 +2410,7 @@ func TestEvaluateLogTransformRedactAttribute(t *testing.T) {
 		LogAttributes: map[string]any{"api_key": "secret-123"},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, "[REDACTED]", record.LogAttributes["api_key"])
 }
@@ -2658,11 +2454,15 @@ func TestEvaluateLogTransformWithNoOpConsumer(t *testing.T) {
 		Body: []byte("test message"),
 	}
 
-	// A consumer can opt out of mutation by making write primitives no-ops.
-	result := EvaluateLog(engine, record, newNoOpLogConsumer().LogAccessor)
+	// A consumer can opt out of mutation by overriding the write primitives
+	// with no-ops. The engine still returns ResultKeepWithTransform — the
+	// transforms ran, they just had no effect.
+	accessor := NewSimpleLogAccessor()
+	accessor.Set = func(*SimpleLogRecord, LogFieldRef, string) {}
+	accessor.Delete = func(*SimpleLogRecord, LogFieldRef) bool { return false }
+	accessor.Move = func(*SimpleLogRecord, LogFieldRef, LogFieldRef) {}
+	result := EvaluateLog(engine, record, accessor)
 	assert.Equal(t, ResultKeepWithTransform, result)
-
-	// Record should be unmodified since the consumer's write methods are no-ops.
 	assert.Nil(t, record.LogAttributes)
 }
 
@@ -2735,7 +2535,7 @@ func TestEvaluateLogTransformAllOpsApplied(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// Remove: "secret" attribute should be gone
@@ -2796,7 +2596,7 @@ func TestEvaluateLogTransformNotAppliedOnDrop(t *testing.T) {
 		Body: []byte("debug message"),
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Body should be unmodified since policy dropped the record
@@ -2889,7 +2689,7 @@ func TestEvaluateLogRateLimitWinnerWithKeepAllTransform(t *testing.T) {
 			},
 		},
 	}
-	firstResult := EvaluateLog(engine, first, NewSimpleLogConsumer().LogAccessor)
+	firstResult := EvaluateLog(engine, first, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, firstResult)
 	assert.Equal(t, []byte("debug"), first.SeverityText)
 
@@ -2907,7 +2707,7 @@ func TestEvaluateLogRateLimitWinnerWithKeepAllTransform(t *testing.T) {
 			},
 		},
 	}
-	secondResult := EvaluateLog(engine, second, NewSimpleLogConsumer().LogAccessor)
+	secondResult := EvaluateLog(engine, second, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, secondResult)
 	assert.Equal(t, []byte("info"), second.SeverityText, "transform should not run when rate-limited policy drops the record")
 }
@@ -2942,7 +2742,7 @@ func TestEvaluateLogNoTransformReturnsKeep(t *testing.T) {
 	}
 
 	// Policy has no transforms - should return ResultKeep, not ResultKeepWithTransform
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result)
 }
 
@@ -2996,7 +2796,7 @@ func TestEvaluateLogTransformMultipleRedacts(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	assert.Equal(t, "[REDACTED]", record.LogAttributes["password"])
@@ -3045,7 +2845,7 @@ func TestEvaluateLogTransformRemoveField(t *testing.T) {
 		SpanID:  []byte("span-123"),
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	assert.Nil(t, record.TraceID)
@@ -3111,7 +2911,7 @@ func TestEvaluateLogTransformAddWithUpsert(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	assert.Equal(t, "overwritten", record.LogAttributes["existing"]) // upsert=true overwrites
@@ -3162,7 +2962,7 @@ func TestEvaluateLogTransformRenameAttribute(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	_, hasSrcIP := record.LogAttributes["src_ip"]
@@ -3245,7 +3045,7 @@ func TestEvaluateLogTransformStatsRecorded(t *testing.T) {
 		},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// Collect stats and verify transform counters
@@ -3319,7 +3119,7 @@ func TestEvaluateLogTransformStatsResetAfterCollect(t *testing.T) {
 		Body:          []byte("msg"),
 		LogAttributes: map[string]any{"secret": "val"},
 	}
-	EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	EvaluateLog(engine, record, NewSimpleLogAccessor())
 
 	// First collect — should have stats
 	stats := registry.CollectStats()
@@ -3388,7 +3188,7 @@ func TestEvaluateLogTransformStatsRecordedThroughConsumer(t *testing.T) {
 		Body: []byte("test message"),
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// Stats are recorded from the engine's transform decision.
@@ -3444,7 +3244,7 @@ func TestEvaluateLogTransformRedactBody(t *testing.T) {
 		Body: []byte("contains sensitive data: SSN=123-45-6789"),
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, []byte("[BODY REDACTED]"), record.Body)
 }
@@ -3516,7 +3316,7 @@ func TestEvaluateLogTransformMultiplePolicies(t *testing.T) {
 		LogAttributes: map[string]any{},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// Both policies matched — transforms from both should be applied
@@ -3597,7 +3397,7 @@ func TestEvaluateLogTransformOrderByPolicyID(t *testing.T) {
 		LogAttributes: map[string]any{},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// aaa-add-first runs first (tag=first), then zzz-add-second runs second (tag=second).
@@ -3676,7 +3476,7 @@ func TestEvaluateLogTransformOrderByPolicyIDReversed(t *testing.T) {
 		LogAttributes: map[string]any{},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 
 	// Same result regardless of input order — zzz-add-second always wins.
@@ -3719,7 +3519,7 @@ func TestDisabledPolicyNotEvaluated(t *testing.T) {
 	}
 
 	// Disabled policy should be skipped — log should pass through
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultNoMatch, result)
 }
 
@@ -3770,7 +3570,7 @@ func TestDisabledPolicyMixedWithEnabled(t *testing.T) {
 	}
 
 	// Only the enabled policy should match — keep all
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeep, result)
 }
 
@@ -3804,7 +3604,7 @@ func TestEvaluateTraceEventNameMatch(t *testing.T) {
 		Name:       []byte("my-span"),
 		EventNames: [][]byte{[]byte("exception")},
 	}
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Span without exception event — should pass through
@@ -3812,7 +3612,7 @@ func TestEvaluateTraceEventNameMatch(t *testing.T) {
 		Name:       []byte("my-span"),
 		EventNames: [][]byte{[]byte("log")},
 	}
-	result2 := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
+	result2 := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultNoMatch, result2)
 }
 
@@ -3846,7 +3646,7 @@ func TestEvaluateTraceScopeNameMatch(t *testing.T) {
 		Name:      []byte("check"),
 		ScopeName: []byte("internal.healthcheck"),
 	}
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Span from a different scope — should pass through
@@ -3854,7 +3654,7 @@ func TestEvaluateTraceScopeNameMatch(t *testing.T) {
 		Name:      []byte("check"),
 		ScopeName: []byte("my.service"),
 	}
-	result2 := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
+	result2 := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultNoMatch, result2)
 }
 
@@ -3887,7 +3687,7 @@ func TestEvaluateTraceSpanStatusUnset(t *testing.T) {
 		Name:   []byte("my-span"),
 		Status: []byte("unset"),
 	}
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Span with error status — should pass through
@@ -3895,7 +3695,7 @@ func TestEvaluateTraceSpanStatusUnset(t *testing.T) {
 		Name:   []byte("my-span"),
 		Status: []byte("error"),
 	}
-	result2 := EvaluateTrace(engine, span2, NewSimpleSpanConsumer().TraceAccessor)
+	result2 := EvaluateTrace(engine, span2, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultNoMatch, result2)
 }
 
@@ -3929,7 +3729,7 @@ func TestEvaluateLogResourceSchemaURL(t *testing.T) {
 		Body:              []byte("test"),
 		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v1.0.0"),
 	}
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Log with new schema — should pass through
@@ -3937,7 +3737,7 @@ func TestEvaluateLogResourceSchemaURL(t *testing.T) {
 		Body:              []byte("test"),
 		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v2.0.0"),
 	}
-	result2 := EvaluateLog(engine, record2, NewSimpleLogConsumer().LogAccessor)
+	result2 := EvaluateLog(engine, record2, NewSimpleLogAccessor())
 	assert.Equal(t, ResultNoMatch, result2)
 }
 
@@ -3971,7 +3771,7 @@ func TestEvaluateMetricResourceSchemaURL(t *testing.T) {
 		Name:              []byte("cpu.usage"),
 		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v1.0.0"),
 	}
-	result := EvaluateMetric(engine, record, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, record, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Metric with new schema — should pass through
@@ -3979,7 +3779,7 @@ func TestEvaluateMetricResourceSchemaURL(t *testing.T) {
 		Name:              []byte("cpu.usage"),
 		ResourceSchemaURL: []byte("https://opentelemetry.io/schemas/v2.0.0"),
 	}
-	result2 := EvaluateMetric(engine, record2, NewSimpleMetricConsumer().MetricAccessor)
+	result2 := EvaluateMetric(engine, record2, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultNoMatch, result2)
 }
 
@@ -4013,7 +3813,7 @@ func TestEvaluateMetricScopeName(t *testing.T) {
 		Name:      []byte("cpu.usage"),
 		ScopeName: []byte("internal.debug"),
 	}
-	result := EvaluateMetric(engine, record, NewSimpleMetricConsumer().MetricAccessor)
+	result := EvaluateMetric(engine, record, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultDrop, result)
 
 	// Metric from different scope — should pass through
@@ -4021,7 +3821,7 @@ func TestEvaluateMetricScopeName(t *testing.T) {
 		Name:      []byte("cpu.usage"),
 		ScopeName: []byte("my.service"),
 	}
-	result2 := EvaluateMetric(engine, record2, NewSimpleMetricConsumer().MetricAccessor)
+	result2 := EvaluateMetric(engine, record2, NewSimpleMetricAccessor())
 	assert.Equal(t, ResultNoMatch, result2)
 }
 
@@ -4066,8 +3866,8 @@ func TestEvaluateTraceHashSeedMode(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	r1 := EvaluateTrace(eng, span, NewSimpleSpanConsumer().TraceAccessor)
-	r2 := EvaluateTrace(eng, span, NewSimpleSpanConsumer().TraceAccessor)
+	r1 := EvaluateTrace(eng, span, NewSimpleSpanAccessor())
+	r2 := EvaluateTrace(eng, span, NewSimpleSpanAccessor())
 	assert.Equal(t, r1, r2, "hash_seed mode should be deterministic")
 	assert.Contains(t, []EvaluateResult{ResultKeepWithTransform, ResultDrop}, r1)
 }
@@ -4109,7 +3909,7 @@ func TestEvaluateTraceProportionalMode(t *testing.T) {
 			Name:    []byte("GET /api/users"),
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/uint64(total)))),
 		}
-		if isTraceKept(EvaluateTrace(eng, span, NewSimpleSpanConsumer().TraceAccessor)) {
+		if isTraceKept(EvaluateTrace(eng, span, NewSimpleSpanAccessor())) {
 			kept++
 		}
 	}
@@ -4155,7 +3955,7 @@ func TestEvaluateTraceEqualizingMode(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/20))),
 			TraceState: traceState,
 		}
-		result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+		result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 		assert.Equal(t, ResultKeepWithTransform, result, "equalizing should keep spans with T_s > T_d (span %d)", i)
 	}
 }
@@ -4194,7 +3994,7 @@ func TestEvaluateTraceFailClosedDefault(t *testing.T) {
 		Name: []byte("GET /api/users"),
 		// No TraceID
 	}
-	result := EvaluateTrace(engine, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(engine, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultDrop, result, "fail_closed=true should drop spans without trace ID")
 }
 
@@ -4234,7 +4034,7 @@ func TestEvaluateTraceFailOpenExplicit(t *testing.T) {
 		Name: []byte("GET /api/users"),
 		// No TraceID
 	}
-	result := EvaluateTrace(eng, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(eng, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultKeep, result, "fail_closed=false should keep spans without trace ID")
 }
 
@@ -4336,8 +4136,8 @@ func TestEvaluateTraceThresholdWriteBackDropped(t *testing.T) {
 
 // TestEvaluateTraceSamplingResultCode verifies that successful sampling
 // returns ResultKeepWithTransform (the engine writes the threshold via the
-// consumer's Set; consumers that don't care can no-op it, as
-// SimpleSpanConsumer does for the SpanSamplingThreshold virtual field).
+// accessor's Set; callers that don't care can no-op it, as SimpleSpanSetValue
+// does for the SpanSamplingThreshold virtual field).
 func TestEvaluateTraceSamplingResultCode(t *testing.T) {
 	mode := policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED
 	registry := NewPolicyRegistry()
@@ -4372,7 +4172,7 @@ func TestEvaluateTraceSamplingResultCode(t *testing.T) {
 		TraceID: []byte("00000000000000000080000000000000"),
 	}
 
-	result := EvaluateTrace(eng, span, NewSimpleSpanConsumer().TraceAccessor)
+	result := EvaluateTrace(eng, span, NewSimpleSpanAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 }
 
@@ -4466,7 +4266,7 @@ func TestEvaluateLogTransformRedactRegexAttribute(t *testing.T) {
 		LogAttributes: map[string]any{"authorization": "Bearer abcdef1234"},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, "Bearer [REDACTED]", record.LogAttributes["authorization"])
 }
@@ -4483,7 +4283,7 @@ func TestEvaluateLogTransformRedactRegexNoMatchIsNoop(t *testing.T) {
 		LogAttributes: map[string]any{"card": "no card here"},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, "no card here", record.LogAttributes["card"], "value should be unchanged when regex does not match")
 }
@@ -4530,7 +4330,7 @@ func TestEvaluateLogTransformRedactRegexNonStringIsNoop(t *testing.T) {
 		LogAttributes: map[string]any{"count": 42},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, 42, record.LogAttributes["count"], "non-string value must be left untouched")
 }
@@ -4547,7 +4347,7 @@ func TestEvaluateLogTransformRedactRegexMultipleMatches(t *testing.T) {
 		LogAttributes: map[string]any{"msg": "from a@b.com to c@d.org"},
 	}
 
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, "from [email] to [email]", record.LogAttributes["msg"])
 }
@@ -4586,7 +4386,7 @@ func TestEvaluateLogTransformRedactRegexBody(t *testing.T) {
 	engine := NewPolicyEngine(registry)
 
 	record := &SimpleLogRecord{Body: []byte("user=alice password=hunter2 host=x")}
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	assert.Equal(t, ResultKeepWithTransform, result)
 	assert.Equal(t, []byte("user=alice password=[REDACTED] host=x"), record.Body)
 }
@@ -4600,7 +4400,7 @@ func TestEvaluateLogTransformRedactRegexStatsRecordMiss(t *testing.T) {
 	engine := NewPolicyEngine(registry)
 
 	record := &SimpleLogRecord{LogAttributes: map[string]any{"msg": "nothing to redact"}}
-	result := EvaluateLog(engine, record, NewSimpleLogConsumer().LogAccessor)
+	result := EvaluateLog(engine, record, NewSimpleLogAccessor())
 	require.Equal(t, ResultKeepWithTransform, result)
 
 	stats := registry.CollectStats()

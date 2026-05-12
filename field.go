@@ -289,65 +289,53 @@ const (
 )
 
 // ApplyLogTransform applies a single TransformOp to a record via the
-// LogConsumer primitives. The engine calls this for every op on a matched
+// LogAccessor primitives. The engine calls this for every op on a matched
 // policy; it's exposed publicly so tests can exercise the spec semantics
 // directly without going through the full evaluation path.
-func ApplyLogTransform[T any](rec T, op TransformOp, c *LogAccessor[T]) bool {
-	return engine.ApplyLogTransform(rec, op, c)
+func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
+	return engine.ApplyLogTransform(rec, op, a)
 }
 
 // ============================================================================
-// CONSUMER ACCESSORS
+// ACCESSORS
 // ============================================================================
 
-// Consumers bridge a user record type T to the policy engine via accessor
-// functions. Instead of implementing an interface, consumers simply configure
-// the accessors they need using the constructor and option functions below.
-// The engine builds every high-level behavior — pattern matching, existence
-// checks, redact with regex templates, rename with upsert, add-or-overwrite —
-// on top of these primitives. New spec features that extend TransformOp are
-// absorbed by the library without touching consumers.
+// Accessors bridge a user record type T to the policy engine via plain
+// function values. Build one with NewLogAccessor / NewMetricAccessor /
+// NewTraceAccessor and pass the matching With* options. The engine builds
+// every high-level behavior — pattern matching, existence checks, regex
+// redact, rename-with-upsert, add-or-overwrite — on top of these primitives,
+// so new spec features that extend TransformOp are absorbed by the library
+// without touching callers.
 type (
 	// LogAccessor provides accessor functions for log records.
-	// Use NewLogConsumer to configure it with your Value/Exists/Set/ Delete/Move functions.
 	LogAccessor[T any] = engine.LogAccessor[T]
 
 	// MetricAccessor provides accessor functions for metric records.
-	// Use NewMetricConsumer to configure it with your Value/Exists functions.
 	MetricAccessor[T any] = engine.MetricAccessor[T]
 
 	// TraceAccessor provides accessor functions for span records.
-	// Use NewTraceConsumer to configure it with your Value/Exists/Set functions.
 	TraceAccessor[T any] = engine.TraceAccessor[T]
 )
 
 // ============================================================================
-// LOG CONSUMER ACCESSORS
+// LOG ACCESSOR
 // ============================================================================
 
-// NewLogConsumer creates a LogAccessor configured with the provided accessor functions.
-// All functions are optional; nil functions will cause panics if called.
+// NewLogAccessor creates a LogAccessor configured with the provided accessor
+// functions. Each function is optional; the engine panics if a policy
+// requires one that wasn't supplied.
+//
 // Example:
 //
-//	consumer := policy.NewLogConsumer(
-//		policy.WithLogValue(func(r *MyLogRecord, ref policy.LogFieldRef) []byte {
-//			// return field value
-//		}),
-//		policy.WithLogExists(func(r *MyLogRecord, ref policy.LogFieldRef) bool {
-//			// return whether field exists
-//		}),
-//		policy.WithLogSet(func(r *MyLogRecord, ref policy.LogFieldRef, value string) {
-//			// set field value
-//		}),
-//		policy.WithLogDelete(func(r *MyLogRecord, ref policy.LogFieldRef) bool {
-//			// delete field
-//			return true
-//		}),
-//		policy.WithLogMove(func(r *MyLogRecord, from, to policy.LogFieldRef) {
-//			// move value from to
-//		}),
+//	accessor := policy.NewLogAccessor[*MyLogRecord](
+//		policy.WithLogValue(myGetValue),
+//		policy.WithLogExists(myHasValue),
+//		policy.WithLogSet(mySetValue),
+//		policy.WithLogDelete(myDeleteValue),
+//		policy.WithLogMove(myMoveValue),
 //	)
-func NewLogConsumer[T any](opts ...LogAccessorOption[T]) *LogAccessor[T] {
+func NewLogAccessor[T any](opts ...LogAccessorOption[T]) *LogAccessor[T] {
 	a := &LogAccessor[T]{}
 	for _, opt := range opts {
 		opt(a)
@@ -397,12 +385,12 @@ func WithLogMove[T any](f func(T, LogFieldRef, LogFieldRef)) LogAccessorOption[T
 }
 
 // ============================================================================
-// METRIC CONSUMER ACCESSORS
+// METRIC ACCESSOR
 // ============================================================================
 
-// NewMetricConsumer creates a MetricAccessor configured with the provided
+// NewMetricAccessor creates a MetricAccessor configured with the provided
 // accessor functions.
-func NewMetricConsumer[T any](opts ...MetricAccessorOption[T]) *MetricAccessor[T] {
+func NewMetricAccessor[T any](opts ...MetricAccessorOption[T]) *MetricAccessor[T] {
 	a := &MetricAccessor[T]{}
 	for _, opt := range opts {
 		opt(a)
@@ -428,13 +416,13 @@ func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricAccessorOptio
 }
 
 // ============================================================================
-// TRACE CONSUMER ACCESSORS
+// TRACE ACCESSOR
 // ============================================================================
 
-// NewTraceConsumer creates a TraceAccessor configured with the provided
-// accessor functions. Use this for span records where you need to write
-// the sampling threshold back to tracestate after a sampling decision.
-func NewTraceConsumer[T any](opts ...TraceAccessorOption[T]) *TraceAccessor[T] {
+// NewTraceAccessor creates a TraceAccessor configured with the provided
+// accessor functions. Configure WithTraceSet on spans where you need the
+// sampling threshold written back to tracestate after a sampling decision.
+func NewTraceAccessor[T any](opts ...TraceAccessorOption[T]) *TraceAccessor[T] {
 	a := &TraceAccessor[T]{}
 	for _, opt := range opts {
 		opt(a)
@@ -465,16 +453,3 @@ func WithTraceSet[T any](f func(T, TraceFieldRef, string)) TraceAccessorOption[T
 		a.Set = f
 	}
 }
-
-// ============================================================================
-// LOG CONSUMER TYPE ALIASES
-// ============================================================================
-
-// LogConsumer is a type alias for LogAccessor for backward compatibility.
-type LogConsumer[T any] = LogAccessor[T]
-
-// MetricConsumer is a type alias for MetricAccessor for backward compatibility.
-type MetricConsumer[T any] = MetricAccessor[T]
-
-// TraceConsumer is a type alias for TraceAccessor for backward compatibility.
-type TraceConsumer[T any] = TraceAccessor[T]

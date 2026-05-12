@@ -28,7 +28,7 @@ type TransformOp struct {
 }
 
 // LogAccessor holds the accessor functions for log record operations.
-// Use NewLogConsumer to construct an implementation with your value/exists/set/delete/move functions.
+// Use NewLogAccessor with WithLog* options to configure it.
 type LogAccessor[T any] struct {
 	// Value returns the field's string value as bytes for pattern matching.
 	// Return nil when the field is absent OR when its underlying value is not a string.
@@ -47,10 +47,10 @@ type LogAccessor[T any] struct {
 	Move func(rec T, from, to LogFieldRef)
 }
 
-// NewLogConsumer creates a LogAccessor configured with the provided accessor functions.
-// All functions are optional; nil functions will cause panics if called.
-// Use this pattern instead of implementing an interface - consumers simply set the functions they need.
-func NewLogConsumer[T any](opts ...LogAccessorOption[T]) *LogAccessor[T] {
+// NewLogAccessor creates a LogAccessor configured with the provided accessor
+// functions. Functions are optional; the ones the engine needs depend on the
+// policy — ApplyLogTransform panics if a required accessor is nil.
+func NewLogAccessor[T any](opts ...LogAccessorOption[T]) *LogAccessor[T] {
 	a := &LogAccessor[T]{}
 	for _, opt := range opts {
 		opt(a)
@@ -97,7 +97,7 @@ func WithLogMove[T any](f func(T, LogFieldRef, LogFieldRef)) LogAccessorOption[T
 }
 
 // MetricAccessor holds the accessor functions for metric record operations.
-// Use NewMetricConsumer to construct an implementation with your value/exists functions.
+// Use NewMetricAccessor with WithMetric* options to configure it.
 type MetricAccessor[T any] struct {
 	// Value returns the field's string value as bytes for pattern matching.
 	Value func(rec T, ref MetricFieldRef) []byte
@@ -106,8 +106,8 @@ type MetricAccessor[T any] struct {
 	Exists func(rec T, ref MetricFieldRef) bool
 }
 
-// NewMetricConsumer creates a MetricAccessor configured with the provided accessor functions.
-func NewMetricConsumer[T any](opts ...MetricAccessorOption[T]) *MetricAccessor[T] {
+// NewMetricAccessor creates a MetricAccessor configured with the provided accessor functions.
+func NewMetricAccessor[T any](opts ...MetricAccessorOption[T]) *MetricAccessor[T] {
 	a := &MetricAccessor[T]{}
 	for _, opt := range opts {
 		opt(a)
@@ -133,7 +133,7 @@ func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricAccessorOptio
 }
 
 // TraceAccessor holds the accessor functions for trace/span record operations.
-// Use NewTraceConsumer to construct an implementation with your value/exists/set functions.
+// Use NewTraceAccessor with WithTrace* options to configure it.
 type TraceAccessor[T any] struct {
 	// Value returns the field's string value as bytes for pattern matching.
 	Value func(rec T, ref TraceFieldRef) []byte
@@ -145,8 +145,8 @@ type TraceAccessor[T any] struct {
 	Set func(rec T, ref TraceFieldRef, value string)
 }
 
-// NewTraceConsumer creates a TraceAccessor configured with the provided accessor functions.
-func NewTraceConsumer[T any](opts ...TraceAccessorOption[T]) *TraceAccessor[T] {
+// NewTraceAccessor creates a TraceAccessor configured with the provided accessor functions.
+func NewTraceAccessor[T any](opts ...TraceAccessorOption[T]) *TraceAccessor[T] {
 	a := &TraceAccessor[T]{}
 	for _, opt := range opts {
 		opt(a)

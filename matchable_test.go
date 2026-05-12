@@ -9,17 +9,18 @@ import (
 )
 
 // simpleLogTransform is a tiny shim that exercises ApplyLogTransform against
-// SimpleLogConsumer. Tests use it to verify the engine's transform
-// orchestration end-to-end on the reference simple-record consumer.
+// the reference SimpleLog* accessor functions. Tests use it to verify the
+// engine's transform orchestration end-to-end without going through
+// EvaluateLog.
 func simpleLogTransform(r *SimpleLogRecord, op TransformOp) bool {
-	return ApplyLogTransform(r, op, NewSimpleLogConsumer().LogAccessor)
+	return ApplyLogTransform(r, op, NewSimpleLogAccessor())
 }
 
 // ============================================================================
 // Matchers — field/attribute extraction
 // ============================================================================
 
-func TestSimpleMetricConsumerValue(t *testing.T) {
+func TestSimpleMetricGetValue(t *testing.T) {
 	record := &SimpleMetricRecord{
 		Name:                   []byte("http.request.duration"),
 		Description:            []byte("Duration of HTTP requests"),
@@ -48,16 +49,12 @@ func TestSimpleMetricConsumerValue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, NewMetricConsumer(
-				WithMetricValue(func(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
-					return SimpleMetricConsumer{}.Value(r, ref)
-				}),
-			).Value(record, tc.ref))
+			assert.Equal(t, tc.want, SimpleMetricGetValue(record, tc.ref))
 		})
 	}
 }
 
-func TestSimpleSpanConsumerValue(t *testing.T) {
+func TestSimpleSpanGetValue(t *testing.T) {
 	record := &SimpleSpanRecord{
 		Name:         []byte("GET /api/users"),
 		TraceID:      []byte("trace-abc123"),
@@ -101,12 +98,12 @@ func TestSimpleSpanConsumerValue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, SimpleSpanConsumer{}.Value(record, tc.ref))
+			assert.Equal(t, tc.want, SimpleSpanGetValue(record, tc.ref))
 		})
 	}
 }
 
-func TestSimpleSpanConsumerValueWithoutEventsOrLinks(t *testing.T) {
+func TestSimpleSpanGetValueWithoutEventsOrLinks(t *testing.T) {
 	record := &SimpleSpanRecord{Name: []byte("test span")}
 	cases := []struct {
 		name string
@@ -119,7 +116,7 @@ func TestSimpleSpanConsumerValueWithoutEventsOrLinks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Nil(t, SimpleSpanConsumer{}.Value(record, tc.ref))
+			assert.Nil(t, SimpleSpanGetValue(record, tc.ref))
 		})
 	}
 }
@@ -154,7 +151,7 @@ func TestTraversePath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, SimpleLogConsumer{}.Value(tc.record, tc.ref))
+			assert.Equal(t, tc.want, SimpleLogGetValue(tc.record, tc.ref))
 		})
 	}
 }

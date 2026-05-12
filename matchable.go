@@ -4,8 +4,10 @@ package policy
 // LOG RECORDS
 // ============================================================================
 
-// SimpleLogRecord is a simple implementation for testing that works with LogMatchFunc.
-// Attribute maps support nested structures via map[string]any values.
+// SimpleLogRecord is a reference log record used by the package's tests and
+// examples. Attribute maps support nested structures via map[string]any values.
+// Wire it up with NewSimpleLogAccessor or call the SimpleLog* accessor
+// functions directly.
 type SimpleLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
@@ -19,16 +21,9 @@ type SimpleLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-// SimpleLogConsumer adapts *SimpleLogRecord to the policy engine. The
-// Value/Exists/Set/Delete/Move methods can be invoked directly on a zero
-// value; NewSimpleLogConsumer wires those same methods into the embedded
-// LogAccessor for use with EvaluateLog.
-type SimpleLogConsumer struct {
-	*LogAccessor[*SimpleLogRecord]
-}
-
-// Value returns the field/attribute value as bytes, or nil if absent.
-func (SimpleLogConsumer) Value(r *SimpleLogRecord, ref LogFieldRef) []byte {
+// SimpleLogGetValue returns the field/attribute value as bytes, or nil if absent.
+// Pass it as the WithLogValue option when wiring a LogAccessor for *SimpleLogRecord.
+func SimpleLogGetValue(r *SimpleLogRecord, ref LogFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
 		case LogFieldBody:
@@ -52,8 +47,8 @@ func (SimpleLogConsumer) Value(r *SimpleLogRecord, ref LogFieldRef) []byte {
 	return traversePath(simpleLogAttrs(r, ref), ref.AttrPath)
 }
 
-// Exists reports whether the field/attribute is present.
-func (SimpleLogConsumer) Exists(r *SimpleLogRecord, ref LogFieldRef) bool {
+// SimpleLogHasValue reports whether the field/attribute is present.
+func SimpleLogHasValue(r *SimpleLogRecord, ref LogFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
 		case LogFieldBody:
@@ -82,8 +77,8 @@ func (SimpleLogConsumer) Exists(r *SimpleLogRecord, ref LogFieldRef) bool {
 	return ok
 }
 
-// Set writes value at ref, creating the attribute map if needed.
-func (SimpleLogConsumer) Set(r *SimpleLogRecord, ref LogFieldRef, value string) {
+// SimpleLogSetValue writes value at ref, creating the attribute map if needed.
+func SimpleLogSetValue(r *SimpleLogRecord, ref LogFieldRef, value string) {
 	if ref.IsField() {
 		switch ref.Field {
 		case LogFieldBody:
@@ -109,8 +104,8 @@ func (SimpleLogConsumer) Set(r *SimpleLogRecord, ref LogFieldRef, value string) 
 	}
 }
 
-// Delete removes the field/attribute. Returns true if it existed.
-func (SimpleLogConsumer) Delete(r *SimpleLogRecord, ref LogFieldRef) bool {
+// SimpleLogDeleteValue removes the field/attribute. Returns true if it existed.
+func SimpleLogDeleteValue(r *SimpleLogRecord, ref LogFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
 		case LogFieldBody:
@@ -147,8 +142,8 @@ func (SimpleLogConsumer) Delete(r *SimpleLogRecord, ref LogFieldRef) bool {
 	return false
 }
 
-// Move transfers the value at from to to.
-func (SimpleLogConsumer) Move(r *SimpleLogRecord, from, to LogFieldRef) {
+// SimpleLogMoveValue transfers the value at from to to.
+func SimpleLogMoveValue(r *SimpleLogRecord, from, to LogFieldRef) {
 	fromAttrs := simpleLogAttrs(r, from)
 	if fromAttrs == nil || len(from.AttrPath) == 0 {
 		return
@@ -167,253 +162,16 @@ func (SimpleLogConsumer) Move(r *SimpleLogRecord, from, to LogFieldRef) {
 	}
 }
 
-// NewSimpleLogConsumer creates a configured LogConsumer for *SimpleLogRecord.
-func NewSimpleLogConsumer() *SimpleLogConsumer {
-	s := SimpleLogConsumer{}
-	s.LogAccessor = NewLogConsumer[*SimpleLogRecord](
-		WithLogValue(s.Value),
-		WithLogExists(s.Exists),
-		WithLogSet(s.Set),
-		WithLogDelete(s.Delete),
-		WithLogMove(s.Move),
+// NewSimpleLogAccessor returns a LogAccessor for *SimpleLogRecord wired with
+// the SimpleLog* accessor functions.
+func NewSimpleLogAccessor() *LogAccessor[*SimpleLogRecord] {
+	return NewLogAccessor[*SimpleLogRecord](
+		WithLogValue(SimpleLogGetValue),
+		WithLogExists(SimpleLogHasValue),
+		WithLogSet(SimpleLogSetValue),
+		WithLogDelete(SimpleLogDeleteValue),
+		WithLogMove(SimpleLogMoveValue),
 	)
-	return &s
-}
-
-// SimpleLogMatcher is a LogMatchFunc implementation for SimpleLogRecord.
-func SimpleLogMatcher(r *SimpleLogRecord, ref LogFieldRef) []byte {
-	if ref.IsField() {
-		switch ref.Field {
-		case LogFieldBody:
-			return r.Body
-		case LogFieldSeverityText:
-			return r.SeverityText
-		case LogFieldTraceID:
-			return r.TraceID
-		case LogFieldSpanID:
-			return r.SpanID
-		case LogFieldEventName:
-			return r.EventName
-		case LogFieldResourceSchemaURL:
-			return r.ResourceSchemaURL
-		case LogFieldScopeSchemaURL:
-			return r.ScopeSchemaURL
-		default:
-			return nil
-		}
-	}
-
-	// Attribute lookup
-	var attrs map[string]any
-	switch {
-	case ref.IsRecordAttr():
-		attrs = r.LogAttributes
-	case ref.IsResourceAttr():
-		attrs = r.ResourceAttributes
-	case ref.IsScopeAttr():
-		attrs = r.ScopeAttributes
-	default:
-		return nil
-	}
-	return traversePath(attrs, ref.AttrPath)
-}
-
-// SimpleLogTransformer is a LogTransformFunc implementation for SimpleLogRecord.
-// It applies transform operations by mutating the record in place.
-// Returns true if the targeted field was present (hit), false if absent (miss).
-func SimpleLogTransformer(r *SimpleLogRecord, op TransformOp) bool {
-	switch op.Kind {
-	case TransformRemove:
-		return simpleLogRemove(r, op.Ref)
-	case TransformRedact:
-		return simpleLogRedact(r, op)
-	case TransformRename:
-		return simpleLogRename(r, op.Ref, op.To, op.Upsert)
-	case TransformAdd:
-		return simpleLogAdd(r, op.Ref, op.Value, op.Upsert)
-	}
-	return false
-}
-
-func simpleLogRemove(r *SimpleLogRecord, ref LogFieldRef) bool {
-	if ref.IsField() {
-		switch ref.Field {
-		case LogFieldBody:
-			hit := r.Body != nil
-			r.Body = nil
-			return hit
-		case LogFieldSeverityText:
-			hit := r.SeverityText != nil
-			r.SeverityText = nil
-			return hit
-		case LogFieldTraceID:
-			hit := r.TraceID != nil
-			r.TraceID = nil
-			return hit
-		case LogFieldSpanID:
-			hit := r.SpanID != nil
-			r.SpanID = nil
-			return hit
-		case LogFieldEventName:
-			hit := r.EventName != nil
-			r.EventName = nil
-			return hit
-		}
-		return false
-	}
-	attrs := simpleLogAttrs(r, ref)
-	if attrs == nil {
-		return false
-	}
-	_, exists := getPath(attrs, ref.AttrPath)
-	deletePath(attrs, ref.AttrPath)
-	return exists
-}
-
-func simpleLogRedact(r *SimpleLogRecord, op TransformOp) bool {
-	ref := op.Ref
-	if ref.IsField() {
-		return simpleLogRedactField(r, ref.Field, op)
-	}
-	attrs := simpleLogAttrs(r, ref)
-	if attrs == nil {
-		return false
-	}
-	cur, exists := getPath(attrs, ref.AttrPath)
-	if !exists {
-		return false
-	}
-	if op.Regex != nil {
-		// Targeted redaction: requires a string value and a match.
-		curStr, ok := cur.(string)
-		if !ok {
-			return false
-		}
-		if !op.Regex.MatchString(curStr) {
-			return false
-		}
-		setPath(attrs, ref.AttrPath, op.Regex.ReplaceAllString(curStr, op.Value))
-		return true
-	}
-	setPath(attrs, ref.AttrPath, op.Value)
-	return true
-}
-
-// simpleLogRedactField redacts a fixed log field. Fixed fields are stored as
-// []byte and treated as strings for regex redaction.
-func simpleLogRedactField(r *SimpleLogRecord, field LogField, op TransformOp) bool {
-	target := simpleLogFieldPtr(r, field)
-	if target == nil {
-		return false
-	}
-	if *target == nil {
-		return false
-	}
-	if op.Regex != nil {
-		curStr := string(*target)
-		if !op.Regex.MatchString(curStr) {
-			return false
-		}
-		*target = []byte(op.Regex.ReplaceAllString(curStr, op.Value))
-		return true
-	}
-	*target = []byte(op.Value)
-	return true
-}
-
-// simpleLogFieldPtr returns a pointer to the backing []byte for a fixed log
-// field, or nil if the field is not redactable.
-func simpleLogFieldPtr(r *SimpleLogRecord, field LogField) *[]byte {
-	switch field {
-	case LogFieldBody:
-		return &r.Body
-	case LogFieldSeverityText:
-		return &r.SeverityText
-	case LogFieldTraceID:
-		return &r.TraceID
-	case LogFieldSpanID:
-		return &r.SpanID
-	case LogFieldEventName:
-		return &r.EventName
-	}
-	return nil
-}
-
-func simpleLogRename(r *SimpleLogRecord, ref LogFieldRef, to string, upsert bool) bool {
-	if ref.IsField() {
-		// Renaming a fixed field to an attribute: not supported in simple impl
-		return false
-	}
-	attrs := simpleLogAttrs(r, ref)
-	if attrs == nil {
-		return false
-	}
-	val, ok := getPath(attrs, ref.AttrPath)
-	if !ok {
-		return false
-	}
-	if !upsert {
-		if _, exists := attrs[to]; exists {
-			return true // source existed but target blocked
-		}
-	}
-	deletePath(attrs, ref.AttrPath)
-	attrs[to] = val
-	return true
-}
-
-func simpleLogAdd(r *SimpleLogRecord, ref LogFieldRef, value string, upsert bool) bool {
-	if ref.IsField() {
-		val := []byte(value)
-		if !upsert {
-			switch ref.Field {
-			case LogFieldBody:
-				if r.Body != nil {
-					return true
-				}
-			case LogFieldSeverityText:
-				if r.SeverityText != nil {
-					return true
-				}
-			case LogFieldTraceID:
-				if r.TraceID != nil {
-					return true
-				}
-			case LogFieldSpanID:
-				if r.SpanID != nil {
-					return true
-				}
-			case LogFieldEventName:
-				if r.EventName != nil {
-					return true
-				}
-			}
-		}
-		switch ref.Field {
-		case LogFieldBody:
-			r.Body = val
-		case LogFieldSeverityText:
-			r.SeverityText = val
-		case LogFieldTraceID:
-			r.TraceID = val
-		case LogFieldSpanID:
-			r.SpanID = val
-		case LogFieldEventName:
-			r.EventName = val
-		}
-		return true
-	}
-	attrs := simpleLogEnsureAttrs(r, ref)
-	if attrs == nil {
-		return false
-	}
-	if !upsert {
-		if _, exists := attrs[ref.AttrPath[0]]; exists {
-			return true
-		}
-	}
-	setPath(attrs, ref.AttrPath, value)
-	return true
 }
 
 // simpleLogAttrs returns the attribute map for the given ref scope, or nil.
@@ -509,8 +267,8 @@ func getPath(m map[string]any, path []string) (any, bool) {
 // METRIC RECORDS
 // ============================================================================
 
-// SimpleMetricRecord is a simple implementation for testing that works with MetricMatchFunc.
-// Attribute maps support nested structures via map[string]any values.
+// SimpleMetricRecord is a reference metric record used by the package's tests
+// and examples. Wire it up with NewSimpleMetricAccessor.
 type SimpleMetricRecord struct {
 	Name                   []byte
 	Description            []byte
@@ -526,15 +284,8 @@ type SimpleMetricRecord struct {
 	ScopeAttributes        map[string]any
 }
 
-// SimpleMetricConsumer adapts *SimpleMetricRecord to the policy engine.
-// Value/Exists can be invoked directly on a zero value; NewSimpleMetricConsumer
-// wires those methods into the embedded MetricAccessor.
-type SimpleMetricConsumer struct {
-	*MetricAccessor[*SimpleMetricRecord]
-}
-
-// Value returns the field/attribute value as bytes, or nil if absent.
-func (SimpleMetricConsumer) Value(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
+// SimpleMetricGetValue returns the field/attribute value as bytes, or nil if absent.
+func SimpleMetricGetValue(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
 		case MetricFieldName:
@@ -562,8 +313,8 @@ func (SimpleMetricConsumer) Value(r *SimpleMetricRecord, ref MetricFieldRef) []b
 	return traversePath(simpleMetricAttrs(r, ref), ref.AttrPath)
 }
 
-// Exists reports whether the field/attribute is present.
-func (SimpleMetricConsumer) Exists(r *SimpleMetricRecord, ref MetricFieldRef) bool {
+// SimpleMetricHasValue reports whether the field/attribute is present.
+func SimpleMetricHasValue(r *SimpleMetricRecord, ref MetricFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
 		case MetricFieldName:
@@ -610,64 +361,21 @@ func simpleMetricAttrs(r *SimpleMetricRecord, ref MetricFieldRef) map[string]any
 	}
 }
 
-// NewSimpleMetricConsumer creates a configured MetricConsumer for *SimpleMetricRecord.
-func NewSimpleMetricConsumer() *SimpleMetricConsumer {
-	s := SimpleMetricConsumer{}
-	s.MetricAccessor = NewMetricConsumer[*SimpleMetricRecord](
-		WithMetricValue(s.Value),
-		WithMetricExists(s.Exists),
+// NewSimpleMetricAccessor returns a MetricAccessor for *SimpleMetricRecord
+// wired with the SimpleMetric* accessor functions.
+func NewSimpleMetricAccessor() *MetricAccessor[*SimpleMetricRecord] {
+	return NewMetricAccessor[*SimpleMetricRecord](
+		WithMetricValue(SimpleMetricGetValue),
+		WithMetricExists(SimpleMetricHasValue),
 	)
-	return &s
-}
-
-// SimpleMetricMatcher is a MetricMatchFunc implementation for SimpleMetricRecord.
-func SimpleMetricMatcher(r *SimpleMetricRecord, ref MetricFieldRef) []byte {
-	if ref.IsField() {
-		switch ref.Field {
-		case MetricFieldName:
-			return r.Name
-		case MetricFieldDescription:
-			return r.Description
-		case MetricFieldUnit:
-			return r.Unit
-		case MetricFieldType:
-			return r.Type
-		case MetricFieldAggregationTemporality:
-			return r.AggregationTemporality
-		case MetricFieldScopeName:
-			return r.ScopeName
-		case MetricFieldScopeVersion:
-			return r.ScopeVersion
-		case MetricFieldResourceSchemaURL:
-			return r.ResourceSchemaURL
-		case MetricFieldScopeSchemaURL:
-			return r.ScopeSchemaURL
-		default:
-			return nil
-		}
-	}
-
-	// Attribute lookup
-	var attrs map[string]any
-	switch {
-	case ref.IsRecordAttr():
-		attrs = r.DatapointAttributes
-	case ref.IsResourceAttr():
-		attrs = r.ResourceAttributes
-	case ref.IsScopeAttr():
-		attrs = r.ScopeAttributes
-	default:
-		return nil
-	}
-	return traversePath(attrs, ref.AttrPath)
 }
 
 // ============================================================================
 // TRACE/SPAN RECORDS
 // ============================================================================
 
-// SimpleSpanRecord is a simple implementation for testing that works with TraceMatchFunc.
-// Attribute maps support nested structures via map[string]any values.
+// SimpleSpanRecord is a reference span record used by the package's tests and
+// examples. Wire it up with NewSimpleSpanAccessor.
 type SimpleSpanRecord struct {
 	Name               []byte
 	TraceID            []byte
@@ -689,15 +397,8 @@ type SimpleSpanRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-// SimpleSpanConsumer adapts *SimpleSpanRecord to the policy engine.
-// Value/Exists/Set can be invoked directly on a zero value;
-// NewSimpleSpanConsumer wires those methods into the embedded TraceAccessor.
-type SimpleSpanConsumer struct {
-	*TraceAccessor[*SimpleSpanRecord]
-}
-
-// Value returns the field/attribute value as bytes, or nil if absent.
-func (SimpleSpanConsumer) Value(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
+// SimpleSpanGetValue returns the field/attribute value as bytes, or nil if absent.
+func SimpleSpanGetValue(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
 		case TraceFieldName:
@@ -739,8 +440,8 @@ func (SimpleSpanConsumer) Value(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
 	return traversePath(simpleSpanAttrs(r, ref), ref.AttrPath)
 }
 
-// Exists reports whether the field/attribute is present.
-func (SimpleSpanConsumer) Exists(r *SimpleSpanRecord, ref TraceFieldRef) bool {
+// SimpleSpanHasValue reports whether the field/attribute is present.
+func SimpleSpanHasValue(r *SimpleSpanRecord, ref TraceFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
 		case TraceFieldName:
@@ -781,10 +482,10 @@ func (SimpleSpanConsumer) Exists(r *SimpleSpanRecord, ref TraceFieldRef) bool {
 	return ok
 }
 
-// Set writes value at ref. The sampling-threshold virtual field is a no-op
-// — it lives in tracestate, which this simple consumer doesn't model
-// separately, and the test consumers can override Set themselves.
-func (SimpleSpanConsumer) Set(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
+// SimpleSpanSetValue writes value at ref. The sampling-threshold virtual
+// field is intentionally a no-op here — it lives in tracestate, which this
+// simple span doesn't model separately. Consumers that care can wrap Set.
+func SimpleSpanSetValue(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
 	if ref.IsField() {
 		switch ref.Field {
 		case TraceFieldName:
@@ -844,15 +545,14 @@ func simpleSpanEnsureAttrs(r *SimpleSpanRecord, ref TraceFieldRef) map[string]an
 	}
 }
 
-// NewSimpleSpanConsumer creates a configured TraceConsumer for *SimpleSpanRecord.
-func NewSimpleSpanConsumer() *SimpleSpanConsumer {
-	s := SimpleSpanConsumer{}
-	s.TraceAccessor = NewTraceConsumer[*SimpleSpanRecord](
-		WithTraceValue(s.Value),
-		WithTraceExists(s.Exists),
-		WithTraceSet(s.Set),
+// NewSimpleSpanAccessor returns a TraceAccessor for *SimpleSpanRecord wired
+// with the SimpleSpan* accessor functions.
+func NewSimpleSpanAccessor() *TraceAccessor[*SimpleSpanRecord] {
+	return NewTraceAccessor[*SimpleSpanRecord](
+		WithTraceValue(SimpleSpanGetValue),
+		WithTraceExists(SimpleSpanHasValue),
+		WithTraceSet(SimpleSpanSetValue),
 	)
-	return &s
 }
 
 // simpleSpanAttrs returns the attribute map for the given ref scope, or nil.
@@ -879,73 +579,6 @@ func simpleSpanAttrs(r *SimpleSpanRecord, ref TraceFieldRef) map[string]any {
 	}
 }
 
-// SimpleSpanMatcher is a TraceMatchFunc implementation for SimpleSpanRecord.
-func SimpleSpanMatcher(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
-	if ref.IsField() {
-		switch ref.Field {
-		case TraceFieldName:
-			return r.Name
-		case TraceFieldTraceID:
-			return r.TraceID
-		case TraceFieldSpanID:
-			return r.SpanID
-		case TraceFieldParentSpanID:
-			return r.ParentSpanID
-		case TraceFieldTraceState:
-			return r.TraceState
-		case TraceFieldKind:
-			return r.Kind
-		case TraceFieldStatus:
-			return r.Status
-		case TraceFieldScopeName:
-			return r.ScopeName
-		case TraceFieldScopeVersion:
-			return r.ScopeVersion
-		case TraceFieldResourceSchemaURL:
-			return r.ResourceSchemaURL
-		case TraceFieldScopeSchemaURL:
-			return r.ScopeSchemaURL
-		case TraceFieldEventName:
-			// Return first event name if available
-			if len(r.EventNames) > 0 {
-				return r.EventNames[0]
-			}
-			return nil
-		case TraceFieldLinkTraceID:
-			// Return first link trace ID if available
-			if len(r.LinkTraceIDs) > 0 {
-				return r.LinkTraceIDs[0]
-			}
-			return nil
-		default:
-			return nil
-		}
-	}
-
-	// Attribute lookup
-	var attrs map[string]any
-	switch {
-	case ref.IsRecordAttr():
-		attrs = r.SpanAttributes
-	case ref.IsResourceAttr():
-		attrs = r.ResourceAttributes
-	case ref.IsScopeAttr():
-		attrs = r.ScopeAttributes
-	case ref.IsEventAttr():
-		// Return first event's attribute if available
-		if len(r.EventAttributes) > 0 {
-			attrs = r.EventAttributes[0]
-		}
-	case ref.IsLinkAttr():
-		// Return first link's attribute if available
-		if len(r.LinkAttributes) > 0 {
-			attrs = r.LinkAttributes[0]
-		}
-	default:
-		return nil
-	}
-	return traversePath(attrs, ref.AttrPath)
-}
 
 // traversePath navigates through nested maps following the path segments.
 func traversePath(m map[string]any, path []string) []byte {
