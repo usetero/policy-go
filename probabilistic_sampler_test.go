@@ -232,72 +232,8 @@ func TestShouldSampleTraceHashSeedZero(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	result1, _, _ := shouldSampleTrace(policy, span, NewTraceAccessor(
-		WithTraceValue(func(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID
-				case TraceFieldTraceState:
-					return r.TraceState
-				default:
-					return nil
-				}
-			}
-			return nil
-		}),
-		WithTraceExists(func(r *SimpleSpanRecord, ref TraceFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID != nil
-				case TraceFieldTraceState:
-					return r.TraceState != nil
-				default:
-					return false
-				}
-			}
-			return false
-		}),
-		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-			if ref.IsField() && ref.Field == TraceFieldTraceState {
-				r.TraceState = []byte(value)
-			}
-		}),
-	))
-	result2, _, _ := shouldSampleTrace(policy, span, NewTraceAccessor(
-		WithTraceValue(func(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID
-				case TraceFieldTraceState:
-					return r.TraceState
-				default:
-					return nil
-				}
-			}
-			return nil
-		}),
-		WithTraceExists(func(r *SimpleSpanRecord, ref TraceFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID != nil
-				case TraceFieldTraceState:
-					return r.TraceState != nil
-				default:
-					return false
-				}
-			}
-			return false
-		}),
-		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-			if ref.IsField() && ref.Field == TraceFieldTraceState {
-				r.TraceState = []byte(value)
-			}
-		}),
-	))
+	result1, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
+	result2, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.Equal(t, result1, result2, "deterministic for same trace ID")
 }
 
@@ -310,72 +246,8 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 	}
 
 	// Same seed → same result
-	r1a, _, _ := shouldSampleTrace(policy1, span, NewTraceAccessor(
-		WithTraceValue(func(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID
-				case TraceFieldTraceState:
-					return r.TraceState
-				default:
-					return nil
-				}
-			}
-			return nil
-		}),
-		WithTraceExists(func(r *SimpleSpanRecord, ref TraceFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID != nil
-				case TraceFieldTraceState:
-					return r.TraceState != nil
-				default:
-					return false
-				}
-			}
-			return false
-		}),
-		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-			if ref.IsField() && ref.Field == TraceFieldTraceState {
-				r.TraceState = []byte(value)
-			}
-		}),
-	))
-	r1b, _, _ := shouldSampleTrace(policy1, span, NewTraceAccessor(
-		WithTraceValue(func(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID
-				case TraceFieldTraceState:
-					return r.TraceState
-				default:
-					return nil
-				}
-			}
-			return nil
-		}),
-		WithTraceExists(func(r *SimpleSpanRecord, ref TraceFieldRef) bool {
-			if ref.IsField() {
-				switch ref.Field {
-				case TraceFieldTraceID:
-					return r.TraceID != nil
-				case TraceFieldTraceState:
-					return r.TraceState != nil
-				default:
-					return false
-				}
-			}
-			return false
-		}),
-		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-			if ref.IsField() && ref.Field == TraceFieldTraceState {
-				r.TraceState = []byte(value)
-			}
-		}),
-	))
+	r1a, _, _ := shouldSampleTrace(policy1, span, buildTraceAccessor(SimpleSpanOptions()))
+	r1b, _, _ := shouldSampleTrace(policy1, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.Equal(t, r1a, r1b, "same seed should be deterministic")
 
 	// Different seeds may produce different results (test with many trace IDs)
@@ -384,40 +256,8 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 		s := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		r1, _, _ := shouldSampleTrace(policy1, s, NewTraceAccessor(
-			WithTraceValue(func(r *SimpleSpanRecord, ref TraceFieldRef) []byte {
-				if ref.IsField() {
-					switch ref.Field {
-					case TraceFieldTraceID:
-						return r.TraceID
-					case TraceFieldTraceState:
-						return r.TraceState
-					default:
-						return nil
-					}
-				}
-				return nil
-			}),
-			WithTraceExists(func(r *SimpleSpanRecord, ref TraceFieldRef) bool {
-				if ref.IsField() {
-					switch ref.Field {
-					case TraceFieldTraceID:
-						return r.TraceID != nil
-					case TraceFieldTraceState:
-						return r.TraceState != nil
-					default:
-						return false
-					}
-				}
-				return false
-			}),
-			WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
-				if ref.IsField() && ref.Field == TraceFieldTraceState {
-					r.TraceState = []byte(value)
-				}
-			}),
-		))
-		r2, _, _ := shouldSampleTrace(policy2, s, NewSimpleSpanAccessor())
+		r1, _, _ := shouldSampleTrace(policy1, s, buildTraceAccessor(SimpleSpanOptions()))
+		r2, _, _ := shouldSampleTrace(policy2, s, buildTraceAccessor(SimpleSpanOptions()))
 		if r1 != r2 {
 			differentCount++
 		}
@@ -433,7 +273,7 @@ func TestShouldSampleTraceHashSeedDistribution(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor()); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -458,7 +298,7 @@ func TestShouldSampleTraceProportional(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor()); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -480,7 +320,7 @@ func TestShouldSampleTraceProportionalNoThreshold(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor()); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -500,7 +340,7 @@ func TestShouldSampleTraceEqualizing(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor()); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -524,7 +364,7 @@ func TestShouldSampleTraceEqualizingHigherIncoming(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor()); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -537,7 +377,7 @@ func TestShouldSampleTraceFailClosed(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, true)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.False(t, keep, "fail_closed should drop when no randomness")
 }
 
@@ -546,7 +386,7 @@ func TestShouldSampleTraceFailOpen(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, false)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.True(t, keep, "fail_open should keep when no randomness")
 }
 
@@ -555,7 +395,7 @@ func TestShouldSampleTraceProportionalFailClosed(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL, 0, true)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.False(t, keep, "proportional fail_closed should drop when no randomness")
 }
 
@@ -564,7 +404,7 @@ func TestShouldSampleTraceEqualizingFailOpen(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING, 0, false)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	keep, _, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.True(t, keep, "equalizing fail_open should keep when no randomness")
 }
 
@@ -607,7 +447,7 @@ func TestShouldSampleTraceReturnsThreshold(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	_, threshold, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	_, threshold, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.Equal(t, calculateRejectionThreshold(50), threshold)
 }
 
@@ -617,7 +457,7 @@ func TestShouldSampleTrace100PercentReturnsZeroThreshold(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	keep, threshold, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	keep, threshold, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.True(t, keep)
 	assert.Equal(t, uint64(0), threshold)
 }
@@ -632,7 +472,7 @@ func TestShouldSampleTraceEqualizingReturnsIncomingThreshold(t *testing.T) {
 		TraceState: traceState,
 	}
 
-	keep, threshold, _ := shouldSampleTrace(policy, span, NewSimpleSpanAccessor())
+	keep, threshold, _ := shouldSampleTrace(policy, span, buildTraceAccessor(SimpleSpanOptions()))
 	assert.True(t, keep)
 	assert.Equal(t, uint64(0xe6666666666666), threshold, "should return incoming threshold when T_s > T_d")
 }

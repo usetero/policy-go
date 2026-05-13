@@ -71,12 +71,39 @@ func NewPolicyEngine(registry *PolicyRegistry) *PolicyEngine {
 // LOG EVALUATION
 // ============================================================================
 
+// buildLogAccessor assembles a LogAccessor from the supplied options.
+func buildLogAccessor[T any](opts []LogOption[T]) *engine.LogAccessor[T] {
+	var a engine.LogAccessor[T]
+	for _, opt := range opts {
+		opt(&a)
+	}
+	return &a
+}
+
+// buildMetricAccessor assembles a MetricAccessor from the supplied options.
+func buildMetricAccessor[T any](opts []MetricOption[T]) *engine.MetricAccessor[T] {
+	var a engine.MetricAccessor[T]
+	for _, opt := range opts {
+		opt(&a)
+	}
+	return &a
+}
+
+// buildTraceAccessor assembles a TraceAccessor from the supplied options.
+func buildTraceAccessor[T any](opts []TraceOption[T]) *engine.TraceAccessor[T] {
+	var a engine.TraceAccessor[T]
+	for _, opt := range opts {
+		opt(&a)
+	}
+	return &a
+}
+
 // EvaluateLog checks a log record against the current policies and returns
-// the result. The accessor's Value/Exists methods drive matching; if the
-// winning policy has transforms, the engine applies them via the accessor's
-// Set/Delete/Move functions. Consumers that don't want mutation can leave
-// those functions nil (or set them as no-ops).
-func EvaluateLog[T any](e *PolicyEngine, record T, c *engine.LogAccessor[T]) EvaluateResult {
+// the result. The Value/Exists options drive matching; if the winning policy
+// has transforms, the engine applies them via the Set/Delete/Move options.
+// Consumers that don't want mutation can omit those options.
+func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) EvaluateResult {
+	c := buildLogAccessor(opts)
 	snapshot := e.registry.LogSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -290,8 +317,9 @@ func recordMatchStats[T engine.FieldType](matchers *engine.CompiledMatchers[T], 
 // ============================================================================
 
 // EvaluateMetric checks a metric against the current policies and returns
-// the result. The consumer's Value/Exists methods drive matching.
-func EvaluateMetric[T any](e *PolicyEngine, metric T, c *engine.MetricAccessor[T]) EvaluateResult {
+// the result. The Value/Exists options drive matching.
+func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) EvaluateResult {
+	c := buildMetricAccessor(opts)
 	snapshot := e.registry.MetricSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -448,10 +476,11 @@ func applyKeepActionMetric(policy *engine.CompiledPolicy[engine.MetricField], ma
 // ============================================================================
 
 // EvaluateTrace checks a span against the current policies and returns
-// the result. The consumer's Value/Exists methods drive matching; after a
-// sampling decision, the engine writes the effective threshold back through
-// the consumer's Set method (using SpanSamplingThreshold() as the ref).
-func EvaluateTrace[T any](e *PolicyEngine, span T, c *engine.TraceAccessor[T]) EvaluateResult {
+// the result. The Value/Exists options drive matching; after a sampling
+// decision, the engine writes the effective threshold back through the
+// Set option (using SpanSamplingThreshold() as the ref).
+func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) EvaluateResult {
+	c := buildTraceAccessor(opts)
 	snapshot := e.registry.TraceSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch

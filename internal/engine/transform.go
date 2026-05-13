@@ -27,8 +27,9 @@ type TransformOp struct {
 	Regex  *regexp.Regexp // optional compiled regex for targeted redaction (redact only)
 }
 
-// LogAccessor holds the accessor functions for log record operations.
-// Use NewLogAccessor with WithLog* options to configure it.
+// LogAccessor bundles the per-record accessor functions the engine needs to
+// evaluate log policies. Callers don't construct it directly — they pass
+// LogOption values to EvaluateLog, which assembles a LogAccessor internally.
 type LogAccessor[T any] struct {
 	// Value returns the field's string value as bytes for pattern matching.
 	// Return nil when the field is absent OR when its underlying value is not a string.
@@ -47,57 +48,8 @@ type LogAccessor[T any] struct {
 	Move func(rec T, from, to LogFieldRef)
 }
 
-// NewLogAccessor creates a LogAccessor configured with the provided accessor
-// functions. Functions are optional; the ones the engine needs depend on the
-// policy — ApplyLogTransform panics if a required accessor is nil.
-func NewLogAccessor[T any](opts ...LogAccessorOption[T]) *LogAccessor[T] {
-	a := &LogAccessor[T]{}
-	for _, opt := range opts {
-		opt(a)
-	}
-	return a
-}
-
-// LogAccessorOption configures a LogAccessor.
-type LogAccessorOption[T any] func(*LogAccessor[T])
-
-// WithLogValue sets the Value accessor function.
-func WithLogValue[T any](f func(T, LogFieldRef) []byte) LogAccessorOption[T] {
-	return func(a *LogAccessor[T]) {
-		a.Value = f
-	}
-}
-
-// WithLogExists sets the Exists accessor function.
-func WithLogExists[T any](f func(T, LogFieldRef) bool) LogAccessorOption[T] {
-	return func(a *LogAccessor[T]) {
-		a.Exists = f
-	}
-}
-
-// WithLogSet sets the Set accessor function.
-func WithLogSet[T any](f func(T, LogFieldRef, string)) LogAccessorOption[T] {
-	return func(a *LogAccessor[T]) {
-		a.Set = f
-	}
-}
-
-// WithLogDelete sets the Delete accessor function.
-func WithLogDelete[T any](f func(T, LogFieldRef) bool) LogAccessorOption[T] {
-	return func(a *LogAccessor[T]) {
-		a.Delete = f
-	}
-}
-
-// WithLogMove sets the Move accessor function.
-func WithLogMove[T any](f func(T, LogFieldRef, LogFieldRef)) LogAccessorOption[T] {
-	return func(a *LogAccessor[T]) {
-		a.Move = f
-	}
-}
-
-// MetricAccessor holds the accessor functions for metric record operations.
-// Use NewMetricAccessor with WithMetric* options to configure it.
+// MetricAccessor bundles the per-record accessor functions the engine needs to
+// evaluate metric policies.
 type MetricAccessor[T any] struct {
 	// Value returns the field's string value as bytes for pattern matching.
 	Value func(rec T, ref MetricFieldRef) []byte
@@ -106,34 +58,8 @@ type MetricAccessor[T any] struct {
 	Exists func(rec T, ref MetricFieldRef) bool
 }
 
-// NewMetricAccessor creates a MetricAccessor configured with the provided accessor functions.
-func NewMetricAccessor[T any](opts ...MetricAccessorOption[T]) *MetricAccessor[T] {
-	a := &MetricAccessor[T]{}
-	for _, opt := range opts {
-		opt(a)
-	}
-	return a
-}
-
-// MetricAccessorOption configures a MetricAccessor.
-type MetricAccessorOption[T any] func(*MetricAccessor[T])
-
-// WithMetricValue sets the Value accessor function.
-func WithMetricValue[T any](f func(T, MetricFieldRef) []byte) MetricAccessorOption[T] {
-	return func(a *MetricAccessor[T]) {
-		a.Value = f
-	}
-}
-
-// WithMetricExists sets the Exists accessor function.
-func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricAccessorOption[T] {
-	return func(a *MetricAccessor[T]) {
-		a.Exists = f
-	}
-}
-
-// TraceAccessor holds the accessor functions for trace/span record operations.
-// Use NewTraceAccessor with WithTrace* options to configure it.
+// TraceAccessor bundles the per-record accessor functions the engine needs to
+// evaluate trace policies.
 type TraceAccessor[T any] struct {
 	// Value returns the field's string value as bytes for pattern matching.
 	Value func(rec T, ref TraceFieldRef) []byte
@@ -143,39 +69,6 @@ type TraceAccessor[T any] struct {
 
 	// Set writes a string value at ref, creating the field if necessary.
 	Set func(rec T, ref TraceFieldRef, value string)
-}
-
-// NewTraceAccessor creates a TraceAccessor configured with the provided accessor functions.
-func NewTraceAccessor[T any](opts ...TraceAccessorOption[T]) *TraceAccessor[T] {
-	a := &TraceAccessor[T]{}
-	for _, opt := range opts {
-		opt(a)
-	}
-	return a
-}
-
-// TraceAccessorOption configures a TraceAccessor.
-type TraceAccessorOption[T any] func(*TraceAccessor[T])
-
-// WithTraceValue sets the Value accessor function.
-func WithTraceValue[T any](f func(T, TraceFieldRef) []byte) TraceAccessorOption[T] {
-	return func(a *TraceAccessor[T]) {
-		a.Value = f
-	}
-}
-
-// WithTraceExists sets the Exists accessor function.
-func WithTraceExists[T any](f func(T, TraceFieldRef) bool) TraceAccessorOption[T] {
-	return func(a *TraceAccessor[T]) {
-		a.Exists = f
-	}
-}
-
-// WithTraceSet sets the Set accessor function.
-func WithTraceSet[T any](f func(T, TraceFieldRef, string)) TraceAccessorOption[T] {
-	return func(a *TraceAccessor[T]) {
-		a.Set = f
-	}
 }
 
 // ApplyLogTransform applies a single TransformOp using the LogAccessor accessors.

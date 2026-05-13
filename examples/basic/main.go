@@ -121,11 +121,11 @@ func main() {
 	}
 	fmt.Println()
 
-	// Build the accessor once and reuse across evaluations.
-	accessor := policy.NewLogAccessor[*ExampleLogRecord](
+	// Reuse the option slice across evaluations.
+	logOpts := []policy.LogOption[*ExampleLogRecord]{
 		policy.WithLogValue(exampleGetValue),
 		policy.WithLogExists(exampleHasValue),
-	)
+	}
 
 	// Create an engine for evaluation
 	eng := policy.NewPolicyEngine(registry)
@@ -228,7 +228,7 @@ func main() {
 	fmt.Println("Evaluating log records:")
 	fmt.Println("========================")
 	for _, ex := range examples {
-		result := policy.EvaluateLog(eng, ex.record, accessor)
+		result := policy.EvaluateLog(eng, ex.record, logOpts...)
 		fmt.Printf("%-45s -> %s\n", ex.name, result)
 	}
 

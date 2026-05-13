@@ -6,8 +6,8 @@ package policy
 
 // SimpleLogRecord is a reference log record used by the package's tests and
 // examples. Attribute maps support nested structures via map[string]any values.
-// Wire it up with NewSimpleLogAccessor or call the SimpleLog* accessor
-// functions directly.
+// Wire it up by spreading SimpleLogOptions() into EvaluateLog, or call the
+// SimpleLog* accessor functions directly.
 type SimpleLogRecord struct {
 	Body               []byte
 	SeverityText       []byte
@@ -162,16 +162,18 @@ func SimpleLogMoveValue(r *SimpleLogRecord, from, to LogFieldRef) {
 	}
 }
 
-// NewSimpleLogAccessor returns a LogAccessor for *SimpleLogRecord wired with
-// the SimpleLog* accessor functions.
-func NewSimpleLogAccessor() *LogAccessor[*SimpleLogRecord] {
-	return NewLogAccessor[*SimpleLogRecord](
+// SimpleLogOptions returns the LogOption slice that wires *SimpleLogRecord up
+// to the SimpleLog* accessor functions. Spread it into EvaluateLog:
+//
+//	result := policy.EvaluateLog(eng, rec, policy.SimpleLogOptions()...)
+func SimpleLogOptions() []LogOption[*SimpleLogRecord] {
+	return []LogOption[*SimpleLogRecord]{
 		WithLogValue(SimpleLogGetValue),
 		WithLogExists(SimpleLogHasValue),
 		WithLogSet(SimpleLogSetValue),
 		WithLogDelete(SimpleLogDeleteValue),
 		WithLogMove(SimpleLogMoveValue),
-	)
+	}
 }
 
 // simpleLogAttrs returns the attribute map for the given ref scope, or nil.
@@ -268,7 +270,7 @@ func getPath(m map[string]any, path []string) (any, bool) {
 // ============================================================================
 
 // SimpleMetricRecord is a reference metric record used by the package's tests
-// and examples. Wire it up with NewSimpleMetricAccessor.
+// and examples. Wire it up by spreading SimpleMetricOptions() into EvaluateMetric.
 type SimpleMetricRecord struct {
 	Name                   []byte
 	Description            []byte
@@ -361,13 +363,13 @@ func simpleMetricAttrs(r *SimpleMetricRecord, ref MetricFieldRef) map[string]any
 	}
 }
 
-// NewSimpleMetricAccessor returns a MetricAccessor for *SimpleMetricRecord
-// wired with the SimpleMetric* accessor functions.
-func NewSimpleMetricAccessor() *MetricAccessor[*SimpleMetricRecord] {
-	return NewMetricAccessor[*SimpleMetricRecord](
+// SimpleMetricOptions returns the MetricOption slice that wires
+// *SimpleMetricRecord up to the SimpleMetric* accessor functions.
+func SimpleMetricOptions() []MetricOption[*SimpleMetricRecord] {
+	return []MetricOption[*SimpleMetricRecord]{
 		WithMetricValue(SimpleMetricGetValue),
 		WithMetricExists(SimpleMetricHasValue),
-	)
+	}
 }
 
 // ============================================================================
@@ -375,7 +377,7 @@ func NewSimpleMetricAccessor() *MetricAccessor[*SimpleMetricRecord] {
 // ============================================================================
 
 // SimpleSpanRecord is a reference span record used by the package's tests and
-// examples. Wire it up with NewSimpleSpanAccessor.
+// examples. Wire it up by spreading SimpleSpanOptions() into EvaluateTrace.
 type SimpleSpanRecord struct {
 	Name               []byte
 	TraceID            []byte
@@ -545,14 +547,14 @@ func simpleSpanEnsureAttrs(r *SimpleSpanRecord, ref TraceFieldRef) map[string]an
 	}
 }
 
-// NewSimpleSpanAccessor returns a TraceAccessor for *SimpleSpanRecord wired
-// with the SimpleSpan* accessor functions.
-func NewSimpleSpanAccessor() *TraceAccessor[*SimpleSpanRecord] {
-	return NewTraceAccessor[*SimpleSpanRecord](
+// SimpleSpanOptions returns the TraceOption slice that wires *SimpleSpanRecord
+// up to the SimpleSpan* accessor functions.
+func SimpleSpanOptions() []TraceOption[*SimpleSpanRecord] {
+	return []TraceOption[*SimpleSpanRecord]{
 		WithTraceValue(SimpleSpanGetValue),
 		WithTraceExists(SimpleSpanHasValue),
 		WithTraceSet(SimpleSpanSetValue),
-	)
+	}
 }
 
 // simpleSpanAttrs returns the attribute map for the given ref scope, or nil.

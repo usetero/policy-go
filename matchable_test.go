@@ -13,7 +13,7 @@ import (
 // engine's transform orchestration end-to-end without going through
 // EvaluateLog.
 func simpleLogTransform(r *SimpleLogRecord, op TransformOp) bool {
-	return ApplyLogTransform(r, op, NewSimpleLogAccessor())
+	return ApplyLogTransform(r, op, SimpleLogOptions()...)
 }
 
 // ============================================================================

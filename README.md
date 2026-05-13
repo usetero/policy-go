@@ -65,11 +65,9 @@ type LogRecord struct {
     ResourceAttributes map[string]any
 }
 
-// Implement a consumer to extract values and optionally apply transforms.
-// This example only evaluates policies, so writes are no-ops.
-type LogConsumer struct{}
-
-func (LogConsumer) Value(r *LogRecord, ref policy.LogFieldRef) []byte {
+// Accessor functions bridge LogRecord to the engine. This example only
+// evaluates policies, so writes are omitted entirely.
+func logValue(r *LogRecord, ref policy.LogFieldRef) []byte {
     if ref.IsField() {
         switch ref.Field {
         case policy.LogFieldBody:
@@ -82,22 +80,15 @@ func (LogConsumer) Value(r *LogRecord, ref policy.LogFieldRef) []byte {
             return nil
         }
     }
-
     return traversePath(logAttrs(r, ref), ref.AttrPath)
 }
 
-func (c LogConsumer) Exists(r *LogRecord, ref policy.LogFieldRef) bool {
+func logExists(r *LogRecord, ref policy.LogFieldRef) bool {
     if ref.IsField() {
-        return c.Value(r, ref) != nil
+        return logValue(r, ref) != nil
     }
     return existsPath(logAttrs(r, ref), ref.AttrPath)
 }
-
-func (LogConsumer) Set(*LogRecord, policy.LogFieldRef, string) {}
-func (c LogConsumer) Delete(r *LogRecord, ref policy.LogFieldRef) bool {
-    return c.Exists(r, ref)
-}
-func (LogConsumer) Move(*LogRecord, policy.LogFieldRef, policy.LogFieldRef) {}
 
 func logAttrs(r *LogRecord, ref policy.LogFieldRef) map[string]any {
     switch {
@@ -183,7 +174,10 @@ func main() {
         },
     }
 
-    result := policy.EvaluateLog(engine, record, LogConsumer{})
+    result := policy.EvaluateLog(engine, record,
+        policy.WithLogValue(logValue),
+        policy.WithLogExists(logExists),
+    )
     fmt.Printf("Result: %s\n", result) // "drop" if matched by policy
 }
 ```
@@ -216,13 +210,13 @@ to the registry and automatically uses the latest snapshot for each evaluation.
 engine := policy.NewPolicyEngine(registry)
 
 // Evaluate logs
-result := policy.EvaluateLog(engine, logRecord, logConsumer)
+result := policy.EvaluateLog(engine, logRecord, logOpts...)
 
 // Evaluate metrics
-result := policy.EvaluateMetric(engine, metricRecord, metricConsumer)
+result := policy.EvaluateMetric(engine, metricRecord, metricOpts...)
 
 // Evaluate traces/spans
-result := policy.EvaluateTrace(engine, spanRecord, traceConsumer)
+result := policy.EvaluateTrace(engine, spanRecord, traceOpts...)
 
 switch result {
 case policy.ResultNoMatch:
@@ -238,38 +232,37 @@ case policy.ResultSample:
 }
 ```
 
-### Consumers
+### Accessor Options
 
-Consumers adapt your telemetry types to the engine. `Value` returns a string
-field value as bytes for pattern matching. `Exists` reports field presence even
-when the value is not a string. Log and trace consumers also expose write
-primitives used for log transforms and trace sampling threshold write-back.
+You bridge your telemetry types to the engine by passing accessor options
+directly to `EvaluateLog` / `EvaluateMetric` / `EvaluateTrace`. `WithLogValue`
+returns a string field value as bytes for pattern matching; `WithLogExists`
+reports field presence even when the value is not a string. Log and trace
+evaluations also accept write primitives used for log transforms and trace
+sampling threshold write-back.
 
 ```go
-type LogConsumer[T any] interface {
-    Value(record T, ref LogFieldRef) []byte
-    Exists(record T, ref LogFieldRef) bool
-    Set(record T, ref LogFieldRef, value string)
-    Delete(record T, ref LogFieldRef) bool
-    Move(record T, from, to LogFieldRef)
-}
+// Log options
+policy.WithLogValue(func(record T, ref LogFieldRef) []byte { ... })
+policy.WithLogExists(func(record T, ref LogFieldRef) bool { ... })
+policy.WithLogSet(func(record T, ref LogFieldRef, value string) { ... })
+policy.WithLogDelete(func(record T, ref LogFieldRef) bool { ... })
+policy.WithLogMove(func(record T, from, to LogFieldRef) { ... })
 
-type MetricConsumer[T any] interface {
-    Value(record T, ref MetricFieldRef) []byte
-    Exists(record T, ref MetricFieldRef) bool
-}
+// Metric options
+policy.WithMetricValue(func(record T, ref MetricFieldRef) []byte { ... })
+policy.WithMetricExists(func(record T, ref MetricFieldRef) bool { ... })
 
-type TraceConsumer[T any] interface {
-    Value(record T, ref TraceFieldRef) []byte
-    Exists(record T, ref TraceFieldRef) bool
-    Set(record T, ref TraceFieldRef, value string)
-}
+// Trace options
+policy.WithTraceValue(func(record T, ref TraceFieldRef) []byte { ... })
+policy.WithTraceExists(func(record T, ref TraceFieldRef) bool { ... })
+policy.WithTraceSet(func(record T, ref TraceFieldRef, value string) { ... })
 ```
 
-Example log consumer value lookup:
+Example log value lookup:
 
 ```go
-func (MyLogConsumer) Value(r *MyLogRecord, ref policy.LogFieldRef) []byte {
+func myLogValue(r *MyLogRecord, ref policy.LogFieldRef) []byte {
     // Handle field lookups
     if ref.IsField() {
         switch ref.Field {
