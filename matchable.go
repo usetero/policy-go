@@ -579,7 +579,6 @@ func simpleSpanAttrs(r *SimpleSpanRecord, ref TraceFieldRef) map[string]any {
 	}
 }
 
-
 // traversePath navigates through nested maps following the path segments.
 func traversePath(m map[string]any, path []string) []byte {
 	if len(path) == 0 || m == nil {
