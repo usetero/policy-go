@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/usetero/policy-go/compare/v1.6.0...v1.7.0) (2026-05-13)
+
+
+### Features
+
+* support regex from policy 1.4.0 ([#64](https://github.com/usetero/policy-go/issues/64)) ([aec257c](https://github.com/usetero/policy-go/commit/aec257c051fbb696dd8e45f4057d5190686e664d))
+
+
+### Bug Fixes
+
+* golangci lint install ([#66](https://github.com/usetero/policy-go/issues/66)) ([23eb6bd](https://github.com/usetero/policy-go/commit/23eb6bd1321f659bf2fe84680a0b2478a652d694))
+
 ## [1.6.0](https://github.com/usetero/policy-go/compare/v1.5.1...v1.6.0) (2026-04-23)
 
 
