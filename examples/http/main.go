@@ -21,8 +21,7 @@ type ExampleLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-// ExampleLogMatcher is the LogMatchFunc implementation for ExampleLogRecord.
-func ExampleLogMatcher(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
+func exampleGetValue(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
 		case policy.LogFieldBody:
@@ -33,20 +32,45 @@ func ExampleLogMatcher(r *ExampleLogRecord, ref policy.LogFieldRef) []byte {
 			return nil
 		}
 	}
+	return traversePath(exampleAttrs(r, ref), ref.AttrPath)
+}
 
-	// Attribute lookup
-	var attrs map[string]any
+func exampleHasValue(r *ExampleLogRecord, ref policy.LogFieldRef) bool {
+	if ref.IsField() {
+		return exampleGetValue(r, ref) != nil
+	}
+	return pathExists(exampleAttrs(r, ref), ref.AttrPath)
+}
+
+func pathExists(m map[string]any, path []string) bool {
+	if len(path) == 0 || m == nil {
+		return false
+	}
+	cur := any(m)
+	for _, seg := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return false
+		}
+		cur, ok = m[seg]
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func exampleAttrs(r *ExampleLogRecord, ref policy.LogFieldRef) map[string]any {
 	switch {
 	case ref.IsRecordAttr():
-		attrs = r.LogAttributes
+		return r.LogAttributes
 	case ref.IsResourceAttr():
-		attrs = r.ResourceAttributes
+		return r.ResourceAttributes
 	case ref.IsScopeAttr():
-		attrs = r.ScopeAttributes
+		return r.ScopeAttributes
 	default:
 		return nil
 	}
-	return traversePath(attrs, ref.AttrPath)
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -58,14 +82,10 @@ func traversePath(m map[string]any, path []string) []byte {
 		return nil
 	}
 	if len(path) == 1 {
-		switch v := val.(type) {
-		case []byte:
-			return v
-		case string:
-			return []byte(v)
-		default:
-			return nil
+		if s, ok := val.(string); ok {
+			return []byte(s)
 		}
+		return nil
 	}
 	nested, ok := val.(map[string]any)
 	if !ok {
@@ -136,6 +156,11 @@ func main() {
 	}
 	fmt.Println()
 
+	logOpts := []policy.LogOption[*ExampleLogRecord]{
+		policy.WithLogValue(exampleGetValue),
+		policy.WithLogExists(exampleHasValue),
+	}
+
 	// Create an engine for evaluation
 	eng := policy.NewPolicyEngine(registry)
 
@@ -171,7 +196,7 @@ func main() {
 	fmt.Println("Evaluating log records:")
 	fmt.Println("========================")
 	for _, ex := range examples {
-		result := policy.EvaluateLog(eng, ex.record, ExampleLogMatcher)
+		result := policy.EvaluateLog(eng, ex.record, logOpts...)
 		fmt.Printf("%-30s -> %s\n", ex.name, result)
 	}
 

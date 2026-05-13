@@ -710,6 +710,45 @@ func TestParserParseTransformRedact(t *testing.T) {
 	assert.Equal(t, "***", transform.GetRedact()[1].GetReplacement())
 }
 
+func TestParserParseTransformRedactWithRegex(t *testing.T) {
+	parser := NewParser()
+
+	j := `{
+		"policies": [{
+			"id": "test",
+			"name": "Test",
+			"log": {
+				"match": [{"log_field": "body", "regex": ".*"}],
+				"keep": "all",
+				"transform": {
+					"redact": [
+						{
+							"log_attribute": ["http", "request", "headers", "authorization"],
+							"regex": "(?i)^(bearer\\s+).+$",
+							"replacement": "$1[REDACTED]"
+						},
+						{"log_field": "body", "replacement": "***"}
+					]
+				}
+			}
+		}]
+	}`
+
+	policies, err := parser.ParseBytes([]byte(j))
+	require.NoError(t, err)
+
+	redacts := policies[0].GetLog().GetTransform().GetRedact()
+	require.Len(t, redacts, 2)
+
+	assert.Equal(t, []string{"http", "request", "headers", "authorization"}, redacts[0].GetLogAttribute().GetPath())
+	require.NotNil(t, redacts[0].Regex)
+	assert.Equal(t, `(?i)^(bearer\s+).+$`, redacts[0].GetRegex())
+	assert.Equal(t, "$1[REDACTED]", redacts[0].GetReplacement())
+
+	// Second redact has no regex set.
+	assert.Nil(t, redacts[1].Regex)
+}
+
 func TestParserParseTransformRename(t *testing.T) {
 	parser := NewParser()
 

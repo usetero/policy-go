@@ -73,7 +73,34 @@ func TestSnapshotGetStats(t *testing.T) {
 	record := &SimpleLogRecord{
 		Body: []byte("stats test message"),
 	}
-	EvaluateLog(engine, record, SimpleLogMatcher)
+	EvaluateLog(engine, record,
+		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+			if ref.IsField() {
+				switch ref.Field {
+				case LogFieldBody:
+					return r.Body
+				case LogFieldSeverityText:
+					return r.SeverityText
+				default:
+					return nil
+				}
+			}
+			return nil
+		}),
+		WithLogExists(func(r *SimpleLogRecord, ref LogFieldRef) bool {
+			if ref.IsField() {
+				switch ref.Field {
+				case LogFieldBody:
+					return r.Body != nil
+				case LogFieldSeverityText:
+					return r.SeverityText != nil
+				default:
+					return false
+				}
+			}
+			return false
+		}),
+	)
 
 	// Get stats from snapshot
 	snapshot := registry.LogSnapshot()

@@ -202,7 +202,8 @@ func (AggregationTemporality) EnumDescriptor() ([]byte, []int) {
 // MetricTarget defines matching and actions for metrics.
 type MetricTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Matchers to identify which metrics this policy applies to (AND logic)
+	// Matchers to identify which metrics this policy applies to (AND logic).
+	// Implementations MUST reject policies with an empty match list.
 	Match []*MetricMatcher `protobuf:"bytes,1,rep,name=match,proto3" json:"match,omitempty"`
 	// Whether to keep matching metrics (true) or drop them (false)
 	Keep          bool `protobuf:"varint,2,opt,name=keep,proto3" json:"keep,omitempty"`

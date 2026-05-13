@@ -9,12 +9,14 @@ import (
 )
 
 func TestCompileLogTransformNil(t *testing.T) {
-	ops := compileLogTransform(nil)
+	ops, err := compileLogTransform(nil)
+	require.NoError(t, err)
 	assert.Nil(t, ops)
 }
 
 func TestCompileLogTransformEmpty(t *testing.T) {
-	ops := compileLogTransform(&policyv1.LogTransform{})
+	ops, err := compileLogTransform(&policyv1.LogTransform{})
+	require.NoError(t, err)
 	assert.Nil(t, ops)
 }
 
@@ -46,7 +48,8 @@ func TestCompileLogTransformOrdering(t *testing.T) {
 		},
 	}
 
-	ops := compileLogTransform(transform)
+	ops, err := compileLogTransform(transform)
+	require.NoError(t, err)
 	require.Len(t, ops, 5)
 
 	// Removes first (2), then redact (1), rename (1), add (1)
@@ -69,6 +72,46 @@ func TestCompileLogTransformOrdering(t *testing.T) {
 	assert.Equal(t, []string{"tag"}, ops[4].Ref.AttrPath)
 	assert.Equal(t, "v1", ops[4].Value)
 	assert.False(t, ops[4].Upsert)
+}
+
+func TestCompileLogTransformRedactRegex(t *testing.T) {
+	regex := `\bsecret-\d+\b`
+	transform := &policyv1.LogTransform{
+		Redact: []*policyv1.LogRedact{
+			{
+				Field: &policyv1.LogRedact_LogAttribute{
+					LogAttribute: &policyv1.AttributePath{Path: []string{"msg"}},
+				},
+				Replacement: "[REDACTED]",
+				Regex:       &regex,
+			},
+		},
+	}
+
+	ops, err := compileLogTransform(transform)
+	require.NoError(t, err)
+	require.Len(t, ops, 1)
+	require.NotNil(t, ops[0].Regex)
+	assert.True(t, ops[0].Regex.MatchString("hit secret-12 here"))
+	assert.False(t, ops[0].Regex.MatchString("no match"))
+}
+
+func TestCompileLogTransformRedactRegexInvalid(t *testing.T) {
+	bad := `[`
+	transform := &policyv1.LogTransform{
+		Redact: []*policyv1.LogRedact{
+			{
+				Field:       &policyv1.LogRedact_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+				Replacement: "x",
+				Regex:       &bad,
+			},
+		},
+	}
+
+	ops, err := compileLogTransform(transform)
+	require.Error(t, err)
+	assert.Nil(t, ops)
+	assert.Contains(t, err.Error(), "redact[0]")
 }
 
 func TestFieldRefFromLogRemoveAllScopes(t *testing.T) {

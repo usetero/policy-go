@@ -9,6 +9,15 @@ import (
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
+// traceAccessorFromOpts is a test-only helper that materializes a
+// *engine.TraceAccessor from options. The production hot path keeps the
+// accessor on the stack via applyTraceOpts; tests can afford the heap alloc.
+func traceAccessorFromOpts[T any](opts []TraceOption[T]) *engine.TraceAccessor[T] {
+	var a engine.TraceAccessor[T]
+	applyTraceOpts(&a, opts)
+	return &a
+}
+
 func TestExtractRandomnessFromTraceID_Hex32(t *testing.T) {
 	// 32-char hex trace ID: last 14 hex chars = 56 bits of randomness
 	traceID := []byte("0123456789abcdef0123456789abcdef")
@@ -232,8 +241,8 @@ func TestShouldSampleTraceHashSeedZero(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	result1, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
-	result2, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	result1, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
+	result2, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.Equal(t, result1, result2, "deterministic for same trace ID")
 }
 
@@ -246,8 +255,8 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 	}
 
 	// Same seed → same result
-	r1a, _, _ := shouldSampleTrace(policy1, span, SimpleSpanMatcher)
-	r1b, _, _ := shouldSampleTrace(policy1, span, SimpleSpanMatcher)
+	r1a, _, _ := shouldSampleTrace(policy1, span, traceAccessorFromOpts(SimpleSpanOptions()))
+	r1b, _, _ := shouldSampleTrace(policy1, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.Equal(t, r1a, r1b, "same seed should be deterministic")
 
 	// Different seeds may produce different results (test with many trace IDs)
@@ -256,8 +265,8 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 		s := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		r1, _, _ := shouldSampleTrace(policy1, s, SimpleSpanMatcher)
-		r2, _, _ := shouldSampleTrace(policy2, s, SimpleSpanMatcher)
+		r1, _, _ := shouldSampleTrace(policy1, s, traceAccessorFromOpts(SimpleSpanOptions()))
+		r2, _, _ := shouldSampleTrace(policy2, s, traceAccessorFromOpts(SimpleSpanOptions()))
 		if r1 != r2 {
 			differentCount++
 		}
@@ -273,7 +282,7 @@ func TestShouldSampleTraceHashSeedDistribution(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%032x", i)),
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -298,7 +307,7 @@ func TestShouldSampleTraceProportional(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -320,7 +329,7 @@ func TestShouldSampleTraceProportionalNoThreshold(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -340,7 +349,7 @@ func TestShouldSampleTraceEqualizing(t *testing.T) {
 		span := &SimpleSpanRecord{
 			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -364,7 +373,7 @@ func TestShouldSampleTraceEqualizingHigherIncoming(t *testing.T) {
 			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
-		if keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher); keep {
+		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
 		}
 	}
@@ -377,7 +386,7 @@ func TestShouldSampleTraceFailClosed(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, true)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.False(t, keep, "fail_closed should drop when no randomness")
 }
 
@@ -386,7 +395,7 @@ func TestShouldSampleTraceFailOpen(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, false)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.True(t, keep, "fail_open should keep when no randomness")
 }
 
@@ -395,7 +404,7 @@ func TestShouldSampleTraceProportionalFailClosed(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_PROPORTIONAL, 0, true)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.False(t, keep, "proportional fail_closed should drop when no randomness")
 }
 
@@ -404,7 +413,7 @@ func TestShouldSampleTraceEqualizingFailOpen(t *testing.T) {
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_EQUALIZING, 0, false)
 	span := &SimpleSpanRecord{} // no TraceID
 
-	keep, _, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.True(t, keep, "equalizing fail_open should keep when no randomness")
 }
 
@@ -447,7 +456,7 @@ func TestShouldSampleTraceReturnsThreshold(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	_, threshold, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	_, threshold, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.Equal(t, calculateRejectionThreshold(50), threshold)
 }
 
@@ -457,7 +466,7 @@ func TestShouldSampleTrace100PercentReturnsZeroThreshold(t *testing.T) {
 		TraceID: []byte("0123456789abcdef0123456789abcdef"),
 	}
 
-	keep, threshold, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, threshold, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.True(t, keep)
 	assert.Equal(t, uint64(0), threshold)
 }
@@ -472,7 +481,7 @@ func TestShouldSampleTraceEqualizingReturnsIncomingThreshold(t *testing.T) {
 		TraceState: traceState,
 	}
 
-	keep, threshold, _ := shouldSampleTrace(policy, span, SimpleSpanMatcher)
+	keep, threshold, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
 	assert.True(t, keep)
 	assert.Equal(t, uint64(0xe6666666666666), threshold, "should return incoming threshold when T_s > T_d")
 }
