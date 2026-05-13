@@ -93,16 +93,16 @@ func benchMoveValue(r *BenchLogRecord, from, to policy.LogFieldRef) {
 	toAttrs[to.AttrPath[0]] = val
 }
 
-// benchLogOptions returns the LogOption slice wiring BenchLogRecord up to the
-// bench* accessor functions.
-func benchLogOptions() []policy.LogOption[*BenchLogRecord] {
-	return []policy.LogOption[*BenchLogRecord]{
-		policy.WithLogValue(benchGetValue),
-		policy.WithLogExists(benchHasValue),
-		policy.WithLogSet(benchSetValue),
-		policy.WithLogDelete(benchDeleteValue),
-		policy.WithLogMove(benchMoveValue),
-	}
+// benchLogOpts wires BenchLogRecord up to the bench* accessor functions.
+// Built once at init and shared across benchmarks so EvaluateLog calls don't
+// allocate a fresh variadic slice per iteration — mirroring how production
+// callers should reuse their option slice.
+var benchLogOpts = []policy.LogOption[*BenchLogRecord]{
+	policy.WithLogValue(benchGetValue),
+	policy.WithLogExists(benchHasValue),
+	policy.WithLogSet(benchSetValue),
+	policy.WithLogDelete(benchDeleteValue),
+	policy.WithLogMove(benchMoveValue),
 }
 
 func traversePath(m map[string]any, path []string) []byte {
@@ -156,7 +156,7 @@ func BenchmarkEvaluateNoMatch(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -275,7 +275,7 @@ func BenchmarkTransformRemove(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogOptions()...)
+		policy.EvaluateLog(engine, r, benchLogOpts...)
 	}
 }
 
@@ -293,7 +293,7 @@ func BenchmarkTransformRedact(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogOptions()...)
+		policy.EvaluateLog(engine, r, benchLogOpts...)
 	}
 }
 
@@ -312,7 +312,7 @@ func BenchmarkTransformRename(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogOptions()...)
+		policy.EvaluateLog(engine, r, benchLogOpts...)
 	}
 }
 
@@ -331,7 +331,7 @@ func BenchmarkTransformAdd(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogOptions()...)
+		policy.EvaluateLog(engine, r, benchLogOpts...)
 	}
 }
 
@@ -366,7 +366,7 @@ func BenchmarkTransformMixed(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogOptions()...)
+		policy.EvaluateLog(engine, r, benchLogOpts...)
 	}
 }
 
@@ -384,7 +384,7 @@ func BenchmarkTransformManyRedacts(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		r := newBenchTransformRecord()
-		policy.EvaluateLog(engine, r, benchLogOptions()...)
+		policy.EvaluateLog(engine, r, benchLogOpts...)
 	}
 }
 
@@ -422,7 +422,7 @@ func BenchmarkTransformParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			r := newBenchTransformRecord()
-			policy.EvaluateLog(engine, r, benchLogOptions()...)
+			policy.EvaluateLog(engine, r, benchLogOpts...)
 		}
 	})
 }
@@ -449,7 +449,7 @@ func BenchmarkTransformNoMatch(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -465,7 +465,7 @@ func BenchmarkEvaluateMatchBody(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -481,7 +481,7 @@ func BenchmarkEvaluateMatchSeverity(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -500,7 +500,7 @@ func BenchmarkEvaluateMatchLogAttribute(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -519,7 +519,7 @@ func BenchmarkEvaluateMatchResourceAttribute(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -537,7 +537,7 @@ func BenchmarkEvaluateParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			policy.EvaluateLog(engine, record, benchLogOptions()...)
+			policy.EvaluateLog(engine, record, benchLogOpts...)
 		}
 	})
 }
@@ -596,7 +596,7 @@ func BenchmarkEvaluateMixedWorkload(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		for _, record := range records {
-			policy.EvaluateLog(engine, record, benchLogOptions()...)
+			policy.EvaluateLog(engine, record, benchLogOpts...)
 		}
 	}
 }
@@ -622,7 +622,7 @@ func BenchmarkStatsCollection(b *testing.B) {
 		SeverityText: []byte("INFO"),
 	}
 	for i := 0; i < 1000; i++ {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 
 	b.ReportAllocs()
@@ -649,7 +649,7 @@ func BenchmarkEvaluateLongBody(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }
 
@@ -676,6 +676,6 @@ func BenchmarkEvaluateWithManyAttributes(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		policy.EvaluateLog(engine, record, benchLogOptions()...)
+		policy.EvaluateLog(engine, record, benchLogOpts...)
 	}
 }

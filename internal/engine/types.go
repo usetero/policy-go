@@ -51,7 +51,9 @@ func (k Keep) Restrictiveness() int {
 }
 
 // ParseKeep parses a keep string from the proto into a Keep struct.
-// Valid values: "all", "none", "N%", "N/s", "N/m"
+// Valid values: "all", "none", "N%", "N/s", "N/m", "N/Ds", "N/Dm"
+// where N is the limit and the optional D is a positive integer window
+// multiplier (e.g. "1/5s" = at most one per 5-second window).
 func ParseKeep(s string) (Keep, error) {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "all" {

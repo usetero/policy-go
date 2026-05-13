@@ -236,10 +236,14 @@ case policy.ResultSample:
 
 You bridge your telemetry types to the engine by passing accessor options
 directly to `EvaluateLog` / `EvaluateMetric` / `EvaluateTrace`. `WithLogValue`
-returns a string field value as bytes for pattern matching; `WithLogExists`
-reports field presence even when the value is not a string. Log and trace
-evaluations also accept write primitives used for log transforms and trace
-sampling threshold write-back.
+returns a textual field value as bytes for pattern matching (string and
+`[]byte` are both treated as textual; opaque types like ints and maps should
+return nil so regex-redact skips them). `WithLogExists` reports field presence
+regardless of value type. Log and trace evaluations also accept write
+primitives (`WithLogSet` / `WithLogDelete` / `WithLogMove` for transforms,
+`WithTraceSet` for trace sampling threshold write-back). Omit a write
+primitive if you don't need it — transforms that would call it gracefully
+record a miss instead of mutating.
 
 ```go
 // Log options

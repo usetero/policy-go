@@ -145,7 +145,7 @@ func TestTraversePath(t *testing.T) {
 		{"deeply nested path", nested, LogAttr("http", "request", "headers", "content-type"), []byte("application/json")},
 		{"partial path (non-leaf) returns nil", nested, LogAttr("http", "request"), nil},
 		{"missing nested path returns nil", nested, LogAttr("http", "response", "status"), nil},
-		{"byte slice attribute returns nil", byteAttr, LogAttr("binary_data"), nil},
+		{"byte slice attribute returns the bytes", byteAttr, LogAttr("binary_data"), []byte{0x01, 0x02, 0x03}},
 		{"empty path returns nil", flat, LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: []string{}}, nil},
 		{"nil scope map returns nil", &SimpleLogRecord{}, LogAttr("key"), nil},
 	}
@@ -659,12 +659,14 @@ func TestSimpleLogRedactRegexAttribute(t *testing.T) {
 			wantValue:   3.14,
 		},
 		{
-			name:        "non-string bytes is a miss",
-			input:       []byte("not a string"),
-			regex:       `.+`,
-			replacement: "[X]",
-			wantHit:     false,
-			wantValue:   []byte("not a string"),
+			// []byte attributes are treated as textual values like strings —
+			// regex-redact applies to them.
+			name:        "byte slice attribute is redacted in place",
+			input:       []byte("4111-1111-1111-1111"),
+			regex:       `\d{4}-\d{4}-\d{4}-\d{4}`,
+			replacement: "[CARD]",
+			wantHit:     true,
+			wantValue:   "[CARD]",
 		},
 		{
 			name:        "non-string nested map is a miss",

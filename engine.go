@@ -71,39 +71,17 @@ func NewPolicyEngine(registry *PolicyRegistry) *PolicyEngine {
 // LOG EVALUATION
 // ============================================================================
 
-// buildLogAccessor assembles a LogAccessor from the supplied options.
-func buildLogAccessor[T any](opts []LogOption[T]) *engine.LogAccessor[T] {
-	var a engine.LogAccessor[T]
-	for _, opt := range opts {
-		opt(&a)
-	}
-	return &a
-}
-
-// buildMetricAccessor assembles a MetricAccessor from the supplied options.
-func buildMetricAccessor[T any](opts []MetricOption[T]) *engine.MetricAccessor[T] {
-	var a engine.MetricAccessor[T]
-	for _, opt := range opts {
-		opt(&a)
-	}
-	return &a
-}
-
-// buildTraceAccessor assembles a TraceAccessor from the supplied options.
-func buildTraceAccessor[T any](opts []TraceOption[T]) *engine.TraceAccessor[T] {
-	var a engine.TraceAccessor[T]
-	for _, opt := range opts {
-		opt(&a)
-	}
-	return &a
-}
-
 // EvaluateLog checks a log record against the current policies and returns
 // the result. The Value/Exists options drive matching; if the winning policy
 // has transforms, the engine applies them via the Set/Delete/Move options.
 // Consumers that don't want mutation can omit those options.
 func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) EvaluateResult {
-	c := buildLogAccessor(opts)
+	// Stack-allocate the accessor. Options dispatch via switch (no closures)
+	// so the compiler can prove a doesn't escape from this function — every
+	// downstream call uses it transiently, none retain it past return.
+	var a engine.LogAccessor[T]
+	applyLogOpts(&a, opts)
+	c := &a
 	snapshot := e.registry.LogSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -319,7 +297,9 @@ func recordMatchStats[T engine.FieldType](matchers *engine.CompiledMatchers[T], 
 // EvaluateMetric checks a metric against the current policies and returns
 // the result. The Value/Exists options drive matching.
 func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) EvaluateResult {
-	c := buildMetricAccessor(opts)
+	var a engine.MetricAccessor[T]
+	applyMetricOpts(&a, opts)
+	c := &a
 	snapshot := e.registry.MetricSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -480,7 +460,9 @@ func applyKeepActionMetric(policy *engine.CompiledPolicy[engine.MetricField], ma
 // decision, the engine writes the effective threshold back through the
 // Set option (using SpanSamplingThreshold() as the ref).
 func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) EvaluateResult {
-	c := buildTraceAccessor(opts)
+	var a engine.TraceAccessor[T]
+	applyTraceOpts(&a, opts)
+	c := &a
 	snapshot := e.registry.TraceSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch

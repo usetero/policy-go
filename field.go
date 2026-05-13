@@ -294,8 +294,9 @@ const (
 // tests can exercise the spec semantics directly without going through the
 // full evaluation path.
 func ApplyLogTransform[T any](rec T, op TransformOp, opts ...LogOption[T]) bool {
-	a := buildLogAccessor(opts)
-	return engine.ApplyLogTransform(rec, op, a)
+	var a engine.LogAccessor[T]
+	applyLogOpts(&a, opts)
+	return engine.ApplyLogTransform(rec, op, &a)
 }
 
 // ============================================================================
@@ -307,56 +308,138 @@ func ApplyLogTransform[T any](rec T, op TransformOp, opts ...LogOption[T]) bool 
 // EvaluateTrace; the engine assembles the accessor it needs internally. New
 // spec features that extend TransformOp are absorbed by the library without
 // touching callers.
+//
+// Options are encoded as discriminated structs (not closures) so the engine
+// can dispatch via switch instead of indirect call. This lets the compiler
+// prove the per-call accessor doesn't escape, keeping it on the stack.
 
-// LogOption configures the log accessor used for a single EvaluateLog call.
-type LogOption[T any] func(*engine.LogAccessor[T])
+type logOptKind uint8
 
-// MetricOption configures the metric accessor used for a single EvaluateMetric call.
-type MetricOption[T any] func(*engine.MetricAccessor[T])
+const (
+	logOptValue logOptKind = iota + 1
+	logOptExists
+	logOptSet
+	logOptDelete
+	logOptMove
+)
 
-// TraceOption configures the trace accessor used for a single EvaluateTrace call.
-type TraceOption[T any] func(*engine.TraceAccessor[T])
+// LogOption configures one accessor primitive on a single EvaluateLog call.
+// Build instances with the WithLog* helpers; the zero value is invalid.
+type LogOption[T any] struct {
+	kind   logOptKind
+	value  func(T, LogFieldRef) []byte
+	exists func(T, LogFieldRef) bool
+	set    func(T, LogFieldRef, string)
+	del    func(T, LogFieldRef) bool
+	move   func(T, LogFieldRef, LogFieldRef)
+}
+
+// applyLogOpts copies the supplied options onto a. Dispatch is a switch on
+// the option kind, not an indirect call through a function value, which lets
+// the compiler keep a on the caller's stack.
+func applyLogOpts[T any](a *engine.LogAccessor[T], opts []LogOption[T]) {
+	for i := range opts {
+		switch opts[i].kind {
+		case logOptValue:
+			a.Value = opts[i].value
+		case logOptExists:
+			a.Exists = opts[i].exists
+		case logOptSet:
+			a.Set = opts[i].set
+		case logOptDelete:
+			a.Delete = opts[i].del
+		case logOptMove:
+			a.Move = opts[i].move
+		}
+	}
+}
+
+type metricOptKind uint8
+
+const (
+	metricOptValue metricOptKind = iota + 1
+	metricOptExists
+)
+
+// MetricOption configures one accessor primitive on a single EvaluateMetric call.
+type MetricOption[T any] struct {
+	kind   metricOptKind
+	value  func(T, MetricFieldRef) []byte
+	exists func(T, MetricFieldRef) bool
+}
+
+func applyMetricOpts[T any](a *engine.MetricAccessor[T], opts []MetricOption[T]) {
+	for i := range opts {
+		switch opts[i].kind {
+		case metricOptValue:
+			a.Value = opts[i].value
+		case metricOptExists:
+			a.Exists = opts[i].exists
+		}
+	}
+}
+
+type traceOptKind uint8
+
+const (
+	traceOptValue traceOptKind = iota + 1
+	traceOptExists
+	traceOptSet
+)
+
+// TraceOption configures one accessor primitive on a single EvaluateTrace call.
+type TraceOption[T any] struct {
+	kind   traceOptKind
+	value  func(T, TraceFieldRef) []byte
+	exists func(T, TraceFieldRef) bool
+	set    func(T, TraceFieldRef, string)
+}
+
+func applyTraceOpts[T any](a *engine.TraceAccessor[T], opts []TraceOption[T]) {
+	for i := range opts {
+		switch opts[i].kind {
+		case traceOptValue:
+			a.Value = opts[i].value
+		case traceOptExists:
+			a.Exists = opts[i].exists
+		case traceOptSet:
+			a.Set = opts[i].set
+		}
+	}
+}
 
 // ============================================================================
 // LOG OPTIONS
 // ============================================================================
 
 // WithLogValue sets the Value accessor function.
-// The function should return nil when the field is absent OR when its
-// underlying value is not a string — the engine relies on this for
-// regex-redact's "non-string is a no-op" rule.
+// The function should return nil when the field is absent or when its
+// underlying value is an opaque non-textual type (int, bool, map, etc.).
+// Return the value as bytes when it is a string or []byte — the engine
+// treats both as textual for matching and regex-redact. Returning nil for
+// opaque types is what enforces regex-redact's "non-text is a no-op" rule.
 func WithLogValue[T any](f func(T, LogFieldRef) []byte) LogOption[T] {
-	return func(a *engine.LogAccessor[T]) {
-		a.Value = f
-	}
+	return LogOption[T]{kind: logOptValue, value: f}
 }
 
 // WithLogExists sets the Exists accessor function.
 func WithLogExists[T any](f func(T, LogFieldRef) bool) LogOption[T] {
-	return func(a *engine.LogAccessor[T]) {
-		a.Exists = f
-	}
+	return LogOption[T]{kind: logOptExists, exists: f}
 }
 
 // WithLogSet sets the Set accessor function.
 func WithLogSet[T any](f func(T, LogFieldRef, string)) LogOption[T] {
-	return func(a *engine.LogAccessor[T]) {
-		a.Set = f
-	}
+	return LogOption[T]{kind: logOptSet, set: f}
 }
 
 // WithLogDelete sets the Delete accessor function.
 func WithLogDelete[T any](f func(T, LogFieldRef) bool) LogOption[T] {
-	return func(a *engine.LogAccessor[T]) {
-		a.Delete = f
-	}
+	return LogOption[T]{kind: logOptDelete, del: f}
 }
 
 // WithLogMove sets the Move accessor function.
 func WithLogMove[T any](f func(T, LogFieldRef, LogFieldRef)) LogOption[T] {
-	return func(a *engine.LogAccessor[T]) {
-		a.Move = f
-	}
+	return LogOption[T]{kind: logOptMove, move: f}
 }
 
 // ============================================================================
@@ -365,16 +448,12 @@ func WithLogMove[T any](f func(T, LogFieldRef, LogFieldRef)) LogOption[T] {
 
 // WithMetricValue sets the Value accessor function.
 func WithMetricValue[T any](f func(T, MetricFieldRef) []byte) MetricOption[T] {
-	return func(a *engine.MetricAccessor[T]) {
-		a.Value = f
-	}
+	return MetricOption[T]{kind: metricOptValue, value: f}
 }
 
 // WithMetricExists sets the Exists accessor function.
 func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricOption[T] {
-	return func(a *engine.MetricAccessor[T]) {
-		a.Exists = f
-	}
+	return MetricOption[T]{kind: metricOptExists, exists: f}
 }
 
 // ============================================================================
@@ -383,23 +462,17 @@ func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricOption[T] {
 
 // WithTraceValue sets the Value accessor function.
 func WithTraceValue[T any](f func(T, TraceFieldRef) []byte) TraceOption[T] {
-	return func(a *engine.TraceAccessor[T]) {
-		a.Value = f
-	}
+	return TraceOption[T]{kind: traceOptValue, value: f}
 }
 
 // WithTraceExists sets the Exists accessor function.
 func WithTraceExists[T any](f func(T, TraceFieldRef) bool) TraceOption[T] {
-	return func(a *engine.TraceAccessor[T]) {
-		a.Exists = f
-	}
+	return TraceOption[T]{kind: traceOptExists, exists: f}
 }
 
 // WithTraceSet sets the Set accessor function. Configure this on spans where
 // you need the sampling threshold written back to tracestate after a
 // sampling decision.
 func WithTraceSet[T any](f func(T, TraceFieldRef, string)) TraceOption[T] {
-	return func(a *engine.TraceAccessor[T]) {
-		a.Set = f
-	}
+	return TraceOption[T]{kind: traceOptSet, set: f}
 }

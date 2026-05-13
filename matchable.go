@@ -21,8 +21,10 @@ type SimpleLogRecord struct {
 	ScopeAttributes    map[string]any
 }
 
-// SimpleLogGetValue returns the field/attribute value as bytes, or nil if absent.
-// Pass it as the WithLogValue option when wiring a LogAccessor for *SimpleLogRecord.
+// SimpleLogGetValue returns the field/attribute value as bytes. Returns nil
+// for absent fields and for opaque non-textual attribute values (int, bool,
+// map, etc.); string and []byte attributes are returned as bytes. Pass it as
+// the WithLogValue option when evaluating against *SimpleLogRecord.
 func SimpleLogGetValue(r *SimpleLogRecord, ref LogFieldRef) []byte {
 	if ref.IsField() {
 		switch ref.Field {
@@ -605,12 +607,17 @@ func traversePath(m map[string]any, path []string) []byte {
 	return traversePath(nested, path[1:])
 }
 
-// toBytes converts a value to bytes for matching. Returns nil for
-// non-string values — the engine treats absence-of-string as a no-op so that
-// targeted-redact regex won't fire on opaque types.
+// toBytes converts a value to bytes for matching. Accepts both string and
+// []byte (the two textual representations OTel logs commonly use); other
+// types return nil so opaque values (ints, bools, maps, etc.) are skipped
+// during matching and regex-redact.
 func toBytes(val any) []byte {
-	if s, ok := val.(string); ok {
-		return []byte(s)
+	switch v := val.(type) {
+	case string:
+		return []byte(v)
+	case []byte:
+		return v
+	default:
+		return nil
 	}
-	return nil
 }

@@ -72,21 +72,22 @@ type TraceAccessor[T any] struct {
 }
 
 // ApplyLogTransform applies a single TransformOp using the LogAccessor accessors.
-// Returns true if the operation was a hit (field present or write occurred), false for a miss.
+// Returns true if the operation was a hit (field present or write occurred),
+// false for a miss. Required primitives (Set/Delete/Move/Exists/Value) for each
+// op kind are validated at policy compile time via RequiredPrimitives; if one
+// is nil at this point it means the consumer also opted out and the op
+// gracefully degrades to a miss.
 func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
 	switch op.Kind {
 	case TransformRemove:
 		if a.Delete == nil {
-			panic("Delete accessor not configured")
+			return false
 		}
 		return a.Delete(rec, op.Ref)
 
 	case TransformRedact:
-		if a.Value == nil {
-			panic("Value accessor not configured")
-		}
-		if a.Set == nil {
-			panic("Set accessor not configured")
+		if a.Value == nil || a.Set == nil {
+			return false
 		}
 		if op.Regex != nil {
 			cur := a.Value(rec, op.Ref)
@@ -100,21 +101,15 @@ func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
 			a.Set(rec, op.Ref, op.Regex.ReplaceAllString(curStr, op.Value))
 			return true
 		}
-		if a.Exists == nil {
-			panic("Exists accessor not configured")
-		}
-		if !a.Exists(rec, op.Ref) {
+		if a.Exists == nil || !a.Exists(rec, op.Ref) {
 			return false
 		}
 		a.Set(rec, op.Ref, op.Value)
 		return true
 
 	case TransformRename:
-		if a.Exists == nil {
-			panic("Exists accessor not configured")
-		}
-		if a.Move == nil {
-			panic("Move accessor not configured")
+		if a.Exists == nil || a.Move == nil {
+			return false
 		}
 		if op.Ref.IsField() {
 			return false
@@ -133,11 +128,8 @@ func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
 		return true
 
 	case TransformAdd:
-		if a.Exists == nil {
-			panic("Exists accessor not configured")
-		}
-		if a.Set == nil {
-			panic("Set accessor not configured")
+		if a.Exists == nil || a.Set == nil {
+			return false
 		}
 		if !op.Upsert && a.Exists(rec, op.Ref) {
 			return true
