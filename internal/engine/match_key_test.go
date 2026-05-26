@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -501,7 +502,8 @@ func TestFieldRefFromLogMatcher(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FieldRefFromLogMatcher(tt.matcher)
+			result, err := FieldRefFromLogMatcher(tt.matcher)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -559,7 +561,8 @@ func TestFieldRefFromMetricMatcher(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FieldRefFromMetricMatcher(tt.matcher)
+			result, err := FieldRefFromMetricMatcher(tt.matcher)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -638,7 +641,8 @@ func TestFieldRefFromTraceMatcher(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FieldRefFromTraceMatcher(tt.matcher)
+			result, err := FieldRefFromTraceMatcher(tt.matcher)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

@@ -643,6 +643,7 @@ func TestConfigLoaderLoadHttp(t *testing.T) {
 			Hash: "test-hash",
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -960,6 +961,7 @@ func TestConfigLoaderWithServiceMetadata(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -971,6 +973,7 @@ func TestConfigLoaderWithServiceMetadata(t *testing.T) {
 				Type:             "http",
 				ID:               "test-http",
 				URL:              server.URL,
+				ContentType:      "protobuf",
 				PollIntervalSecs: &pollInterval,
 			},
 		},
@@ -1052,6 +1055,7 @@ func TestConfigLoaderLoadWithConfigServiceMetadata(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -1069,6 +1073,7 @@ func TestConfigLoaderLoadWithConfigServiceMetadata(t *testing.T) {
 				Type:             "http",
 				ID:               "test-http",
 				URL:              server.URL,
+				ContentType:      "protobuf",
 				PollIntervalSecs: &pollInterval,
 			},
 		},
@@ -1102,6 +1107,7 @@ func TestConfigLoaderConfigOverridesCode(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -1119,6 +1125,7 @@ func TestConfigLoaderConfigOverridesCode(t *testing.T) {
 				Type:             "http",
 				ID:               "test-http",
 				URL:              server.URL,
+				ContentType:      "protobuf",
 				PollIntervalSecs: &pollInterval,
 			},
 		},
@@ -1173,6 +1180,7 @@ func TestConfigLoaderMergesCodeAndConfigMetadata(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -1198,6 +1206,7 @@ func TestConfigLoaderMergesCodeAndConfigMetadata(t *testing.T) {
 				Type:             "http",
 				ID:               "test-http",
 				URL:              server.URL,
+				ContentType:      "protobuf",
 				PollIntervalSecs: &pollInterval,
 			},
 		},
@@ -1254,6 +1263,7 @@ func TestConfigLoaderCodeRequiredFieldsConfigAttrsOnly(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -1274,6 +1284,7 @@ func TestConfigLoaderCodeRequiredFieldsConfigAttrsOnly(t *testing.T) {
 				Type:             "http",
 				ID:               "test-http",
 				URL:              server.URL,
+				ContentType:      "protobuf",
 				PollIntervalSecs: &pollInterval,
 			},
 		},

@@ -189,6 +189,11 @@ type PolicyStatsSnapshot struct {
 	RenameMisses uint64
 	AddHits      uint64
 	AddMisses    uint64
+
+	// Errors lists per-policy compile errors. Populated by the registry from
+	// CompileResult.Errors — providers forward these to the server via
+	// PolicySyncStatus.errors so operators can see which policies are broken.
+	Errors []string
 }
 
 // Snapshot atomically reads and resets all counters, returning an immutable snapshot.

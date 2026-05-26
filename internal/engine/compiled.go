@@ -2,7 +2,9 @@ package engine
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sync"
 
@@ -172,6 +174,11 @@ type CompileResult struct {
 	Logs    *CompiledMatchers[LogField]
 	Metrics *CompiledMatchers[MetricField]
 	Traces  *CompiledMatchers[TraceField]
+	// Errors maps policy ID → per-policy compile errors. A policy with any
+	// entries here is excluded from the compiled matchers; valid policies in
+	// the same batch still compile. Use these to report bad policies back to
+	// the policy server via PolicySyncStatus.errors.
+	Errors map[string][]string
 }
 
 // Close releases all resources.
@@ -197,7 +204,13 @@ func NewCompiler() *Compiler {
 }
 
 // Compile compiles a set of proto policies into CompileResult with separate
-// CompiledMatchers for logs, metrics, and traces.
+// CompiledMatchers for logs, metrics, and traces. Per-policy compile failures
+// (bad regex, empty attribute path, unspecified field enum, missing match
+// oneof, etc.) are reported via CompileResult.Errors. A broken policy is
+// still added to the matchers but with one or more matchers skipped, so its
+// matchCount can never be reached at evaluation — it stays inert. The
+// function's own error return is reserved for batch-level failures (e.g.,
+// Hyperscan init).
 func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompileResult, error) {
 	// Sort policies by ID for deterministic transform ordering per spec.
 	slices.SortFunc(policies, func(a, b *policyv1.Policy) int {
@@ -207,36 +220,53 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 	logBuilder := newMatchersBuilder[LogField]()
 	metricBuilder := newMatchersBuilder[MetricField]()
 	traceBuilder := newMatchersBuilder[TraceField]()
+	var perPolicyErrors map[string][]string
 
 	for _, p := range policies {
 		id := p.GetId()
 		policyStats := stats[id]
+		var policyErr error
+		addErr := func(prefix string, err error) {
+			if err == nil {
+				return
+			}
+			// Splay joined errors so each leaf gets its own prefix when
+			// stringified — fmt.Errorf("%w") collapses joined-ness.
+			for _, leaf := range flattenErr(err) {
+				policyErr = errors.Join(policyErr, fmt.Errorf("%s: %w", prefix, leaf))
+			}
+		}
 
 		// Process log target
 		if log := p.GetLog(); log != nil {
 			idx := logBuilder.reservePolicy(id)
 
 			keep, err := ParseKeep(log.GetKeep())
-			if err != nil {
-				return nil, fmt.Errorf("policy %s: %w", id, err)
-			}
+			addErr("log: keep", err)
 
 			var sampleKey *LogFieldRef
-			if log.GetSampleKey() != nil {
-				sk := FieldRefFromLogSampleKey(log.GetSampleKey())
-				sampleKey = &sk
+			if sk := log.GetSampleKey(); sk != nil {
+				ref, err := FieldRefFromLogSampleKey(sk)
+				if err != nil {
+					addErr("log: sampleKey", err)
+				} else {
+					sampleKey = &ref
+				}
 			}
 
 			for i, m := range log.GetMatch() {
-				ref := FieldRefFromLogMatcher(m)
-				pattern, isExistence, mustExist := extractMatchPattern(m)
+				ref, refErr := FieldRefFromLogMatcher(m)
+				pattern, isExistence, mustExist, patErr := extractMatchPattern(m)
+				addErr(fmt.Sprintf("log: match[%d]", i), refErr)
+				addErr(fmt.Sprintf("log: match[%d]", i), patErr)
+				if refErr != nil || patErr != nil {
+					continue
+				}
 				logBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
 			transforms, err := compileLogTransform(log.GetTransform())
-			if err != nil {
-				return nil, fmt.Errorf("policy %s: %w", id, err)
-			}
+			addErr("log: transform", err)
 			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats, transforms)
 		}
 
@@ -244,15 +274,19 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 		if metric := p.GetMetric(); metric != nil {
 			idx := metricBuilder.reservePolicy(id)
 
-			// Metrics use a simple bool keep for now
-			keep := Keep{Action: KeepAll}
-			if !metric.GetKeep() {
-				keep = Keep{Action: KeepNone}
+			keep := Keep{Action: KeepNone}
+			if metric.GetKeep() {
+				keep = Keep{Action: KeepAll}
 			}
 
 			for i, m := range metric.GetMatch() {
-				ref := FieldRefFromMetricMatcher(m)
-				pattern, isExistence, mustExist := extractMetricMatchPattern(m)
+				ref, refErr := FieldRefFromMetricMatcher(m)
+				pattern, isExistence, mustExist, patErr := extractMetricMatchPattern(m)
+				addErr(fmt.Sprintf("metric: match[%d]", i), refErr)
+				addErr(fmt.Sprintf("metric: match[%d]", i), patErr)
+				if refErr != nil || patErr != nil {
+					continue
+				}
 				metricBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
@@ -263,19 +297,33 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 		if trace := p.GetTrace(); trace != nil {
 			idx := traceBuilder.reservePolicy(id)
 
-			// Traces have a TraceSamplingConfig - parse it
 			keep, err := parseTraceSamplingConfig(trace.GetKeep())
-			if err != nil {
-				return nil, fmt.Errorf("policy %s: %w", id, err)
-			}
+			addErr("trace: keep", err)
 
 			for i, m := range trace.GetMatch() {
-				ref := FieldRefFromTraceMatcher(m)
-				pattern, isExistence, mustExist := extractTraceMatchPattern(m)
+				ref, refErr := FieldRefFromTraceMatcher(m)
+				pattern, isExistence, mustExist, patErr := extractTraceMatchPattern(m)
+				addErr(fmt.Sprintf("trace: match[%d]", i), refErr)
+				addErr(fmt.Sprintf("trace: match[%d]", i), patErr)
+				if refErr != nil || patErr != nil {
+					continue
+				}
 				traceBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
 			}
 
 			traceBuilder.finalizePolicy(id, idx, keep, len(trace.GetMatch()), nil, policyStats, nil)
+		}
+
+		if policyErr != nil {
+			if perPolicyErrors == nil {
+				perPolicyErrors = make(map[string][]string)
+			}
+			leaves := flattenErr(policyErr)
+			msgs := make([]string, len(leaves))
+			for i, e := range leaves {
+				msgs[i] = e.Error()
+			}
+			perPolicyErrors[id] = msgs
 		}
 	}
 
@@ -301,27 +349,52 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 		Logs:    logs,
 		Metrics: metrics,
 		Traces:  traces,
+		Errors:  perPolicyErrors,
 	}, nil
 }
 
-// extractMatchPattern extracts the pattern string from a LogMatcher.
-// Returns (pattern, isExistence, mustExist).
-func extractMatchPattern(m *policyv1.LogMatcher) (string, bool, bool) {
+// flattenErr returns the leaf errors of a possibly errors.Join-ed error so the
+// caller can wrap each one with a per-branch layer prefix. compileLogTransform
+// joins per-op errors; this lets the call site prefix each op individually.
+func flattenErr(err error) []error {
+	if err == nil {
+		return nil
+	}
+	type joined interface{ Unwrap() []error }
+	if j, ok := err.(joined); ok {
+		var out []error
+		for _, e := range j.Unwrap() {
+			out = append(out, flattenErr(e)...)
+		}
+		return out
+	}
+	return []error{err}
+}
+
+// extractMatchPattern extracts the pattern string from a LogMatcher and
+// returns (pattern, isExistence, mustExist, error). Returns an error if the
+// match oneof is missing or the regex fails to compile — both prevent the
+// policy from matching anything useful so we surface them rather than
+// silently ignore.
+func extractMatchPattern(m *policyv1.LogMatcher) (string, bool, bool, error) {
 	switch match := m.GetMatch().(type) {
 	case *policyv1.LogMatcher_Regex:
-		return match.Regex, false, false
+		if _, err := regexp.Compile(match.Regex); err != nil {
+			return "", false, false, fmt.Errorf("invalid regex %q: %w", match.Regex, err)
+		}
+		return match.Regex, false, false, nil
 	case *policyv1.LogMatcher_Exact:
-		return escapeRegex(match.Exact), false, false
+		return escapeRegex(match.Exact), false, false, nil
 	case *policyv1.LogMatcher_StartsWith:
-		return "^" + escapeRegex(match.StartsWith), false, false
+		return "^" + escapeRegex(match.StartsWith), false, false, nil
 	case *policyv1.LogMatcher_EndsWith:
-		return escapeRegex(match.EndsWith) + "$", false, false
+		return escapeRegex(match.EndsWith) + "$", false, false, nil
 	case *policyv1.LogMatcher_Contains:
-		return escapeRegex(match.Contains), false, false
+		return escapeRegex(match.Contains), false, false, nil
 	case *policyv1.LogMatcher_Exists:
-		return "", true, match.Exists
+		return "", true, match.Exists, nil
 	default:
-		return "", false, false
+		return "", false, false, errors.New("no match condition set")
 	}
 }
 
@@ -356,44 +429,53 @@ func aggregationTemporalityToString(at policyv1.AggregationTemporality) string {
 }
 
 // extractMetricMatchPattern extracts the pattern string from a MetricMatcher.
-// For MetricType and AggregationTemporality fields, the enum value is converted to lowercase for matching.
-func extractMetricMatchPattern(m *policyv1.MetricMatcher) (string, bool, bool) {
+// For MetricType and AggregationTemporality fields, the enum value is converted
+// to lowercase for matching and supplies the pattern directly — the standard
+// match oneof is not required for those fields.
+func extractMetricMatchPattern(m *policyv1.MetricMatcher) (string, bool, bool, error) {
 	// Special handling for MetricType - convert enum to lowercase string for matching
 	if mt, ok := m.GetField().(*policyv1.MetricMatcher_MetricType); ok {
-		if mt.MetricType != policyv1.MetricType_METRIC_TYPE_UNSPECIFIED {
-			typeStr := metricTypeToString(mt.MetricType)
-			if typeStr != "" {
-				return "^" + escapeRegex(typeStr) + "$", false, false
-			}
+		if mt.MetricType == policyv1.MetricType_METRIC_TYPE_UNSPECIFIED {
+			return "", false, false, errors.New("metricType is unspecified")
 		}
+		typeStr := metricTypeToString(mt.MetricType)
+		if typeStr == "" {
+			return "", false, false, fmt.Errorf("unknown metric type %v", mt.MetricType)
+		}
+		return "^" + escapeRegex(typeStr) + "$", false, false, nil
 	}
 
 	// Special handling for AggregationTemporality - convert enum to lowercase string for matching
 	if at, ok := m.GetField().(*policyv1.MetricMatcher_AggregationTemporality); ok {
-		if at.AggregationTemporality != policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED {
-			tempStr := aggregationTemporalityToString(at.AggregationTemporality)
-			if tempStr != "" {
-				return "^" + escapeRegex(tempStr) + "$", false, false
-			}
+		if at.AggregationTemporality == policyv1.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED {
+			return "", false, false, errors.New("aggregationTemporality is unspecified")
 		}
+		tempStr := aggregationTemporalityToString(at.AggregationTemporality)
+		if tempStr == "" {
+			return "", false, false, fmt.Errorf("unknown aggregation temporality %v", at.AggregationTemporality)
+		}
+		return "^" + escapeRegex(tempStr) + "$", false, false, nil
 	}
 
 	// Standard match patterns
 	switch match := m.GetMatch().(type) {
 	case *policyv1.MetricMatcher_Regex:
-		return match.Regex, false, false
+		if _, err := regexp.Compile(match.Regex); err != nil {
+			return "", false, false, fmt.Errorf("invalid regex %q: %w", match.Regex, err)
+		}
+		return match.Regex, false, false, nil
 	case *policyv1.MetricMatcher_Exact:
-		return escapeRegex(match.Exact), false, false
+		return escapeRegex(match.Exact), false, false, nil
 	case *policyv1.MetricMatcher_StartsWith:
-		return "^" + escapeRegex(match.StartsWith), false, false
+		return "^" + escapeRegex(match.StartsWith), false, false, nil
 	case *policyv1.MetricMatcher_EndsWith:
-		return escapeRegex(match.EndsWith) + "$", false, false
+		return escapeRegex(match.EndsWith) + "$", false, false, nil
 	case *policyv1.MetricMatcher_Contains:
-		return escapeRegex(match.Contains), false, false
+		return escapeRegex(match.Contains), false, false, nil
 	case *policyv1.MetricMatcher_Exists:
-		return "", true, match.Exists
+		return "", true, match.Exists, nil
 	default:
-		return "", false, false
+		return "", false, false, errors.New("no match condition set")
 	}
 }
 
@@ -430,42 +512,49 @@ func spanStatusToString(ss policyv1.SpanStatusCode) string {
 }
 
 // extractTraceMatchPattern extracts the pattern string from a TraceMatcher.
-// For SpanKind and SpanStatus fields, the enum value is converted to lowercase for matching.
-func extractTraceMatchPattern(m *policyv1.TraceMatcher) (string, bool, bool) {
+// For SpanKind and SpanStatus fields, the enum value is converted to lowercase
+// for matching and supplies the pattern directly.
+func extractTraceMatchPattern(m *policyv1.TraceMatcher) (string, bool, bool, error) {
 	// Special handling for SpanKind - convert enum to lowercase string for matching
 	if sk, ok := m.GetField().(*policyv1.TraceMatcher_SpanKind); ok {
-		if sk.SpanKind != policyv1.SpanKind_SPAN_KIND_UNSPECIFIED {
-			kindStr := spanKindToString(sk.SpanKind)
-			if kindStr != "" {
-				return "^" + escapeRegex(kindStr) + "$", false, false
-			}
+		if sk.SpanKind == policyv1.SpanKind_SPAN_KIND_UNSPECIFIED {
+			return "", false, false, errors.New("spanKind is unspecified")
 		}
+		kindStr := spanKindToString(sk.SpanKind)
+		if kindStr == "" {
+			return "", false, false, fmt.Errorf("unknown span kind %v", sk.SpanKind)
+		}
+		return "^" + escapeRegex(kindStr) + "$", false, false, nil
 	}
 
 	// Special handling for SpanStatus - convert enum to lowercase string for matching
 	if ss, ok := m.GetField().(*policyv1.TraceMatcher_SpanStatus); ok {
 		statusStr := spanStatusToString(ss.SpanStatus)
-		if statusStr != "" {
-			return "^" + escapeRegex(statusStr) + "$", false, false
+		if statusStr == "" {
+			return "", false, false, fmt.Errorf("unknown span status %v", ss.SpanStatus)
 		}
+		return "^" + escapeRegex(statusStr) + "$", false, false, nil
 	}
 
 	// Standard match patterns
 	switch match := m.GetMatch().(type) {
 	case *policyv1.TraceMatcher_Regex:
-		return match.Regex, false, false
+		if _, err := regexp.Compile(match.Regex); err != nil {
+			return "", false, false, fmt.Errorf("invalid regex %q: %w", match.Regex, err)
+		}
+		return match.Regex, false, false, nil
 	case *policyv1.TraceMatcher_Exact:
-		return escapeRegex(match.Exact), false, false
+		return escapeRegex(match.Exact), false, false, nil
 	case *policyv1.TraceMatcher_StartsWith:
-		return "^" + escapeRegex(match.StartsWith), false, false
+		return "^" + escapeRegex(match.StartsWith), false, false, nil
 	case *policyv1.TraceMatcher_EndsWith:
-		return escapeRegex(match.EndsWith) + "$", false, false
+		return escapeRegex(match.EndsWith) + "$", false, false, nil
 	case *policyv1.TraceMatcher_Contains:
-		return escapeRegex(match.Contains), false, false
+		return escapeRegex(match.Contains), false, false, nil
 	case *policyv1.TraceMatcher_Exists:
-		return "", true, match.Exists
+		return "", true, match.Exists, nil
 	default:
-		return "", false, false
+		return "", false, false, errors.New("no match condition set")
 	}
 }
 

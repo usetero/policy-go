@@ -64,7 +64,7 @@ func TestNewHttpProvider(t *testing.T) {
 			opts:             nil,
 			wantURL:          "http://example.com/sync",
 			wantPollInterval: 60 * time.Second,
-			wantContentType:  ContentTypeProtobuf,
+			wantContentType:  ContentTypeJSON,
 			wantHeaders:      nil,
 		},
 		{
@@ -75,17 +75,17 @@ func TestNewHttpProvider(t *testing.T) {
 			},
 			wantURL:          "http://example.com/sync",
 			wantPollInterval: 30 * time.Second,
-			wantContentType:  ContentTypeProtobuf,
+			wantContentType:  ContentTypeJSON,
 		},
 		{
-			name: "with JSON content type",
+			name: "with protobuf content type",
 			url:  "http://example.com/sync",
 			opts: []HttpProviderOption{
-				WithContentType(ContentTypeJSON),
+				WithContentType(ContentTypeProtobuf),
 			},
 			wantURL:          "http://example.com/sync",
 			wantPollInterval: 60 * time.Second,
-			wantContentType:  ContentTypeJSON,
+			wantContentType:  ContentTypeProtobuf,
 		},
 		{
 			name: "with headers",
@@ -98,7 +98,7 @@ func TestNewHttpProvider(t *testing.T) {
 			},
 			wantURL:          "http://example.com/sync",
 			wantPollInterval: 60 * time.Second,
-			wantContentType:  ContentTypeProtobuf,
+			wantContentType:  ContentTypeJSON,
 			wantHeaders: map[string]string{
 				"Authorization": "Bearer token",
 				"X-Custom":      "value",
@@ -208,7 +208,7 @@ func TestHttpProvider_Load_Protobuf(t *testing.T) {
 		// Verify request
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/x-protobuf", r.Header.Get("Content-Type"))
-		assert.Equal(t, "application/x-protobuf", r.Header.Get("Accept"))
+		assert.Equal(t, "application/x-protobuf, application/json", r.Header.Get("Accept"))
 
 		// Parse request
 		body, _ := io.ReadAll(r.Body)
@@ -228,7 +228,7 @@ func TestHttpProvider_Load_Protobuf(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := NewHttpProvider(server.URL)
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeProtobuf))
 	policies, err := p.Load()
 
 	require.NoError(t, err)
@@ -662,6 +662,7 @@ func TestHttpProvider_Load_WithHeaders(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -699,16 +700,20 @@ func TestHttpProvider_Load_WithServiceMetadata(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
 
-	p := NewHttpProvider(server.URL, WithServiceMetadata(&ServiceMetadata{
-		ServiceName:       "my-service",
-		ServiceNamespace:  "my-namespace",
-		ServiceInstanceID: "instance-1",
-		ServiceVersion:    "1.0.0",
-	}))
+	p := NewHttpProvider(server.URL,
+		WithContentType(ContentTypeProtobuf),
+		WithServiceMetadata(&ServiceMetadata{
+			ServiceName:       "my-service",
+			ServiceNamespace:  "my-namespace",
+			ServiceInstanceID: "instance-1",
+			ServiceVersion:    "1.0.0",
+		}),
+	)
 
 	_, err := p.Load()
 	require.NoError(t, err)
@@ -734,11 +739,12 @@ func TestHttpProvider_Load_WithStatsCollector(t *testing.T) {
 
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
 
-	p := NewHttpProvider(server.URL)
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeProtobuf))
 	p.SetStatsCollector(func() []PolicyStatsSnapshot {
 		return []PolicyStatsSnapshot{
 			{PolicyID: "policy-1", MatchHits: 100},
@@ -785,6 +791,7 @@ func TestHttpProvider_Load_SyncError(t *testing.T) {
 			ErrorMessage: "policy validation failed",
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -822,6 +829,7 @@ func TestHttpProvider_Subscribe(t *testing.T) {
 			Hash: "initial-hash",
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -867,6 +875,7 @@ func TestHttpProvider_Subscribe_WithPolling(t *testing.T) {
 			Hash: hash,
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -914,6 +923,7 @@ func TestHttpProvider_Stop(t *testing.T) {
 		requestCount.Add(1)
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -944,6 +954,7 @@ func TestHttpProvider_Stop_Idempotent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -977,6 +988,7 @@ func TestHttpProvider_OnErrorCallback(t *testing.T) {
 			// First request succeeds for Subscribe
 			resp := &policyv1.SyncResponse{Hash: "test"}
 			respBytes, _ := proto.Marshal(resp)
+			w.Header().Set("Content-Type", "application/x-protobuf")
 			w.Write(respBytes)
 		} else {
 			// Subsequent requests fail
@@ -1008,6 +1020,7 @@ func TestHttpProvider_OnSyncCallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := &policyv1.SyncResponse{Hash: "test"}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -1053,6 +1066,7 @@ func TestHttpProvider_HashChangeDetection(t *testing.T) {
 			Hash:     hash,
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
@@ -1096,11 +1110,15 @@ func TestHttpProvider_IncrementalSync(t *testing.T) {
 			SyncTimestampUnixNano: 123456789,
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()
 
-	p := NewHttpProvider(server.URL, WithHTTPPollInterval(30*time.Millisecond))
+	p := NewHttpProvider(server.URL,
+		WithContentType(ContentTypeProtobuf),
+		WithHTTPPollInterval(30*time.Millisecond),
+	)
 
 	err := p.Subscribe(func(policies []*policyv1.Policy) {})
 	require.NoError(t, err)
@@ -1172,6 +1190,20 @@ func TestCollectPolicyStatuses_Values(t *testing.T) {
 	assert.Equal(t, int64(18), status.GetMatchMisses())
 }
 
+func TestCollectPolicyStatuses_ForwardsErrors(t *testing.T) {
+	collector := func() []PolicyStatsSnapshot {
+		return []PolicyStatsSnapshot{
+			{PolicyID: "broken", Errors: []string{"log: match[0]: logAttribute has empty path"}},
+		}
+	}
+
+	result := collectPolicyStatuses(collector)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, "broken", result[0].GetId())
+	assert.Equal(t, []string{"log: match[0]: logAttribute has empty path"}, result[0].GetErrors())
+}
+
 func TestHttpProvider_ConcurrentAccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := &policyv1.SyncResponse{
@@ -1179,6 +1211,7 @@ func TestHttpProvider_ConcurrentAccess(t *testing.T) {
 			Hash:     "hash",
 		}
 		respBytes, _ := proto.Marshal(resp)
+		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(respBytes)
 	}))
 	defer server.Close()

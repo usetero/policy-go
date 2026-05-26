@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -142,7 +143,8 @@ func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
 
 // compileLogTransform converts a proto LogTransform into a flat slice of TransformOps.
 // Operations are ordered: removes, redacts, renames, adds (matching proto field order).
-// Returns an error if any redact regex fails to compile.
+// All per-op errors are accumulated via errors.Join so callers see every problem
+// at once rather than discovering them one fix at a time.
 func compileLogTransform(t *policyv1.LogTransform) ([]TransformOp, error) {
 	if t == nil {
 		return nil, nil
@@ -154,111 +156,181 @@ func compileLogTransform(t *policyv1.LogTransform) ([]TransformOp, error) {
 	}
 
 	ops := make([]TransformOp, 0, n)
+	var compileErr error
 
-	for _, r := range t.GetRemove() {
-		ops = append(ops, TransformOp{
-			Kind: TransformRemove,
-			Ref:  fieldRefFromLogRemove(r),
-		})
+	for i, r := range t.GetRemove() {
+		ref, err := fieldRefFromLogRemove(r)
+		if err != nil {
+			compileErr = errors.Join(compileErr, fmt.Errorf("remove[%d]: %w", i, err))
+			continue
+		}
+		ops = append(ops, TransformOp{Kind: TransformRemove, Ref: ref})
 	}
 
 	for i, r := range t.GetRedact() {
-		op := TransformOp{
-			Kind:  TransformRedact,
-			Ref:   fieldRefFromLogRedact(r),
-			Value: r.GetReplacement(),
+		ref, err := fieldRefFromLogRedact(r)
+		if err != nil {
+			compileErr = errors.Join(compileErr, fmt.Errorf("redact[%d]: %w", i, err))
+			continue
 		}
+		op := TransformOp{Kind: TransformRedact, Ref: ref, Value: r.GetReplacement()}
 		if r.Regex != nil {
 			re, err := regexp.Compile(r.GetRegex())
 			if err != nil {
-				return nil, fmt.Errorf("redact[%d]: invalid regex %q: %w", i, r.GetRegex(), err)
+				compileErr = errors.Join(compileErr, fmt.Errorf("redact[%d]: invalid regex %q: %w", i, r.GetRegex(), err))
+				continue
 			}
 			op.Regex = re
 		}
 		ops = append(ops, op)
 	}
 
-	for _, r := range t.GetRename() {
+	for i, r := range t.GetRename() {
+		ref, err := fieldRefFromLogRename(r)
+		if err != nil {
+			compileErr = errors.Join(compileErr, fmt.Errorf("rename[%d]: %w", i, err))
+			continue
+		}
+		if r.GetTo() == "" {
+			compileErr = errors.Join(compileErr, fmt.Errorf("rename[%d]: to is empty", i))
+			continue
+		}
 		ops = append(ops, TransformOp{
 			Kind:   TransformRename,
-			Ref:    fieldRefFromLogRename(r),
+			Ref:    ref,
 			To:     r.GetTo(),
 			Upsert: r.GetUpsert(),
 		})
 	}
 
-	for _, a := range t.GetAdd() {
+	for i, a := range t.GetAdd() {
+		ref, err := fieldRefFromLogAdd(a)
+		if err != nil {
+			compileErr = errors.Join(compileErr, fmt.Errorf("add[%d]: %w", i, err))
+			continue
+		}
 		ops = append(ops, TransformOp{
 			Kind:   TransformAdd,
-			Ref:    fieldRefFromLogAdd(a),
+			Ref:    ref,
 			Value:  a.GetValue(),
 			Upsert: a.GetUpsert(),
 		})
 	}
 
+	if compileErr != nil {
+		return nil, compileErr
+	}
 	return ops, nil
 }
 
 // fieldRefFromLogRemove extracts a FieldRef from a proto LogRemove.
-func fieldRefFromLogRemove(r *policyv1.LogRemove) LogFieldRef {
+func fieldRefFromLogRemove(r *policyv1.LogRemove) (LogFieldRef, error) {
 	switch f := r.GetField().(type) {
 	case *policyv1.LogRemove_LogField:
-		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
+		if f.LogField == policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+			return LogFieldRef{}, errUnspecifiedEnum
+		}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}, nil
 	case *policyv1.LogRemove_LogAttribute:
-		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		if len(f.LogAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}, nil
 	case *policyv1.LogRemove_ResourceAttribute:
-		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.LogRemove_ScopeAttribute:
-		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	default:
-		return LogFieldRef{}
+		return LogFieldRef{}, errNoFieldSet
 	}
 }
 
 // fieldRefFromLogRedact extracts a FieldRef from a proto LogRedact.
-func fieldRefFromLogRedact(r *policyv1.LogRedact) LogFieldRef {
+func fieldRefFromLogRedact(r *policyv1.LogRedact) (LogFieldRef, error) {
 	switch f := r.GetField().(type) {
 	case *policyv1.LogRedact_LogField:
-		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
+		if f.LogField == policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+			return LogFieldRef{}, errUnspecifiedEnum
+		}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}, nil
 	case *policyv1.LogRedact_LogAttribute:
-		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		if len(f.LogAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}, nil
 	case *policyv1.LogRedact_ResourceAttribute:
-		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.LogRedact_ScopeAttribute:
-		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	default:
-		return LogFieldRef{}
+		return LogFieldRef{}, errNoFieldSet
 	}
 }
 
 // fieldRefFromLogRename extracts a FieldRef from a proto LogRename's "from" field.
-func fieldRefFromLogRename(r *policyv1.LogRename) LogFieldRef {
+func fieldRefFromLogRename(r *policyv1.LogRename) (LogFieldRef, error) {
 	switch f := r.GetFrom().(type) {
 	case *policyv1.LogRename_FromLogField:
-		return LogFieldRef{Field: logFieldFromProto(f.FromLogField)}
+		if f.FromLogField == policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+			return LogFieldRef{}, errUnspecifiedEnum
+		}
+		return LogFieldRef{Field: logFieldFromProto(f.FromLogField)}, nil
 	case *policyv1.LogRename_FromLogAttribute:
-		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.FromLogAttribute.GetPath()}
+		if len(f.FromLogAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.FromLogAttribute.GetPath()}, nil
 	case *policyv1.LogRename_FromResourceAttribute:
-		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.FromResourceAttribute.GetPath()}
+		if len(f.FromResourceAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.FromResourceAttribute.GetPath()}, nil
 	case *policyv1.LogRename_FromScopeAttribute:
-		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.FromScopeAttribute.GetPath()}
+		if len(f.FromScopeAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.FromScopeAttribute.GetPath()}, nil
 	default:
-		return LogFieldRef{}
+		return LogFieldRef{}, errNoFieldSet
 	}
 }
 
 // fieldRefFromLogAdd extracts a FieldRef from a proto LogAdd.
-func fieldRefFromLogAdd(a *policyv1.LogAdd) LogFieldRef {
+func fieldRefFromLogAdd(a *policyv1.LogAdd) (LogFieldRef, error) {
 	switch f := a.GetField().(type) {
 	case *policyv1.LogAdd_LogField:
-		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
+		if f.LogField == policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+			return LogFieldRef{}, errUnspecifiedEnum
+		}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}, nil
 	case *policyv1.LogAdd_LogAttribute:
-		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		if len(f.LogAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}, nil
 	case *policyv1.LogAdd_ResourceAttribute:
-		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.LogAdd_ScopeAttribute:
-		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	default:
-		return LogFieldRef{}
+		return LogFieldRef{}, errNoFieldSet
 	}
 }

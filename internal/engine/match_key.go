@@ -2,6 +2,8 @@
 package engine
 
 import (
+	"errors"
+
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -429,81 +431,141 @@ func traceFieldFromProto(f policyv1.TraceField) TraceField {
 	}
 }
 
-// FieldRefFromLogMatcher extracts a FieldRef from a proto LogMatcher.
-func FieldRefFromLogMatcher(m *policyv1.LogMatcher) LogFieldRef {
+// Common errors returned when building FieldRefs from proto matchers.
+var (
+	errNoFieldSet      = errors.New("no field set")
+	errEmptyAttrPath   = errors.New("attribute has empty path")
+	errUnspecifiedEnum = errors.New("field is unspecified")
+)
+
+// FieldRefFromLogMatcher extracts a FieldRef from a proto LogMatcher. Returns
+// an error if the field oneof is missing, the field enum is unspecified, or
+// an attribute reference has no path.
+func FieldRefFromLogMatcher(m *policyv1.LogMatcher) (LogFieldRef, error) {
 	switch f := m.GetField().(type) {
 	case *policyv1.LogMatcher_LogField:
-		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
+		if f.LogField == policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+			return LogFieldRef{}, errUnspecifiedEnum
+		}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}, nil
 	case *policyv1.LogMatcher_LogAttribute:
-		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		if len(f.LogAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}, nil
 	case *policyv1.LogMatcher_ResourceAttribute:
-		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.LogMatcher_ScopeAttribute:
-		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	default:
-		return LogFieldRef{}
+		return LogFieldRef{}, errNoFieldSet
 	}
 }
 
 // FieldRefFromLogSampleKey extracts a FieldRef from a proto LogSampleKey.
-func FieldRefFromLogSampleKey(sk *policyv1.LogSampleKey) LogFieldRef {
+func FieldRefFromLogSampleKey(sk *policyv1.LogSampleKey) (LogFieldRef, error) {
 	switch f := sk.GetField().(type) {
 	case *policyv1.LogSampleKey_LogField:
-		return LogFieldRef{Field: logFieldFromProto(f.LogField)}
+		if f.LogField == policyv1.LogField_LOG_FIELD_UNSPECIFIED {
+			return LogFieldRef{}, errUnspecifiedEnum
+		}
+		return LogFieldRef{Field: logFieldFromProto(f.LogField)}, nil
 	case *policyv1.LogSampleKey_LogAttribute:
-		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}
+		if len(f.LogAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.LogAttribute.GetPath()}, nil
 	case *policyv1.LogSampleKey_ResourceAttribute:
-		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.LogSampleKey_ScopeAttribute:
-		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return LogFieldRef{}, errEmptyAttrPath
+		}
+		return LogFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	default:
-		return LogFieldRef{}
+		return LogFieldRef{}, errNoFieldSet
 	}
 }
 
 // FieldRefFromMetricMatcher extracts a FieldRef from a proto MetricMatcher.
-func FieldRefFromMetricMatcher(m *policyv1.MetricMatcher) MetricFieldRef {
+func FieldRefFromMetricMatcher(m *policyv1.MetricMatcher) (MetricFieldRef, error) {
 	switch f := m.GetField().(type) {
 	case *policyv1.MetricMatcher_MetricField:
-		return MetricFieldRef{Field: metricFieldFromProto(f.MetricField)}
+		if f.MetricField == policyv1.MetricField_METRIC_FIELD_UNSPECIFIED {
+			return MetricFieldRef{}, errUnspecifiedEnum
+		}
+		return MetricFieldRef{Field: metricFieldFromProto(f.MetricField)}, nil
 	case *policyv1.MetricMatcher_DatapointAttribute:
-		return MetricFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.DatapointAttribute.GetPath()}
+		if len(f.DatapointAttribute.GetPath()) == 0 {
+			return MetricFieldRef{}, errEmptyAttrPath
+		}
+		return MetricFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.DatapointAttribute.GetPath()}, nil
 	case *policyv1.MetricMatcher_ResourceAttribute:
-		return MetricFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return MetricFieldRef{}, errEmptyAttrPath
+		}
+		return MetricFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.MetricMatcher_ScopeAttribute:
-		return MetricFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return MetricFieldRef{}, errEmptyAttrPath
+		}
+		return MetricFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	case *policyv1.MetricMatcher_MetricType:
-		return MetricFieldRef{Field: MetricFieldType}
+		return MetricFieldRef{Field: MetricFieldType}, nil
 	case *policyv1.MetricMatcher_AggregationTemporality:
-		return MetricFieldRef{Field: MetricFieldAggregationTemporality}
+		return MetricFieldRef{Field: MetricFieldAggregationTemporality}, nil
 	default:
-		return MetricFieldRef{}
+		return MetricFieldRef{}, errNoFieldSet
 	}
 }
 
 // FieldRefFromTraceMatcher extracts a FieldRef from a proto TraceMatcher.
-func FieldRefFromTraceMatcher(m *policyv1.TraceMatcher) TraceFieldRef {
+func FieldRefFromTraceMatcher(m *policyv1.TraceMatcher) (TraceFieldRef, error) {
 	switch f := m.GetField().(type) {
 	case *policyv1.TraceMatcher_TraceField:
-		return TraceFieldRef{Field: traceFieldFromProto(f.TraceField)}
+		if f.TraceField == policyv1.TraceField_TRACE_FIELD_UNSPECIFIED {
+			return TraceFieldRef{}, errUnspecifiedEnum
+		}
+		return TraceFieldRef{Field: traceFieldFromProto(f.TraceField)}, nil
 	case *policyv1.TraceMatcher_SpanAttribute:
-		return TraceFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.SpanAttribute.GetPath()}
+		if len(f.SpanAttribute.GetPath()) == 0 {
+			return TraceFieldRef{}, errEmptyAttrPath
+		}
+		return TraceFieldRef{AttrScope: AttrScopeRecord, AttrPath: f.SpanAttribute.GetPath()}, nil
 	case *policyv1.TraceMatcher_ResourceAttribute:
-		return TraceFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}
+		if len(f.ResourceAttribute.GetPath()) == 0 {
+			return TraceFieldRef{}, errEmptyAttrPath
+		}
+		return TraceFieldRef{AttrScope: AttrScopeResource, AttrPath: f.ResourceAttribute.GetPath()}, nil
 	case *policyv1.TraceMatcher_ScopeAttribute:
-		return TraceFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}
+		if len(f.ScopeAttribute.GetPath()) == 0 {
+			return TraceFieldRef{}, errEmptyAttrPath
+		}
+		return TraceFieldRef{AttrScope: AttrScopeScope, AttrPath: f.ScopeAttribute.GetPath()}, nil
 	case *policyv1.TraceMatcher_EventName:
-		return TraceFieldRef{Field: TraceFieldEventName}
+		return TraceFieldRef{Field: TraceFieldEventName}, nil
 	case *policyv1.TraceMatcher_EventAttribute:
-		return TraceFieldRef{AttrScope: AttrScopeEvent, AttrPath: f.EventAttribute.GetPath()}
+		if len(f.EventAttribute.GetPath()) == 0 {
+			return TraceFieldRef{}, errEmptyAttrPath
+		}
+		return TraceFieldRef{AttrScope: AttrScopeEvent, AttrPath: f.EventAttribute.GetPath()}, nil
 	case *policyv1.TraceMatcher_LinkTraceId:
-		return TraceFieldRef{Field: TraceFieldLinkTraceID}
+		return TraceFieldRef{Field: TraceFieldLinkTraceID}, nil
 	case *policyv1.TraceMatcher_SpanKind:
-		return TraceFieldRef{Field: TraceFieldKind}
+		return TraceFieldRef{Field: TraceFieldKind}, nil
 	case *policyv1.TraceMatcher_SpanStatus:
-		return TraceFieldRef{Field: TraceFieldStatus}
+		return TraceFieldRef{Field: TraceFieldStatus}, nil
 	default:
-		return TraceFieldRef{}
+		return TraceFieldRef{}, errNoFieldSet
 	}
 }
 
