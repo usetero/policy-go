@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"sync"
 	"time"
@@ -16,22 +17,33 @@ import (
 )
 
 // ContentType specifies the encoding format for HTTP requests.
+// Requests are sent in the configured format; responses are decoded based
+// on the server's Content-Type header, so a JSON request can accept a
+// protobuf response (or vice versa) without reconfiguring the provider.
 type ContentType int
 
 const (
-	// ContentTypeProtobuf uses protobuf encoding (default, more efficient).
+	// ContentTypeProtobuf uses protobuf encoding (more compact on the wire).
 	ContentTypeProtobuf ContentType = iota
-	// ContentTypeJSON uses JSON encoding (useful for debugging).
+	// ContentTypeJSON uses JSON encoding (default for new providers;
+	// spec-compliant proto3 JSON, easier to debug).
 	ContentTypeJSON
+)
+
+const (
+	mimeJSON     = "application/json"
+	mimeProtobuf = "application/x-protobuf"
+	// mimeProtobufAlt is the alternate spelling some servers use.
+	mimeProtobufAlt = "application/protobuf"
 )
 
 // String returns the MIME type for the content type.
 func (c ContentType) String() string {
 	switch c {
 	case ContentTypeJSON:
-		return "application/json"
+		return mimeJSON
 	default:
-		return "application/x-protobuf"
+		return mimeProtobuf
 	}
 }
 
@@ -46,8 +58,9 @@ type HttpProviderConfig struct {
 	PollInterval time.Duration
 	// ServiceMetadata identifies this client to the policy server.
 	ServiceMetadata *ServiceMetadata
-	// ContentType specifies the encoding format (protobuf or JSON).
-	// Default is protobuf.
+	// ContentType specifies the encoding format for outgoing requests.
+	// Default is JSON. The provider always decodes responses based on the
+	// server's Content-Type header regardless of this setting.
 	ContentType ContentType
 	// HTTPClient allows providing a custom HTTP client.
 	// If nil, http.DefaultClient is used.
@@ -130,12 +143,14 @@ type HttpProvider struct {
 	wg     sync.WaitGroup
 }
 
-// NewHttpProvider creates a new HTTP policy provider.
+// NewHttpProvider creates a new HTTP policy provider. Requests default to
+// JSON; the server's response Content-Type is honored, so a JSON-sending
+// client will still decode a protobuf response correctly.
 func NewHttpProvider(url string, opts ...HttpProviderOption) *HttpProvider {
 	config := HttpProviderConfig{
 		URL:          url,
 		PollInterval: 60 * time.Second,
-		ContentType:  ContentTypeProtobuf,
+		ContentType:  ContentTypeJSON,
 	}
 
 	for _, opt := range opts {
@@ -256,22 +271,19 @@ func (p *HttpProvider) doSync(ctx context.Context) {
 func (p *HttpProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Policy, error) {
 	req := p.buildSyncRequest(fullSync)
 
-	// Encode request
+	// Encode request body using the configured content type.
 	var body []byte
 	var err error
-	contentType := p.config.ContentType.String()
+	reqContentType := p.config.ContentType.String()
 
 	switch p.config.ContentType {
 	case ContentTypeJSON:
 		body, err = protojson.Marshal(req)
-		if err != nil {
-			return nil, WrapError(ErrProvider, "failed to encode request", err)
-		}
 	default:
 		body, err = proto.Marshal(req)
-		if err != nil {
-			return nil, WrapError(ErrProvider, "failed to encode request", err)
-		}
+	}
+	if err != nil {
+		return nil, WrapError(ErrProvider, "failed to encode request", err)
 	}
 
 	// Build HTTP request
@@ -280,8 +292,14 @@ func (p *HttpProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 		return nil, WrapError(ErrProvider, "failed to create request", err)
 	}
 
-	httpReq.Header.Set("Content-Type", contentType)
-	httpReq.Header.Set("Accept", contentType)
+	httpReq.Header.Set("Content-Type", reqContentType)
+	// Advertise both formats so the server can pick either. The configured
+	// format is listed first as a soft preference.
+	if p.config.ContentType == ContentTypeJSON {
+		httpReq.Header.Set("Accept", mimeJSON+", "+mimeProtobuf)
+	} else {
+		httpReq.Header.Set("Accept", mimeProtobuf+", "+mimeJSON)
+	}
 
 	for k, v := range p.config.Headers {
 		httpReq.Header.Set(k, v)
@@ -305,17 +323,11 @@ func (p *HttpProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 		return nil, WrapError(ErrProvider, "failed to read response", err)
 	}
 
-	// Decode response
-	var syncResp policyv1.SyncResponse
-	switch p.config.ContentType {
-	case ContentTypeJSON:
-		if err := protojson.Unmarshal(respBody, &syncResp); err != nil {
-			return nil, WrapError(ErrProvider, "failed to decode JSON response", err)
-		}
-	default:
-		if err := proto.Unmarshal(respBody, &syncResp); err != nil {
-			return nil, WrapError(ErrProvider, "failed to decode protobuf response", err)
-		}
+	// Decode response based on the server's Content-Type header, not on what
+	// we sent — a JSON request can be answered with a protobuf response.
+	syncResp, err := decodeSyncResponse(respBody, resp.Header.Get("Content-Type"), p.config.ContentType)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check for errors
@@ -334,6 +346,47 @@ func (p *HttpProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 	p.mu.Unlock()
 
 	return syncResp.GetPolicies(), nil
+}
+
+// decodeSyncResponse decodes a sync response body according to the server's
+// Content-Type header. Recognized types: application/json,
+// application/x-protobuf, application/protobuf. If the header is missing or
+// unparseable, falls back to fallback (the format the client sent), since a
+// symmetric server is the most likely answer. An unrecognized non-empty type
+// is an error rather than silent guessing.
+func decodeSyncResponse(body []byte, contentType string, fallback ContentType) (*policyv1.SyncResponse, error) {
+	var mediaType string
+	if contentType != "" {
+		if mt, _, err := mime.ParseMediaType(contentType); err == nil {
+			mediaType = mt
+		}
+	}
+
+	var syncResp policyv1.SyncResponse
+	switch mediaType {
+	case mimeProtobuf, mimeProtobufAlt:
+		if err := proto.Unmarshal(body, &syncResp); err != nil {
+			return nil, WrapError(ErrProvider, "failed to decode protobuf response", err)
+		}
+	case mimeJSON:
+		if err := protojson.Unmarshal(body, &syncResp); err != nil {
+			return nil, WrapError(ErrProvider, "failed to decode JSON response", err)
+		}
+	case "":
+		// Server didn't tell us what it sent — assume it mirrored our request.
+		if fallback == ContentTypeJSON {
+			if err := protojson.Unmarshal(body, &syncResp); err != nil {
+				return nil, WrapError(ErrProvider, "failed to decode response (no Content-Type, fell back to JSON)", err)
+			}
+		} else {
+			if err := proto.Unmarshal(body, &syncResp); err != nil {
+				return nil, WrapError(ErrProvider, "failed to decode response (no Content-Type, fell back to protobuf)", err)
+			}
+		}
+	default:
+		return nil, NewError(ErrProvider, fmt.Sprintf("unsupported response Content-Type %q", contentType))
+	}
+	return &syncResp, nil
 }
 
 func (p *HttpProvider) buildSyncRequest(fullSync bool) *policyv1.SyncRequest {
@@ -374,6 +427,7 @@ func collectPolicyStatuses(collector StatsCollector) []*policyv1.PolicySyncStatu
 			Id:          snap.PolicyID,
 			MatchHits:   int64(snap.MatchHits),
 			MatchMisses: int64(snap.MatchMisses),
+			Errors:      snap.Errors,
 		}
 		if snap.RemoveHits > 0 || snap.RemoveMisses > 0 {
 			status.Remove = &policyv1.TransformStageStatus{Hits: int64(snap.RemoveHits), Misses: int64(snap.RemoveMisses)}

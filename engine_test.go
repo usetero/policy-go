@@ -4411,8 +4411,9 @@ func TestEvaluateLogTransformRedactRegexStatsRecordMiss(t *testing.T) {
 	assert.Equal(t, uint64(1), snap.RedactMisses, "regex no-match should count as miss")
 }
 
-func TestCompileInvalidRedactRegexFails(t *testing.T) {
+func TestCompileInvalidRedactRegexReportsPerPolicy(t *testing.T) {
 	registry := NewPolicyRegistry()
+	registry.SetIncludeZeroHitPolicyStats(true)
 	var compileErr error
 	registry.SetOnRecompile(func(err error) {
 		compileErr = err
@@ -4447,6 +4448,21 @@ func TestCompileInvalidRedactRegexFails(t *testing.T) {
 	})
 	_, err := registry.Register(provider)
 	require.NoError(t, err)
-	require.Error(t, compileErr, "invalid regex must surface as a compile error")
-	assert.Contains(t, compileErr.Error(), "bad-regex")
+	require.NoError(t, compileErr, "per-policy errors must not abort the batch")
+
+	stats := registry.CollectStats()
+	var snap *PolicyStatsSnapshot
+	for i := range stats {
+		if stats[i].PolicyID == "bad-regex" {
+			snap = &stats[i]
+			break
+		}
+	}
+	require.NotNil(t, snap, "expected stats snapshot for bad-regex carrying the compile error")
+	require.NotEmpty(t, snap.Errors, "expected compile errors to surface via PolicyStatsSnapshot.Errors")
+	joined := ""
+	for _, e := range snap.Errors {
+		joined += e + "\n"
+	}
+	assert.Contains(t, joined, "invalid regex")
 }

@@ -38,6 +38,7 @@ type PolicyRegistry struct {
 	nextId                    atomic.Uint64
 	providers                 map[ProviderId]*providerEntry
 	stats                     map[string]*engine.PolicyStats
+	compileErrors             map[string][]string
 	includeZeroHitPolicyStats bool
 	logSnapshot               *LogSnapshot
 	metricSnapshot            *MetricSnapshot
@@ -124,19 +125,33 @@ func (r *PolicyRegistry) TraceSnapshot() *TraceSnapshot {
 }
 
 // CollectStats atomically reads and resets stats for all policies, returning
-// snapshots of the delta since the last call.
+// snapshots of the delta since the last call. Compile errors from the most
+// recent recompile are attached to each snapshot's Errors field so providers
+// can forward them to the policy server. Policies that failed validation but
+// have no runtime counters are still reported when they have errors.
 // This is the StatsCollector implementation that gets registered with providers.
 func (r *PolicyRegistry) CollectStats() []PolicyStatsSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	seen := make(map[string]bool, len(r.stats))
 	snapshots := make([]PolicyStatsSnapshot, 0, len(r.stats))
 	for id, stats := range r.stats {
 		snapshot := stats.Snapshot(id)
+		snapshot.Errors = r.compileErrors[id]
+		seen[id] = true
 		if !r.includeZeroHitPolicyStats && isZeroPolicyStatsSnapshot(snapshot) {
 			continue
 		}
 		snapshots = append(snapshots, snapshot)
+	}
+	// Policies that failed validation never got a PolicyStats entry; emit
+	// them so the server learns about the error even with no runtime counters.
+	for id, errs := range r.compileErrors {
+		if seen[id] {
+			continue
+		}
+		snapshots = append(snapshots, PolicyStatsSnapshot{PolicyID: id, Errors: errs})
 	}
 	return snapshots
 }
@@ -201,6 +216,8 @@ func (r *PolicyRegistry) recompileLocked() error {
 		return err
 	}
 
+	r.compileErrors = result.Errors
+
 	// Create new snapshots
 	// Note: Old snapshots remain valid - Hyperscan resources are cleaned up
 	// by Go's garbage collector via finalizers set by the gohs library.
@@ -221,5 +238,6 @@ func isZeroPolicyStatsSnapshot(s PolicyStatsSnapshot) bool {
 		s.RenameHits == 0 &&
 		s.RenameMisses == 0 &&
 		s.AddHits == 0 &&
-		s.AddMisses == 0
+		s.AddMisses == 0 &&
+		len(s.Errors) == 0
 }

@@ -150,7 +150,8 @@ func TestFieldRefFromLogRemoveAllScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref := fieldRefFromLogRemove(tt.proto)
+			ref, err := fieldRefFromLogRemove(tt.proto)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, ref)
 		})
 	}
@@ -195,7 +196,8 @@ func TestFieldRefFromLogRedactAllScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref := fieldRefFromLogRedact(tt.proto)
+			ref, err := fieldRefFromLogRedact(tt.proto)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, ref)
 		})
 	}
@@ -237,7 +239,8 @@ func TestFieldRefFromLogRenameAllScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref := fieldRefFromLogRename(tt.proto)
+			ref, err := fieldRefFromLogRename(tt.proto)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, ref)
 		})
 	}
@@ -279,7 +282,8 @@ func TestFieldRefFromLogAddAllScopes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ref := fieldRefFromLogAdd(tt.proto)
+			ref, err := fieldRefFromLogAdd(tt.proto)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, ref)
 		})
 	}
