@@ -282,6 +282,10 @@ type MetricMatcher struct {
 	// Match type. Exactly one must be set.
 	// Note: For metric_type field, only exists is valid (type equality is implicit).
 	//
+	// The string match types (exact, regex, starts_with, ends_with, contains)
+	// operate only on string field values. To match non-string values, use the
+	// typed equals matcher or the numeric comparison matchers (gt, gte, lt, lte).
+	//
 	// Types that are valid to be assigned to Match:
 	//
 	//	*MetricMatcher_Exact
@@ -290,6 +294,11 @@ type MetricMatcher struct {
 	//	*MetricMatcher_StartsWith
 	//	*MetricMatcher_EndsWith
 	//	*MetricMatcher_Contains
+	//	*MetricMatcher_Equals
+	//	*MetricMatcher_Gt
+	//	*MetricMatcher_Gte
+	//	*MetricMatcher_Lt
+	//	*MetricMatcher_Lte
 	Match isMetricMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
 	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
@@ -451,6 +460,51 @@ func (x *MetricMatcher) GetContains() string {
 	return ""
 }
 
+func (x *MetricMatcher) GetEquals() *Value {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_Equals); ok {
+			return x.Equals
+		}
+	}
+	return nil
+}
+
+func (x *MetricMatcher) GetGt() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_Gt); ok {
+			return x.Gt
+		}
+	}
+	return nil
+}
+
+func (x *MetricMatcher) GetGte() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_Gte); ok {
+			return x.Gte
+		}
+	}
+	return nil
+}
+
+func (x *MetricMatcher) GetLt() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_Lt); ok {
+			return x.Lt
+		}
+	}
+	return nil
+}
+
+func (x *MetricMatcher) GetLte() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*MetricMatcher_Lte); ok {
+			return x.Lte
+		}
+	}
+	return nil
+}
+
 func (x *MetricMatcher) GetNegate() bool {
 	if x != nil {
 		return x.Negate
@@ -516,12 +570,12 @@ type isMetricMatcher_Match interface {
 }
 
 type MetricMatcher_Exact struct {
-	// Exact string match
+	// Exact string match (string field values only)
 	Exact string `protobuf:"bytes,10,opt,name=exact,proto3,oneof"`
 }
 
 type MetricMatcher_Regex struct {
-	// Regular expression match
+	// Regular expression match (string field values only)
 	Regex string `protobuf:"bytes,11,opt,name=regex,proto3,oneof"`
 }
 
@@ -531,18 +585,43 @@ type MetricMatcher_Exists struct {
 }
 
 type MetricMatcher_StartsWith struct {
-	// Literal prefix match
+	// Literal prefix match (string field values only)
 	StartsWith string `protobuf:"bytes,13,opt,name=starts_with,json=startsWith,proto3,oneof"`
 }
 
 type MetricMatcher_EndsWith struct {
-	// Literal suffix match
+	// Literal suffix match (string field values only)
 	EndsWith string `protobuf:"bytes,14,opt,name=ends_with,json=endsWith,proto3,oneof"`
 }
 
 type MetricMatcher_Contains struct {
-	// Literal substring match
+	// Literal substring match (string field values only)
 	Contains string `protobuf:"bytes,15,opt,name=contains,proto3,oneof"`
+}
+
+type MetricMatcher_Equals struct {
+	// Typed equality for non-string field values (bool, int, double, bytes)
+	Equals *Value `protobuf:"bytes,22,opt,name=equals,proto3,oneof"`
+}
+
+type MetricMatcher_Gt struct {
+	// Numeric greater-than comparison (int/double field values)
+	Gt *NumericValue `protobuf:"bytes,23,opt,name=gt,proto3,oneof"`
+}
+
+type MetricMatcher_Gte struct {
+	// Numeric greater-than-or-equal comparison (int/double field values)
+	Gte *NumericValue `protobuf:"bytes,24,opt,name=gte,proto3,oneof"`
+}
+
+type MetricMatcher_Lt struct {
+	// Numeric less-than comparison (int/double field values)
+	Lt *NumericValue `protobuf:"bytes,25,opt,name=lt,proto3,oneof"`
+}
+
+type MetricMatcher_Lte struct {
+	// Numeric less-than-or-equal comparison (int/double field values)
+	Lte *NumericValue `protobuf:"bytes,26,opt,name=lte,proto3,oneof"`
 }
 
 func (*MetricMatcher_Exact) isMetricMatcher_Match() {}
@@ -557,6 +636,16 @@ func (*MetricMatcher_EndsWith) isMetricMatcher_Match() {}
 
 func (*MetricMatcher_Contains) isMetricMatcher_Match() {}
 
+func (*MetricMatcher_Equals) isMetricMatcher_Match() {}
+
+func (*MetricMatcher_Gt) isMetricMatcher_Match() {}
+
+func (*MetricMatcher_Gte) isMetricMatcher_Match() {}
+
+func (*MetricMatcher_Lt) isMetricMatcher_Match() {}
+
+func (*MetricMatcher_Lte) isMetricMatcher_Match() {}
+
 var File_tero_policy_v1_metric_proto protoreflect.FileDescriptor
 
 const file_tero_policy_v1_metric_proto_rawDesc = "" +
@@ -564,7 +653,7 @@ const file_tero_policy_v1_metric_proto_rawDesc = "" +
 	"\x1btero/policy/v1/metric.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"W\n" +
 	"\fMetricTarget\x123\n" +
 	"\x05match\x18\x01 \x03(\v2\x1d.tero.policy.v1.MetricMatcherR\x05match\x12\x12\n" +
-	"\x04keep\x18\x02 \x01(\bR\x04keep\"\xde\x05\n" +
+	"\x04keep\x18\x02 \x01(\bR\x04keep\"\xd3\a\n" +
 	"\rMetricMatcher\x12@\n" +
 	"\fmetric_field\x18\x01 \x01(\x0e2\x1b.tero.policy.v1.MetricFieldH\x00R\vmetricField\x12P\n" +
 	"\x13datapoint_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x12datapointAttribute\x12N\n" +
@@ -580,7 +669,12 @@ const file_tero_policy_v1_metric_proto_rawDesc = "" +
 	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
 	"startsWith\x12\x1d\n" +
 	"\tends_with\x18\x0e \x01(\tH\x01R\bendsWith\x12\x1c\n" +
-	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12\x16\n" +
+	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12/\n" +
+	"\x06equals\x18\x16 \x01(\v2\x15.tero.policy.v1.ValueH\x01R\x06equals\x12.\n" +
+	"\x02gt\x18\x17 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x02gt\x120\n" +
+	"\x03gte\x18\x18 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x03gte\x12.\n" +
+	"\x02lt\x18\x19 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x02lt\x120\n" +
+	"\x03lte\x18\x1a \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x03lte\x12\x16\n" +
 	"\x06negate\x18\x14 \x01(\bR\x06negate\x12)\n" +
 	"\x10case_insensitive\x18\x15 \x01(\bR\x0fcaseInsensitiveB\a\n" +
 	"\x05fieldB\a\n" +
@@ -629,20 +723,27 @@ var file_tero_policy_v1_metric_proto_goTypes = []any{
 	(*MetricTarget)(nil),        // 3: tero.policy.v1.MetricTarget
 	(*MetricMatcher)(nil),       // 4: tero.policy.v1.MetricMatcher
 	(*AttributePath)(nil),       // 5: tero.policy.v1.AttributePath
+	(*Value)(nil),               // 6: tero.policy.v1.Value
+	(*NumericValue)(nil),        // 7: tero.policy.v1.NumericValue
 }
 var file_tero_policy_v1_metric_proto_depIdxs = []int32{
-	4, // 0: tero.policy.v1.MetricTarget.match:type_name -> tero.policy.v1.MetricMatcher
-	0, // 1: tero.policy.v1.MetricMatcher.metric_field:type_name -> tero.policy.v1.MetricField
-	5, // 2: tero.policy.v1.MetricMatcher.datapoint_attribute:type_name -> tero.policy.v1.AttributePath
-	5, // 3: tero.policy.v1.MetricMatcher.resource_attribute:type_name -> tero.policy.v1.AttributePath
-	5, // 4: tero.policy.v1.MetricMatcher.scope_attribute:type_name -> tero.policy.v1.AttributePath
-	1, // 5: tero.policy.v1.MetricMatcher.metric_type:type_name -> tero.policy.v1.MetricType
-	2, // 6: tero.policy.v1.MetricMatcher.aggregation_temporality:type_name -> tero.policy.v1.AggregationTemporality
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	4,  // 0: tero.policy.v1.MetricTarget.match:type_name -> tero.policy.v1.MetricMatcher
+	0,  // 1: tero.policy.v1.MetricMatcher.metric_field:type_name -> tero.policy.v1.MetricField
+	5,  // 2: tero.policy.v1.MetricMatcher.datapoint_attribute:type_name -> tero.policy.v1.AttributePath
+	5,  // 3: tero.policy.v1.MetricMatcher.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	5,  // 4: tero.policy.v1.MetricMatcher.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	1,  // 5: tero.policy.v1.MetricMatcher.metric_type:type_name -> tero.policy.v1.MetricType
+	2,  // 6: tero.policy.v1.MetricMatcher.aggregation_temporality:type_name -> tero.policy.v1.AggregationTemporality
+	6,  // 7: tero.policy.v1.MetricMatcher.equals:type_name -> tero.policy.v1.Value
+	7,  // 8: tero.policy.v1.MetricMatcher.gt:type_name -> tero.policy.v1.NumericValue
+	7,  // 9: tero.policy.v1.MetricMatcher.gte:type_name -> tero.policy.v1.NumericValue
+	7,  // 10: tero.policy.v1.MetricMatcher.lt:type_name -> tero.policy.v1.NumericValue
+	7,  // 11: tero.policy.v1.MetricMatcher.lte:type_name -> tero.policy.v1.NumericValue
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_metric_proto_init() }
@@ -664,6 +765,11 @@ func file_tero_policy_v1_metric_proto_init() {
 		(*MetricMatcher_StartsWith)(nil),
 		(*MetricMatcher_EndsWith)(nil),
 		(*MetricMatcher_Contains)(nil),
+		(*MetricMatcher_Equals)(nil),
+		(*MetricMatcher_Gt)(nil),
+		(*MetricMatcher_Gte)(nil),
+		(*MetricMatcher_Lt)(nil),
+		(*MetricMatcher_Lte)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

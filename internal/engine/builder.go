@@ -13,6 +13,7 @@ type matchersBuilder[T FieldType] struct {
 	groups          map[matchKeyString][]patternEntry
 	groupKeys       map[matchKeyString]MatchKey[T]
 	existenceChecks []ExistenceCheck[T]
+	typedChecks     []TypedCheck[T]
 	policies        map[string]*CompiledPolicy[T]
 	policyList      []*CompiledPolicy[T]
 	policyIndices   map[string]int
@@ -73,6 +74,21 @@ func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExist
 	b.groupKeys[keyStr] = key
 }
 
+// addTypedCheck registers a typed comparison (equals/gt/gte/lt/lte). These
+// bypass Hyperscan entirely — the comparison is done at evaluation time
+// against the consumer's TypedValue accessor.
+func (b *matchersBuilder[T]) addTypedCheck(ref FieldRef[T], op TypedOp, target FieldValue, negate bool, policyID string, policyIndex int, matcherIndex int) {
+	b.typedChecks = append(b.typedChecks, TypedCheck[T]{
+		Ref:         ref,
+		Op:          op,
+		Target:      target,
+		Negate:      negate,
+		PolicyID:    policyID,
+		PolicyIndex: policyIndex,
+		MatchIndex:  matcherIndex,
+	})
+}
+
 // finalizePolicy completes the policy with its keep action and other metadata.
 func (b *matchersBuilder[T]) finalizePolicy(policyID string, policyIndex int, keep Keep, matcherCount int, sampleKey *FieldRef[T], stats *PolicyStats, transforms []TransformOp) {
 	// Create rate limiter if needed
@@ -107,6 +123,7 @@ func (b *matchersBuilder[T]) build() (*CompiledMatchers[T], error) {
 	result := &CompiledMatchers[T]{
 		databases:       make([]DatabaseEntry[T], 0, len(b.groups)),
 		existenceChecks: b.existenceChecks,
+		typedChecks:     b.typedChecks,
 		policies:        b.policies,
 		policyList:      b.policyList,
 	}

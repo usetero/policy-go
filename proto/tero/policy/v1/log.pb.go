@@ -29,9 +29,13 @@ const (
 	// Log record fields
 	LogField_LOG_FIELD_BODY          LogField = 1
 	LogField_LOG_FIELD_SEVERITY_TEXT LogField = 2
-	LogField_LOG_FIELD_TRACE_ID      LogField = 3
-	LogField_LOG_FIELD_SPAN_ID       LogField = 4
-	LogField_LOG_FIELD_EVENT_NAME    LogField = 5
+	// trace_id and span_id are bytes. They are authored as lowercase hex and
+	// matched as raw bytes (exact/equals), or as their hex rendering for string
+	// match types. See the Value message and the spec's
+	// "Bytes and Identifier Fields" section.
+	LogField_LOG_FIELD_TRACE_ID   LogField = 3
+	LogField_LOG_FIELD_SPAN_ID    LogField = 4
+	LogField_LOG_FIELD_EVENT_NAME LogField = 5
 	// Schema URLs
 	LogField_LOG_FIELD_RESOURCE_SCHEMA_URL LogField = 10
 	LogField_LOG_FIELD_SCOPE_SCHEMA_URL    LogField = 11
@@ -331,6 +335,10 @@ type LogMatcher struct {
 	Field isLogMatcher_Field `protobuf_oneof:"field"`
 	// Match type. Exactly one must be set.
 	//
+	// The string match types (exact, regex, starts_with, ends_with, contains)
+	// operate only on string field values. To match non-string values, use the
+	// typed equals matcher or the numeric comparison matchers (gt, gte, lt, lte).
+	//
 	// Types that are valid to be assigned to Match:
 	//
 	//	*LogMatcher_Exact
@@ -339,6 +347,11 @@ type LogMatcher struct {
 	//	*LogMatcher_StartsWith
 	//	*LogMatcher_EndsWith
 	//	*LogMatcher_Contains
+	//	*LogMatcher_Equals
+	//	*LogMatcher_Gt
+	//	*LogMatcher_Gte
+	//	*LogMatcher_Lt
+	//	*LogMatcher_Lte
 	Match isLogMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
 	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
@@ -482,6 +495,51 @@ func (x *LogMatcher) GetContains() string {
 	return ""
 }
 
+func (x *LogMatcher) GetEquals() *Value {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_Equals); ok {
+			return x.Equals
+		}
+	}
+	return nil
+}
+
+func (x *LogMatcher) GetGt() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_Gt); ok {
+			return x.Gt
+		}
+	}
+	return nil
+}
+
+func (x *LogMatcher) GetGte() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_Gte); ok {
+			return x.Gte
+		}
+	}
+	return nil
+}
+
+func (x *LogMatcher) GetLt() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_Lt); ok {
+			return x.Lt
+		}
+	}
+	return nil
+}
+
+func (x *LogMatcher) GetLte() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*LogMatcher_Lte); ok {
+			return x.Lte
+		}
+	}
+	return nil
+}
+
 func (x *LogMatcher) GetNegate() bool {
 	if x != nil {
 		return x.Negate
@@ -533,12 +591,12 @@ type isLogMatcher_Match interface {
 }
 
 type LogMatcher_Exact struct {
-	// Exact string match
+	// Exact string match (string field values only)
 	Exact string `protobuf:"bytes,10,opt,name=exact,proto3,oneof"`
 }
 
 type LogMatcher_Regex struct {
-	// Regular expression match
+	// Regular expression match (string field values only)
 	Regex string `protobuf:"bytes,11,opt,name=regex,proto3,oneof"`
 }
 
@@ -548,18 +606,43 @@ type LogMatcher_Exists struct {
 }
 
 type LogMatcher_StartsWith struct {
-	// Literal prefix match
+	// Literal prefix match (string field values only)
 	StartsWith string `protobuf:"bytes,13,opt,name=starts_with,json=startsWith,proto3,oneof"`
 }
 
 type LogMatcher_EndsWith struct {
-	// Literal suffix match
+	// Literal suffix match (string field values only)
 	EndsWith string `protobuf:"bytes,14,opt,name=ends_with,json=endsWith,proto3,oneof"`
 }
 
 type LogMatcher_Contains struct {
-	// Literal substring match
+	// Literal substring match (string field values only)
 	Contains string `protobuf:"bytes,15,opt,name=contains,proto3,oneof"`
+}
+
+type LogMatcher_Equals struct {
+	// Typed equality for non-string field values (bool, int, double, bytes)
+	Equals *Value `protobuf:"bytes,22,opt,name=equals,proto3,oneof"`
+}
+
+type LogMatcher_Gt struct {
+	// Numeric greater-than comparison (int/double field values)
+	Gt *NumericValue `protobuf:"bytes,23,opt,name=gt,proto3,oneof"`
+}
+
+type LogMatcher_Gte struct {
+	// Numeric greater-than-or-equal comparison (int/double field values)
+	Gte *NumericValue `protobuf:"bytes,24,opt,name=gte,proto3,oneof"`
+}
+
+type LogMatcher_Lt struct {
+	// Numeric less-than comparison (int/double field values)
+	Lt *NumericValue `protobuf:"bytes,25,opt,name=lt,proto3,oneof"`
+}
+
+type LogMatcher_Lte struct {
+	// Numeric less-than-or-equal comparison (int/double field values)
+	Lte *NumericValue `protobuf:"bytes,26,opt,name=lte,proto3,oneof"`
 }
 
 func (*LogMatcher_Exact) isLogMatcher_Match() {}
@@ -573,6 +656,16 @@ func (*LogMatcher_StartsWith) isLogMatcher_Match() {}
 func (*LogMatcher_EndsWith) isLogMatcher_Match() {}
 
 func (*LogMatcher_Contains) isLogMatcher_Match() {}
+
+func (*LogMatcher_Equals) isLogMatcher_Match() {}
+
+func (*LogMatcher_Gt) isLogMatcher_Match() {}
+
+func (*LogMatcher_Gte) isLogMatcher_Match() {}
+
+func (*LogMatcher_Lt) isLogMatcher_Match() {}
+
+func (*LogMatcher_Lte) isLogMatcher_Match() {}
 
 // LogTransform defines modifications to logs.
 type LogTransform struct {
@@ -1211,7 +1304,7 @@ const file_tero_policy_v1_log_proto_rawDesc = "" +
 	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
 	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
 	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttributeB\a\n" +
-	"\x05field\"\xa4\x04\n" +
+	"\x05field\"\x99\x06\n" +
 	"\n" +
 	"LogMatcher\x127\n" +
 	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
@@ -1225,7 +1318,12 @@ const file_tero_policy_v1_log_proto_rawDesc = "" +
 	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
 	"startsWith\x12\x1d\n" +
 	"\tends_with\x18\x0e \x01(\tH\x01R\bendsWith\x12\x1c\n" +
-	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12\x16\n" +
+	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12/\n" +
+	"\x06equals\x18\x16 \x01(\v2\x15.tero.policy.v1.ValueH\x01R\x06equals\x12.\n" +
+	"\x02gt\x18\x17 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x02gt\x120\n" +
+	"\x03gte\x18\x18 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x03gte\x12.\n" +
+	"\x02lt\x18\x19 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x02lt\x120\n" +
+	"\x03lte\x18\x1a \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x03lte\x12\x16\n" +
 	"\x06negate\x18\x14 \x01(\bR\x06negate\x12)\n" +
 	"\x10case_insensitive\x18\x15 \x01(\bR\x0fcaseInsensitiveB\a\n" +
 	"\x05fieldB\a\n" +
@@ -1305,6 +1403,8 @@ var file_tero_policy_v1_log_proto_goTypes = []any{
 	(*LogRename)(nil),     // 7: tero.policy.v1.LogRename
 	(*LogAdd)(nil),        // 8: tero.policy.v1.LogAdd
 	(*AttributePath)(nil), // 9: tero.policy.v1.AttributePath
+	(*Value)(nil),         // 10: tero.policy.v1.Value
+	(*NumericValue)(nil),  // 11: tero.policy.v1.NumericValue
 }
 var file_tero_policy_v1_log_proto_depIdxs = []int32{
 	3,  // 0: tero.policy.v1.LogTarget.match:type_name -> tero.policy.v1.LogMatcher
@@ -1318,31 +1418,36 @@ var file_tero_policy_v1_log_proto_depIdxs = []int32{
 	9,  // 8: tero.policy.v1.LogMatcher.log_attribute:type_name -> tero.policy.v1.AttributePath
 	9,  // 9: tero.policy.v1.LogMatcher.resource_attribute:type_name -> tero.policy.v1.AttributePath
 	9,  // 10: tero.policy.v1.LogMatcher.scope_attribute:type_name -> tero.policy.v1.AttributePath
-	5,  // 11: tero.policy.v1.LogTransform.remove:type_name -> tero.policy.v1.LogRemove
-	6,  // 12: tero.policy.v1.LogTransform.redact:type_name -> tero.policy.v1.LogRedact
-	7,  // 13: tero.policy.v1.LogTransform.rename:type_name -> tero.policy.v1.LogRename
-	8,  // 14: tero.policy.v1.LogTransform.add:type_name -> tero.policy.v1.LogAdd
-	0,  // 15: tero.policy.v1.LogRemove.log_field:type_name -> tero.policy.v1.LogField
-	9,  // 16: tero.policy.v1.LogRemove.log_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 17: tero.policy.v1.LogRemove.resource_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 18: tero.policy.v1.LogRemove.scope_attribute:type_name -> tero.policy.v1.AttributePath
-	0,  // 19: tero.policy.v1.LogRedact.log_field:type_name -> tero.policy.v1.LogField
-	9,  // 20: tero.policy.v1.LogRedact.log_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 21: tero.policy.v1.LogRedact.resource_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 22: tero.policy.v1.LogRedact.scope_attribute:type_name -> tero.policy.v1.AttributePath
-	0,  // 23: tero.policy.v1.LogRename.from_log_field:type_name -> tero.policy.v1.LogField
-	9,  // 24: tero.policy.v1.LogRename.from_log_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 25: tero.policy.v1.LogRename.from_resource_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 26: tero.policy.v1.LogRename.from_scope_attribute:type_name -> tero.policy.v1.AttributePath
-	0,  // 27: tero.policy.v1.LogAdd.log_field:type_name -> tero.policy.v1.LogField
-	9,  // 28: tero.policy.v1.LogAdd.log_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 29: tero.policy.v1.LogAdd.resource_attribute:type_name -> tero.policy.v1.AttributePath
-	9,  // 30: tero.policy.v1.LogAdd.scope_attribute:type_name -> tero.policy.v1.AttributePath
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	10, // 11: tero.policy.v1.LogMatcher.equals:type_name -> tero.policy.v1.Value
+	11, // 12: tero.policy.v1.LogMatcher.gt:type_name -> tero.policy.v1.NumericValue
+	11, // 13: tero.policy.v1.LogMatcher.gte:type_name -> tero.policy.v1.NumericValue
+	11, // 14: tero.policy.v1.LogMatcher.lt:type_name -> tero.policy.v1.NumericValue
+	11, // 15: tero.policy.v1.LogMatcher.lte:type_name -> tero.policy.v1.NumericValue
+	5,  // 16: tero.policy.v1.LogTransform.remove:type_name -> tero.policy.v1.LogRemove
+	6,  // 17: tero.policy.v1.LogTransform.redact:type_name -> tero.policy.v1.LogRedact
+	7,  // 18: tero.policy.v1.LogTransform.rename:type_name -> tero.policy.v1.LogRename
+	8,  // 19: tero.policy.v1.LogTransform.add:type_name -> tero.policy.v1.LogAdd
+	0,  // 20: tero.policy.v1.LogRemove.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 21: tero.policy.v1.LogRemove.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 22: tero.policy.v1.LogRemove.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 23: tero.policy.v1.LogRemove.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 24: tero.policy.v1.LogRedact.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 25: tero.policy.v1.LogRedact.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 26: tero.policy.v1.LogRedact.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 27: tero.policy.v1.LogRedact.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 28: tero.policy.v1.LogRename.from_log_field:type_name -> tero.policy.v1.LogField
+	9,  // 29: tero.policy.v1.LogRename.from_log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 30: tero.policy.v1.LogRename.from_resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 31: tero.policy.v1.LogRename.from_scope_attribute:type_name -> tero.policy.v1.AttributePath
+	0,  // 32: tero.policy.v1.LogAdd.log_field:type_name -> tero.policy.v1.LogField
+	9,  // 33: tero.policy.v1.LogAdd.log_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 34: tero.policy.v1.LogAdd.resource_attribute:type_name -> tero.policy.v1.AttributePath
+	9,  // 35: tero.policy.v1.LogAdd.scope_attribute:type_name -> tero.policy.v1.AttributePath
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_log_proto_init() }
@@ -1368,6 +1473,11 @@ func file_tero_policy_v1_log_proto_init() {
 		(*LogMatcher_StartsWith)(nil),
 		(*LogMatcher_EndsWith)(nil),
 		(*LogMatcher_Contains)(nil),
+		(*LogMatcher_Equals)(nil),
+		(*LogMatcher_Gt)(nil),
+		(*LogMatcher_Gte)(nil),
+		(*LogMatcher_Lt)(nil),
+		(*LogMatcher_Lte)(nil),
 	}
 	file_tero_policy_v1_log_proto_msgTypes[4].OneofWrappers = []any{
 		(*LogRemove_LogField)(nil),

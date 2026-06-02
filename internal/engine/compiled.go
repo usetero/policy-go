@@ -121,6 +121,7 @@ type CompiledPolicy[T FieldType] struct {
 type CompiledMatchers[T FieldType] struct {
 	databases       []DatabaseEntry[T]
 	existenceChecks []ExistenceCheck[T]
+	typedChecks     []TypedCheck[T]
 	policies        map[string]*CompiledPolicy[T]
 	policyList      []*CompiledPolicy[T] // Index-ordered list for fast lookup
 }
@@ -146,6 +147,11 @@ func (c *CompiledMatchers[T]) Databases() []DatabaseEntry[T] {
 // ExistenceChecks returns the existence checks.
 func (c *CompiledMatchers[T]) ExistenceChecks() []ExistenceCheck[T] {
 	return c.existenceChecks
+}
+
+// TypedChecks returns the typed-comparison checks (equals/gt/gte/lt/lte).
+func (c *CompiledMatchers[T]) TypedChecks() []TypedCheck[T] {
+	return c.typedChecks
 }
 
 // Policies returns the compiled policies.
@@ -256,10 +262,22 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 
 			for i, m := range log.GetMatch() {
 				ref, refErr := FieldRefFromLogMatcher(m)
-				pattern, isExistence, mustExist, patErr := extractMatchPattern(m)
 				addErr(fmt.Sprintf("log: match[%d]", i), refErr)
+				if refErr != nil {
+					continue
+				}
+				op, target, isTyped, typedErr := extractLogTypedMatch(m)
+				if isTyped {
+					addErr(fmt.Sprintf("log: match[%d]", i), typedErr)
+					if typedErr != nil {
+						continue
+					}
+					logBuilder.addTypedCheck(ref, op, target, m.GetNegate(), id, idx, i)
+					continue
+				}
+				pattern, isExistence, mustExist, patErr := extractMatchPattern(m)
 				addErr(fmt.Sprintf("log: match[%d]", i), patErr)
-				if refErr != nil || patErr != nil {
+				if patErr != nil {
 					continue
 				}
 				logBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
@@ -281,10 +299,22 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 
 			for i, m := range metric.GetMatch() {
 				ref, refErr := FieldRefFromMetricMatcher(m)
-				pattern, isExistence, mustExist, patErr := extractMetricMatchPattern(m)
 				addErr(fmt.Sprintf("metric: match[%d]", i), refErr)
+				if refErr != nil {
+					continue
+				}
+				op, target, isTyped, typedErr := extractMetricTypedMatch(m)
+				if isTyped {
+					addErr(fmt.Sprintf("metric: match[%d]", i), typedErr)
+					if typedErr != nil {
+						continue
+					}
+					metricBuilder.addTypedCheck(ref, op, target, m.GetNegate(), id, idx, i)
+					continue
+				}
+				pattern, isExistence, mustExist, patErr := extractMetricMatchPattern(m)
 				addErr(fmt.Sprintf("metric: match[%d]", i), patErr)
-				if refErr != nil || patErr != nil {
+				if patErr != nil {
 					continue
 				}
 				metricBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
@@ -302,10 +332,22 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 
 			for i, m := range trace.GetMatch() {
 				ref, refErr := FieldRefFromTraceMatcher(m)
-				pattern, isExistence, mustExist, patErr := extractTraceMatchPattern(m)
 				addErr(fmt.Sprintf("trace: match[%d]", i), refErr)
+				if refErr != nil {
+					continue
+				}
+				op, target, isTyped, typedErr := extractTraceTypedMatch(m)
+				if isTyped {
+					addErr(fmt.Sprintf("trace: match[%d]", i), typedErr)
+					if typedErr != nil {
+						continue
+					}
+					traceBuilder.addTypedCheck(ref, op, target, m.GetNegate(), id, idx, i)
+					continue
+				}
+				pattern, isExistence, mustExist, patErr := extractTraceMatchPattern(m)
 				addErr(fmt.Sprintf("trace: match[%d]", i), patErr)
-				if refErr != nil || patErr != nil {
+				if patErr != nil {
 					continue
 				}
 				traceBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)

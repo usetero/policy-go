@@ -133,6 +133,13 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		}
 	}
 
+	// Typed comparison checks (equals/gt/gte/lt/lte) are compiled but not yet
+	// evaluated. Their MatcherCount contribution means policies containing any
+	// typed matcher stay inert at eval time (matchCounts cannot reach the
+	// declared MatcherCount), matching the fail-open requirement until a
+	// follow-up implements typed evaluation.
+	_ = matchers.TypedChecks
+
 	// Process Hyperscan databases
 	for _, entry := range matchers.Databases() {
 		key := entry.Key
@@ -351,6 +358,9 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 		}
 	}
 
+	// Typed checks compiled but not yet evaluated — see EvaluateLog.
+	_ = matchers.TypedChecks
+
 	// Process Hyperscan databases
 	for _, entry := range matchers.Databases() {
 		key := entry.Key
@@ -513,6 +523,9 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 			matchCounts[check.PolicyIndex]++
 		}
 	}
+
+	// Typed checks compiled but not yet evaluated — see EvaluateLog.
+	_ = matchers.TypedChecks
 
 	// Process Hyperscan databases
 	for _, entry := range matchers.Databases() {

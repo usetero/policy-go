@@ -27,7 +27,11 @@ type TraceField int32
 const (
 	TraceField_TRACE_FIELD_UNSPECIFIED TraceField = 0
 	// Span fields
-	TraceField_TRACE_FIELD_NAME           TraceField = 1
+	TraceField_TRACE_FIELD_NAME TraceField = 1
+	// trace_id, span_id, and parent_span_id are bytes. They are authored as
+	// lowercase hex and matched as raw bytes (exact/equals), or as their hex
+	// rendering for string match types. See the Value message and the spec's
+	// "Bytes and Identifier Fields" section.
 	TraceField_TRACE_FIELD_TRACE_ID       TraceField = 2
 	TraceField_TRACE_FIELD_SPAN_ID        TraceField = 3
 	TraceField_TRACE_FIELD_PARENT_SPAN_ID TraceField = 4
@@ -363,6 +367,10 @@ type TraceMatcher struct {
 	// Match type. Exactly one must be set.
 	// Note: For span_kind and span_status fields, only exists is valid (equality is implicit).
 	//
+	// The string match types (exact, regex, starts_with, ends_with, contains)
+	// operate only on string field values. To match non-string values, use the
+	// typed equals matcher or the numeric comparison matchers (gt, gte, lt, lte).
+	//
 	// Types that are valid to be assigned to Match:
 	//
 	//	*TraceMatcher_Exact
@@ -371,6 +379,11 @@ type TraceMatcher struct {
 	//	*TraceMatcher_StartsWith
 	//	*TraceMatcher_EndsWith
 	//	*TraceMatcher_Contains
+	//	*TraceMatcher_Equals
+	//	*TraceMatcher_Gt
+	//	*TraceMatcher_Gte
+	//	*TraceMatcher_Lt
+	//	*TraceMatcher_Lte
 	Match isTraceMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
 	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
@@ -559,6 +572,51 @@ func (x *TraceMatcher) GetContains() string {
 	return ""
 }
 
+func (x *TraceMatcher) GetEquals() *Value {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_Equals); ok {
+			return x.Equals
+		}
+	}
+	return nil
+}
+
+func (x *TraceMatcher) GetGt() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_Gt); ok {
+			return x.Gt
+		}
+	}
+	return nil
+}
+
+func (x *TraceMatcher) GetGte() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_Gte); ok {
+			return x.Gte
+		}
+	}
+	return nil
+}
+
+func (x *TraceMatcher) GetLt() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_Lt); ok {
+			return x.Lt
+		}
+	}
+	return nil
+}
+
+func (x *TraceMatcher) GetLte() *NumericValue {
+	if x != nil {
+		if x, ok := x.Match.(*TraceMatcher_Lte); ok {
+			return x.Lte
+		}
+	}
+	return nil
+}
+
 func (x *TraceMatcher) GetNegate() bool {
 	if x != nil {
 		return x.Negate
@@ -618,7 +676,9 @@ type TraceMatcher_EventAttribute struct {
 }
 
 type TraceMatcher_LinkTraceId struct {
-	// Link trace ID matcher (matches if span has a link to this trace)
+	// Link trace ID matcher (matches if span has a link to this trace).
+	// Authored as lowercase hex and decoded to bytes at policy-compile time,
+	// then compared against link trace ids as raw bytes.
 	LinkTraceId string `protobuf:"bytes,9,opt,name=link_trace_id,json=linkTraceId,proto3,oneof"`
 }
 
@@ -645,12 +705,12 @@ type isTraceMatcher_Match interface {
 }
 
 type TraceMatcher_Exact struct {
-	// Exact string match
+	// Exact string match (string field values only)
 	Exact string `protobuf:"bytes,10,opt,name=exact,proto3,oneof"`
 }
 
 type TraceMatcher_Regex struct {
-	// Regular expression match
+	// Regular expression match (string field values only)
 	Regex string `protobuf:"bytes,11,opt,name=regex,proto3,oneof"`
 }
 
@@ -660,18 +720,43 @@ type TraceMatcher_Exists struct {
 }
 
 type TraceMatcher_StartsWith struct {
-	// Literal prefix match
+	// Literal prefix match (string field values only)
 	StartsWith string `protobuf:"bytes,13,opt,name=starts_with,json=startsWith,proto3,oneof"`
 }
 
 type TraceMatcher_EndsWith struct {
-	// Literal suffix match
+	// Literal suffix match (string field values only)
 	EndsWith string `protobuf:"bytes,14,opt,name=ends_with,json=endsWith,proto3,oneof"`
 }
 
 type TraceMatcher_Contains struct {
-	// Literal substring match
+	// Literal substring match (string field values only)
 	Contains string `protobuf:"bytes,15,opt,name=contains,proto3,oneof"`
+}
+
+type TraceMatcher_Equals struct {
+	// Typed equality for non-string field values (bool, int, double, bytes)
+	Equals *Value `protobuf:"bytes,22,opt,name=equals,proto3,oneof"`
+}
+
+type TraceMatcher_Gt struct {
+	// Numeric greater-than comparison (int/double field values)
+	Gt *NumericValue `protobuf:"bytes,23,opt,name=gt,proto3,oneof"`
+}
+
+type TraceMatcher_Gte struct {
+	// Numeric greater-than-or-equal comparison (int/double field values)
+	Gte *NumericValue `protobuf:"bytes,24,opt,name=gte,proto3,oneof"`
+}
+
+type TraceMatcher_Lt struct {
+	// Numeric less-than comparison (int/double field values)
+	Lt *NumericValue `protobuf:"bytes,25,opt,name=lt,proto3,oneof"`
+}
+
+type TraceMatcher_Lte struct {
+	// Numeric less-than-or-equal comparison (int/double field values)
+	Lte *NumericValue `protobuf:"bytes,26,opt,name=lte,proto3,oneof"`
 }
 
 func (*TraceMatcher_Exact) isTraceMatcher_Match() {}
@@ -685,6 +770,16 @@ func (*TraceMatcher_StartsWith) isTraceMatcher_Match() {}
 func (*TraceMatcher_EndsWith) isTraceMatcher_Match() {}
 
 func (*TraceMatcher_Contains) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_Equals) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_Gt) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_Gte) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_Lt) isTraceMatcher_Match() {}
+
+func (*TraceMatcher_Lte) isTraceMatcher_Match() {}
 
 // TraceSamplingConfig configures probabilistic sampling for traces.
 //
@@ -800,7 +895,7 @@ const file_tero_policy_v1_trace_proto_rawDesc = "" +
 	"\x1atero/policy/v1/trace.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"z\n" +
 	"\vTraceTarget\x122\n" +
 	"\x05match\x18\x01 \x03(\v2\x1c.tero.policy.v1.TraceMatcherR\x05match\x127\n" +
-	"\x04keep\x18\x02 \x01(\v2#.tero.policy.v1.TraceSamplingConfigR\x04keep\"\xbb\x06\n" +
+	"\x04keep\x18\x02 \x01(\v2#.tero.policy.v1.TraceSamplingConfigR\x04keep\"\xb0\b\n" +
 	"\fTraceMatcher\x12=\n" +
 	"\vtrace_field\x18\x01 \x01(\x0e2\x1a.tero.policy.v1.TraceFieldH\x00R\n" +
 	"traceField\x12F\n" +
@@ -821,7 +916,12 @@ const file_tero_policy_v1_trace_proto_rawDesc = "" +
 	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
 	"startsWith\x12\x1d\n" +
 	"\tends_with\x18\x0e \x01(\tH\x01R\bendsWith\x12\x1c\n" +
-	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12\x16\n" +
+	"\bcontains\x18\x0f \x01(\tH\x01R\bcontains\x12/\n" +
+	"\x06equals\x18\x16 \x01(\v2\x15.tero.policy.v1.ValueH\x01R\x06equals\x12.\n" +
+	"\x02gt\x18\x17 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x02gt\x120\n" +
+	"\x03gte\x18\x18 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x03gte\x12.\n" +
+	"\x02lt\x18\x19 \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x02lt\x120\n" +
+	"\x03lte\x18\x1a \x01(\v2\x1c.tero.policy.v1.NumericValueH\x01R\x03lte\x12\x16\n" +
 	"\x06negate\x18\x14 \x01(\bR\x06negate\x12)\n" +
 	"\x10case_insensitive\x18\x15 \x01(\bR\x0fcaseInsensitiveB\a\n" +
 	"\x05fieldB\a\n" +
@@ -893,6 +993,8 @@ var file_tero_policy_v1_trace_proto_goTypes = []any{
 	(*TraceMatcher)(nil),        // 5: tero.policy.v1.TraceMatcher
 	(*TraceSamplingConfig)(nil), // 6: tero.policy.v1.TraceSamplingConfig
 	(*AttributePath)(nil),       // 7: tero.policy.v1.AttributePath
+	(*Value)(nil),               // 8: tero.policy.v1.Value
+	(*NumericValue)(nil),        // 9: tero.policy.v1.NumericValue
 }
 var file_tero_policy_v1_trace_proto_depIdxs = []int32{
 	5,  // 0: tero.policy.v1.TraceTarget.match:type_name -> tero.policy.v1.TraceMatcher
@@ -904,12 +1006,17 @@ var file_tero_policy_v1_trace_proto_depIdxs = []int32{
 	1,  // 6: tero.policy.v1.TraceMatcher.span_kind:type_name -> tero.policy.v1.SpanKind
 	2,  // 7: tero.policy.v1.TraceMatcher.span_status:type_name -> tero.policy.v1.SpanStatusCode
 	7,  // 8: tero.policy.v1.TraceMatcher.event_attribute:type_name -> tero.policy.v1.AttributePath
-	3,  // 9: tero.policy.v1.TraceSamplingConfig.mode:type_name -> tero.policy.v1.SamplingMode
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	8,  // 9: tero.policy.v1.TraceMatcher.equals:type_name -> tero.policy.v1.Value
+	9,  // 10: tero.policy.v1.TraceMatcher.gt:type_name -> tero.policy.v1.NumericValue
+	9,  // 11: tero.policy.v1.TraceMatcher.gte:type_name -> tero.policy.v1.NumericValue
+	9,  // 12: tero.policy.v1.TraceMatcher.lt:type_name -> tero.policy.v1.NumericValue
+	9,  // 13: tero.policy.v1.TraceMatcher.lte:type_name -> tero.policy.v1.NumericValue
+	3,  // 14: tero.policy.v1.TraceSamplingConfig.mode:type_name -> tero.policy.v1.SamplingMode
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_trace_proto_init() }
@@ -934,6 +1041,11 @@ func file_tero_policy_v1_trace_proto_init() {
 		(*TraceMatcher_StartsWith)(nil),
 		(*TraceMatcher_EndsWith)(nil),
 		(*TraceMatcher_Contains)(nil),
+		(*TraceMatcher_Equals)(nil),
+		(*TraceMatcher_Gt)(nil),
+		(*TraceMatcher_Gte)(nil),
+		(*TraceMatcher_Lt)(nil),
+		(*TraceMatcher_Lte)(nil),
 	}
 	file_tero_policy_v1_trace_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
