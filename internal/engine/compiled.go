@@ -266,13 +266,12 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if refErr != nil {
 					continue
 				}
-				op, target, isTyped, typedErr := extractLogTypedMatch(m)
-				if isTyped {
-					addErr(fmt.Sprintf("log: match[%d]", i), typedErr)
-					if typedErr != nil {
-						continue
+				if tm, ok := extractTypedMatch(m); ok {
+					err := tm.validate()
+					addErr(fmt.Sprintf("log: match[%d]", i), err)
+					if err == nil {
+						logBuilder.addTypedCheck(ref, tm.op, tm.eq, tm.num, m.GetNegate(), id, idx, i)
 					}
-					logBuilder.addTypedCheck(ref, op, target, m.GetNegate(), id, idx, i)
 					continue
 				}
 				pattern, isExistence, mustExist, patErr := extractMatchPattern(m)
@@ -303,13 +302,12 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if refErr != nil {
 					continue
 				}
-				op, target, isTyped, typedErr := extractMetricTypedMatch(m)
-				if isTyped {
-					addErr(fmt.Sprintf("metric: match[%d]", i), typedErr)
-					if typedErr != nil {
-						continue
+				if tm, ok := extractTypedMatch(m); ok {
+					err := tm.validate()
+					addErr(fmt.Sprintf("metric: match[%d]", i), err)
+					if err == nil {
+						metricBuilder.addTypedCheck(ref, tm.op, tm.eq, tm.num, m.GetNegate(), id, idx, i)
 					}
-					metricBuilder.addTypedCheck(ref, op, target, m.GetNegate(), id, idx, i)
 					continue
 				}
 				pattern, isExistence, mustExist, patErr := extractMetricMatchPattern(m)
@@ -336,13 +334,12 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if refErr != nil {
 					continue
 				}
-				op, target, isTyped, typedErr := extractTraceTypedMatch(m)
-				if isTyped {
-					addErr(fmt.Sprintf("trace: match[%d]", i), typedErr)
-					if typedErr != nil {
-						continue
+				if tm, ok := extractTypedMatch(m); ok {
+					err := tm.validate()
+					addErr(fmt.Sprintf("trace: match[%d]", i), err)
+					if err == nil {
+						traceBuilder.addTypedCheck(ref, tm.op, tm.eq, tm.num, m.GetNegate(), id, idx, i)
 					}
-					traceBuilder.addTypedCheck(ref, op, target, m.GetNegate(), id, idx, i)
 					continue
 				}
 				pattern, isExistence, mustExist, patErr := extractTraceMatchPattern(m)

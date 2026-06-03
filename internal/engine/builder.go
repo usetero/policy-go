@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flier/gohs/hyperscan"
+	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
 // matchersBuilder accumulates matchers and builds a CompiledMatchers.
@@ -76,16 +77,18 @@ func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExist
 
 // addTypedCheck registers a typed comparison (equals/gt/gte/lt/lte). These
 // bypass Hyperscan entirely — the comparison is done at evaluation time
-// against the consumer's TypedValue accessor.
-func (b *matchersBuilder[T]) addTypedCheck(ref FieldRef[T], op TypedOp, target FieldValue, negate bool, policyID string, policyIndex int, matcherIndex int) {
+// against the consumer's TypedValue accessor. Exactly one of equalsValue or
+// numericValue is non-nil, matching op.
+func (b *matchersBuilder[T]) addTypedCheck(ref FieldRef[T], op TypedOp, equalsValue *policyv1.Value, numericValue *policyv1.NumericValue, negate bool, policyID string, policyIndex int, matcherIndex int) {
 	b.typedChecks = append(b.typedChecks, TypedCheck[T]{
-		Ref:         ref,
-		Op:          op,
-		Target:      target,
-		Negate:      negate,
-		PolicyID:    policyID,
-		PolicyIndex: policyIndex,
-		MatchIndex:  matcherIndex,
+		Ref:          ref,
+		Op:           op,
+		EqualsValue:  equalsValue,
+		NumericValue: numericValue,
+		Negate:       negate,
+		PolicyID:     policyID,
+		PolicyIndex:  policyIndex,
+		MatchIndex:   matcherIndex,
 	})
 }
 

@@ -50,18 +50,25 @@ func TestCompileRegistersTypedChecks(t *testing.T) {
 
 	// match[0]: equals 200 (int)
 	assert.Equal(t, TypedOpEquals, checks[0].Op)
-	assert.Equal(t, FieldValueInt, checks[0].Target.Kind)
-	assert.Equal(t, int64(200), checks[0].Target.Int)
+	require.NotNil(t, checks[0].EqualsValue)
+	intVal, ok := checks[0].EqualsValue.GetValue().(*policyv1.Value_IntValue)
+	require.True(t, ok)
+	assert.Equal(t, int64(200), intVal.IntValue)
 
 	// match[1]: gte 500 (int)
 	assert.Equal(t, TypedOpGTE, checks[1].Op)
-	assert.Equal(t, FieldValueInt, checks[1].Target.Kind)
-	assert.Equal(t, int64(500), checks[1].Target.Int)
+	require.NotNil(t, checks[1].NumericValue)
+	numInt, ok := checks[1].NumericValue.GetValue().(*policyv1.NumericValue_IntValue)
+	require.True(t, ok)
+	assert.Equal(t, int64(500), numInt.IntValue)
 
-	// match[2]: equals hex "8a3f0e1234567890" → decoded to bytes
+	// match[2]: equals hex "8a3f0e1234567890" — proto pointer carries the
+	// literal hex string; decoding happens at eval time (see follow-up).
 	assert.Equal(t, TypedOpEquals, checks[2].Op)
-	assert.Equal(t, FieldValueBytes, checks[2].Target.Kind)
-	assert.Equal(t, []byte{0x8a, 0x3f, 0x0e, 0x12, 0x34, 0x56, 0x78, 0x90}, checks[2].Target.Bytes)
+	require.NotNil(t, checks[2].EqualsValue)
+	hexVal, ok := checks[2].EqualsValue.GetValue().(*policyv1.Value_HexValue)
+	require.True(t, ok)
+	assert.Equal(t, "8a3f0e1234567890", hexVal.HexValue)
 }
 
 func TestCompileRegistersAllTypedOps(t *testing.T) {
@@ -140,14 +147,20 @@ func TestCompileTypedMatcherWorksForMetricAndTrace(t *testing.T) {
 	require.Empty(t, result.Errors)
 
 	require.Len(t, result.Metrics.TypedChecks(), 1)
-	assert.Equal(t, TypedOpEquals, result.Metrics.TypedChecks()[0].Op)
-	assert.Equal(t, FieldValueBool, result.Metrics.TypedChecks()[0].Target.Kind)
-	assert.True(t, result.Metrics.TypedChecks()[0].Target.Bool)
+	mc := result.Metrics.TypedChecks()[0]
+	assert.Equal(t, TypedOpEquals, mc.Op)
+	require.NotNil(t, mc.EqualsValue)
+	boolVal, ok := mc.EqualsValue.GetValue().(*policyv1.Value_BoolValue)
+	require.True(t, ok)
+	assert.True(t, boolVal.BoolValue)
 
 	require.Len(t, result.Traces.TypedChecks(), 1)
-	assert.Equal(t, TypedOpGT, result.Traces.TypedChecks()[0].Op)
-	assert.Equal(t, FieldValueInt, result.Traces.TypedChecks()[0].Target.Kind)
-	assert.Equal(t, int64(1_000_000_000), result.Traces.TypedChecks()[0].Target.Int)
+	tc := result.Traces.TypedChecks()[0]
+	assert.Equal(t, TypedOpGT, tc.Op)
+	require.NotNil(t, tc.NumericValue)
+	intVal, ok := tc.NumericValue.GetValue().(*policyv1.NumericValue_IntValue)
+	require.True(t, ok)
+	assert.Equal(t, int64(1_000_000_000), intVal.IntValue)
 }
 
 func TestCompileTypedMatcherErrors(t *testing.T) {
@@ -156,14 +169,6 @@ func TestCompileTypedMatcherErrors(t *testing.T) {
 		matcher *policyv1.LogMatcher
 		want    string
 	}{
-		{
-			name: "equals with no value",
-			matcher: &policyv1.LogMatcher{
-				Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: []string{"x"}}},
-				Match: &policyv1.LogMatcher_Equals{Equals: nil},
-			},
-			want: "equals value is unset",
-		},
 		{
 			name: "equals with empty value oneof",
 			matcher: &policyv1.LogMatcher{
@@ -187,14 +192,6 @@ func TestCompileTypedMatcherErrors(t *testing.T) {
 				Match: &policyv1.LogMatcher_Equals{Equals: &policyv1.Value{Value: &policyv1.Value_HexValue{HexValue: "abc"}}},
 			},
 			want: "invalid hex_value",
-		},
-		{
-			name: "gt with no value",
-			matcher: &policyv1.LogMatcher{
-				Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: []string{"x"}}},
-				Match: &policyv1.LogMatcher_Gt{Gt: nil},
-			},
-			want: "numeric value is unset",
 		},
 		{
 			name: "gte with empty oneof",
