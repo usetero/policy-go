@@ -89,12 +89,17 @@ type MetricMatcher struct {
 	AggregationTemporality string         `json:"aggregation_temporality,omitempty"`
 
 	// Match conditions
-	Regex      string `json:"regex,omitempty"`
-	Exact      string `json:"exact,omitempty"`
-	Exists     *bool  `json:"exists,omitempty"`
-	StartsWith string `json:"starts_with,omitempty"`
-	EndsWith   string `json:"ends_with,omitempty"`
-	Contains   string `json:"contains,omitempty"`
+	Regex      string               `json:"regex,omitempty"`
+	Exact      string               `json:"exact,omitempty"`
+	Exists     *bool                `json:"exists,omitempty"`
+	StartsWith string               `json:"starts_with,omitempty"`
+	EndsWith   string               `json:"ends_with,omitempty"`
+	Contains   string               `json:"contains,omitempty"`
+	Equals     *MatcherValue        `json:"equals,omitempty"`
+	Gt         *MatcherNumericValue `json:"gt,omitempty"`
+	Gte        *MatcherNumericValue `json:"gte,omitempty"`
+	Lt         *MatcherNumericValue `json:"lt,omitempty"`
+	Lte        *MatcherNumericValue `json:"lte,omitempty"`
 
 	// Flags
 	Negate          bool `json:"negate,omitempty"`
@@ -130,12 +135,17 @@ type TraceMatcher struct {
 	LinkTraceID       string         `json:"link_trace_id,omitempty"`
 
 	// Match conditions
-	Regex      string `json:"regex,omitempty"`
-	Exact      string `json:"exact,omitempty"`
-	Exists     *bool  `json:"exists,omitempty"`
-	StartsWith string `json:"starts_with,omitempty"`
-	EndsWith   string `json:"ends_with,omitempty"`
-	Contains   string `json:"contains,omitempty"`
+	Regex      string               `json:"regex,omitempty"`
+	Exact      string               `json:"exact,omitempty"`
+	Exists     *bool                `json:"exists,omitempty"`
+	StartsWith string               `json:"starts_with,omitempty"`
+	EndsWith   string               `json:"ends_with,omitempty"`
+	Contains   string               `json:"contains,omitempty"`
+	Equals     *MatcherValue        `json:"equals,omitempty"`
+	Gt         *MatcherNumericValue `json:"gt,omitempty"`
+	Gte        *MatcherNumericValue `json:"gte,omitempty"`
+	Lt         *MatcherNumericValue `json:"lt,omitempty"`
+	Lte        *MatcherNumericValue `json:"lte,omitempty"`
 
 	// Flags
 	Negate          bool `json:"negate,omitempty"`
@@ -188,12 +198,17 @@ type LogMatcher struct {
 	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
 
 	// Match conditions
-	Regex      string `json:"regex,omitempty"`
-	Exact      string `json:"exact,omitempty"`
-	Exists     *bool  `json:"exists,omitempty"`
-	StartsWith string `json:"starts_with,omitempty"`
-	EndsWith   string `json:"ends_with,omitempty"`
-	Contains   string `json:"contains,omitempty"`
+	Regex      string               `json:"regex,omitempty"`
+	Exact      string               `json:"exact,omitempty"`
+	Exists     *bool                `json:"exists,omitempty"`
+	StartsWith string               `json:"starts_with,omitempty"`
+	EndsWith   string               `json:"ends_with,omitempty"`
+	Contains   string               `json:"contains,omitempty"`
+	Equals     *MatcherValue        `json:"equals,omitempty"`
+	Gt         *MatcherNumericValue `json:"gt,omitempty"`
+	Gte        *MatcherNumericValue `json:"gte,omitempty"`
+	Lt         *MatcherNumericValue `json:"lt,omitempty"`
+	Lte        *MatcherNumericValue `json:"lte,omitempty"`
 
 	// Flags
 	Negate          bool `json:"negate,omitempty"`
@@ -250,6 +265,190 @@ func (k *KeepValue) UnmarshalJSON(data []byte) error {
 	}
 
 	return NewParseError("keep", "must be string, bool, or object")
+}
+
+// MatcherValueKind discriminates the variants of MatcherValue.
+type MatcherValueKind uint8
+
+const (
+	MatcherValueUnset MatcherValueKind = iota
+	MatcherValueBool
+	MatcherValueInt
+	MatcherValueDouble
+	MatcherValueBytes
+	MatcherValueHex
+)
+
+// MatcherValue is the parsed `equals` literal. Accepts both shorthand (true,
+// 200, 0.5) and canonical proto form ({bool_value, int_value, double_value,
+// bytes_value, hex_value}). A bare string literal is rejected per the spec —
+// use `exact` for strings. Only one field is populated based on Kind.
+type MatcherValue struct {
+	Kind   MatcherValueKind
+	Bool   bool
+	Int    int64
+	Double float64
+	Bytes  []byte
+	Hex    string
+}
+
+// UnmarshalJSON implements polymorphic unmarshaling. Shorthand: true/false →
+// bool, integer literal → int, fractional literal → double. Canonical: an
+// object with exactly one of {bool_value, int_value, double_value,
+// bytes_value, hex_value}. A string literal is rejected.
+func (v *MatcherValue) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		return NewParseError("equals", "empty value")
+	}
+	switch data[0] {
+	case 't', 'f':
+		var b bool
+		if err := json.Unmarshal(data, &b); err == nil {
+			v.Kind, v.Bool = MatcherValueBool, b
+			return nil
+		}
+	case '"':
+		return NewParseError("equals", "string literal not allowed — use exact for strings")
+	case '{':
+		return v.unmarshalCanonical(data)
+	}
+	// Numeric: prefer int when the literal has no fractional part or exponent.
+	if isIntegerJSON(data) {
+		var n int64
+		if err := json.Unmarshal(data, &n); err == nil {
+			v.Kind, v.Int = MatcherValueInt, n
+			return nil
+		}
+	}
+	var d float64
+	if err := json.Unmarshal(data, &d); err == nil {
+		v.Kind, v.Double = MatcherValueDouble, d
+		return nil
+	}
+	return NewParseError("equals", "must be bool, int, double, or {bool_value|int_value|double_value|bytes_value|hex_value}")
+}
+
+func (v *MatcherValue) unmarshalCanonical(data []byte) error {
+	var raw struct {
+		BoolValue   *bool    `json:"bool_value,omitempty"`
+		IntValue    *int64   `json:"int_value,omitempty"`
+		DoubleValue *float64 `json:"double_value,omitempty"`
+		BytesValue  []byte   `json:"bytes_value,omitempty"`
+		HexValue    *string  `json:"hex_value,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return NewParseError("equals", "invalid canonical Value: "+err.Error())
+	}
+	count := 0
+	if raw.BoolValue != nil {
+		count++
+	}
+	if raw.IntValue != nil {
+		count++
+	}
+	if raw.DoubleValue != nil {
+		count++
+	}
+	if raw.BytesValue != nil {
+		count++
+	}
+	if raw.HexValue != nil {
+		count++
+	}
+	if count == 0 {
+		return NewParseError("equals", "canonical Value must set exactly one variant")
+	}
+	if count > 1 {
+		return NewParseError("equals", "canonical Value must set exactly one variant")
+	}
+	switch {
+	case raw.BoolValue != nil:
+		v.Kind, v.Bool = MatcherValueBool, *raw.BoolValue
+	case raw.IntValue != nil:
+		v.Kind, v.Int = MatcherValueInt, *raw.IntValue
+	case raw.DoubleValue != nil:
+		v.Kind, v.Double = MatcherValueDouble, *raw.DoubleValue
+	case raw.BytesValue != nil:
+		v.Kind, v.Bytes = MatcherValueBytes, raw.BytesValue
+	case raw.HexValue != nil:
+		v.Kind, v.Hex = MatcherValueHex, *raw.HexValue
+	}
+	return nil
+}
+
+// MatcherNumericValue is the parsed gt/gte/lt/lte literal. Accepts shorthand
+// (integer → int, fractional → double) and canonical ({int_value} or
+// {double_value}). Bool, bytes, hex, and string are rejected — the schema
+// admits only numbers.
+type MatcherNumericValue struct {
+	Kind   MatcherValueKind // MatcherValueInt or MatcherValueDouble
+	Int    int64
+	Double float64
+}
+
+func (v *MatcherNumericValue) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		return NewParseError("numeric_value", "empty value")
+	}
+	switch data[0] {
+	case 't', 'f':
+		return NewParseError("numeric_value", "bool literal not allowed in numeric comparison")
+	case '"':
+		return NewParseError("numeric_value", "string literal not allowed in numeric comparison")
+	case '{':
+		return v.unmarshalCanonical(data)
+	}
+	if isIntegerJSON(data) {
+		var n int64
+		if err := json.Unmarshal(data, &n); err == nil {
+			v.Kind, v.Int = MatcherValueInt, n
+			return nil
+		}
+	}
+	var d float64
+	if err := json.Unmarshal(data, &d); err == nil {
+		v.Kind, v.Double = MatcherValueDouble, d
+		return nil
+	}
+	return NewParseError("numeric_value", "must be int, double, or {int_value|double_value}")
+}
+
+func (v *MatcherNumericValue) unmarshalCanonical(data []byte) error {
+	var raw struct {
+		IntValue    *int64   `json:"int_value,omitempty"`
+		DoubleValue *float64 `json:"double_value,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return NewParseError("numeric_value", "invalid canonical NumericValue: "+err.Error())
+	}
+	count := 0
+	if raw.IntValue != nil {
+		count++
+	}
+	if raw.DoubleValue != nil {
+		count++
+	}
+	if count != 1 {
+		return NewParseError("numeric_value", "canonical NumericValue must set exactly one variant")
+	}
+	if raw.IntValue != nil {
+		v.Kind, v.Int = MatcherValueInt, *raw.IntValue
+	} else {
+		v.Kind, v.Double = MatcherValueDouble, *raw.DoubleValue
+	}
+	return nil
+}
+
+// isIntegerJSON reports whether the JSON-encoded numeric literal in data has
+// no decimal point or exponent and so should be unmarshaled as int rather
+// than double. Drives the type selection for shorthand literals.
+func isIntegerJSON(data []byte) bool {
+	for _, b := range data {
+		if b == '.' || b == 'e' || b == 'E' {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseError represents a JSON parsing error.

@@ -1,6 +1,7 @@
 package jsonpolicy
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,8 +163,22 @@ func (p *Parser) convertLogMatcher(m LogMatcher) (*policyv1.LogMatcher, error) {
 		matcher.Match = &policyv1.LogMatcher_EndsWith{EndsWith: m.EndsWith}
 	} else if m.Contains != "" {
 		matcher.Match = &policyv1.LogMatcher_Contains{Contains: m.Contains}
+	} else if m.Equals != nil {
+		v, err := convertMatcherValue(m.Equals)
+		if err != nil {
+			return nil, err
+		}
+		matcher.Match = &policyv1.LogMatcher_Equals{Equals: v}
+	} else if m.Gt != nil {
+		matcher.Match = &policyv1.LogMatcher_Gt{Gt: convertMatcherNumeric(m.Gt)}
+	} else if m.Gte != nil {
+		matcher.Match = &policyv1.LogMatcher_Gte{Gte: convertMatcherNumeric(m.Gte)}
+	} else if m.Lt != nil {
+		matcher.Match = &policyv1.LogMatcher_Lt{Lt: convertMatcherNumeric(m.Lt)}
+	} else if m.Lte != nil {
+		matcher.Match = &policyv1.LogMatcher_Lte{Lte: convertMatcherNumeric(m.Lte)}
 	} else {
-		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, or contains)")
+		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, contains, equals, gt, gte, lt, or lte)")
 	}
 
 	return matcher, nil
@@ -452,8 +467,22 @@ func (p *Parser) convertMetricMatcher(m MetricMatcher) (*policyv1.MetricMatcher,
 		matcher.Match = &policyv1.MetricMatcher_EndsWith{EndsWith: m.EndsWith}
 	} else if m.Contains != "" {
 		matcher.Match = &policyv1.MetricMatcher_Contains{Contains: m.Contains}
+	} else if m.Equals != nil {
+		v, err := convertMatcherValue(m.Equals)
+		if err != nil {
+			return nil, err
+		}
+		matcher.Match = &policyv1.MetricMatcher_Equals{Equals: v}
+	} else if m.Gt != nil {
+		matcher.Match = &policyv1.MetricMatcher_Gt{Gt: convertMatcherNumeric(m.Gt)}
+	} else if m.Gte != nil {
+		matcher.Match = &policyv1.MetricMatcher_Gte{Gte: convertMatcherNumeric(m.Gte)}
+	} else if m.Lt != nil {
+		matcher.Match = &policyv1.MetricMatcher_Lt{Lt: convertMatcherNumeric(m.Lt)}
+	} else if m.Lte != nil {
+		matcher.Match = &policyv1.MetricMatcher_Lte{Lte: convertMatcherNumeric(m.Lte)}
 	} else {
-		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, or contains)")
+		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, contains, equals, gt, gte, lt, or lte)")
 	}
 
 	return matcher, nil
@@ -669,11 +698,57 @@ func (p *Parser) convertTraceMatcher(m TraceMatcher) (*policyv1.TraceMatcher, er
 		matcher.Match = &policyv1.TraceMatcher_EndsWith{EndsWith: m.EndsWith}
 	} else if m.Contains != "" {
 		matcher.Match = &policyv1.TraceMatcher_Contains{Contains: m.Contains}
+	} else if m.Equals != nil {
+		v, err := convertMatcherValue(m.Equals)
+		if err != nil {
+			return nil, err
+		}
+		matcher.Match = &policyv1.TraceMatcher_Equals{Equals: v}
+	} else if m.Gt != nil {
+		matcher.Match = &policyv1.TraceMatcher_Gt{Gt: convertMatcherNumeric(m.Gt)}
+	} else if m.Gte != nil {
+		matcher.Match = &policyv1.TraceMatcher_Gte{Gte: convertMatcherNumeric(m.Gte)}
+	} else if m.Lt != nil {
+		matcher.Match = &policyv1.TraceMatcher_Lt{Lt: convertMatcherNumeric(m.Lt)}
+	} else if m.Lte != nil {
+		matcher.Match = &policyv1.TraceMatcher_Lte{Lte: convertMatcherNumeric(m.Lte)}
 	} else {
-		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, or contains)")
+		return nil, NewParseError("matcher", "must have a match type (regex, exact, exists, starts_with, ends_with, contains, equals, gt, gte, lt, or lte)")
 	}
 
 	return matcher, nil
+}
+
+// convertMatcherValue maps a parsed MatcherValue to a proto Value. hex_value
+// is sanity-checked here too so a bad hex literal fails at parse time rather
+// than waiting for the engine compile pass.
+func convertMatcherValue(v *MatcherValue) (*policyv1.Value, error) {
+	switch v.Kind {
+	case MatcherValueBool:
+		return &policyv1.Value{Value: &policyv1.Value_BoolValue{BoolValue: v.Bool}}, nil
+	case MatcherValueInt:
+		return &policyv1.Value{Value: &policyv1.Value_IntValue{IntValue: v.Int}}, nil
+	case MatcherValueDouble:
+		return &policyv1.Value{Value: &policyv1.Value_DoubleValue{DoubleValue: v.Double}}, nil
+	case MatcherValueBytes:
+		return &policyv1.Value{Value: &policyv1.Value_BytesValue{BytesValue: v.Bytes}}, nil
+	case MatcherValueHex:
+		if _, err := hex.DecodeString(v.Hex); err != nil {
+			return nil, NewParseError("equals.hex_value", "invalid hex: "+err.Error())
+		}
+		return &policyv1.Value{Value: &policyv1.Value_HexValue{HexValue: v.Hex}}, nil
+	}
+	return nil, NewParseError("equals", "value oneof is unset")
+}
+
+// convertMatcherNumeric maps a parsed MatcherNumericValue to a proto
+// NumericValue. The unmarshaler already rejects everything but int/double, so
+// no further validation is needed.
+func convertMatcherNumeric(v *MatcherNumericValue) *policyv1.NumericValue {
+	if v.Kind == MatcherValueDouble {
+		return &policyv1.NumericValue{Value: &policyv1.NumericValue_DoubleValue{DoubleValue: v.Double}}
+	}
+	return &policyv1.NumericValue{Value: &policyv1.NumericValue_IntValue{IntValue: v.Int}}
 }
 
 func (p *Parser) setTraceFieldSelector(matcher *policyv1.TraceMatcher, m TraceMatcher) error {

@@ -104,13 +104,288 @@ func (x *AttributePath) GetPath() []string {
 	return nil
 }
 
+// Value carries a typed, non-string scalar for the `equals` matcher. String
+// equality is expressed with the `exact` match type, so this message
+// intentionally has no string variant.
+//
+// `equals` matches when the field value has the same type and value as the set
+// variant. Integer and floating-point values are compared in a single numeric
+// domain (an int_value may match a double field with an equal numeric value and
+// vice versa). All other type pairings do not match.
+//
+// YAML/JSON Unmarshaling:
+//
+// Implementations MUST accept both the canonical proto form and scalar
+// shorthand. For shorthand, the literal's type selects the variant:
+//
+//	equals: true   ->  bool_value
+//	equals: 200    ->  int_value
+//	equals: 0.5    ->  double_value
+//
+// Bytes are authored either as proto-native base64 (`bytes_value`) or, more
+// readably, as a lowercase-hex string (`hex_value`). The two are equivalent —
+// hex_value is decoded to bytes at policy-compile time and yields the same bytes
+// as the corresponding bytes_value — but hex_value keeps identifiers
+// (trace/span ids) readable in the canonical proto/JSON form instead of base64.
+// A bare string literal (e.g. `equals: "foo"`) MUST be rejected — use `exact`
+// for strings.
+//
+// Future direction: the `exact` match type is expected to be deprecated. Once a
+// string variant is added to this message, all equality (string and non-string)
+// will be expressed through `equals`, with `exact` kept only for backward
+// compatibility.
+type Value struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Exactly one must be set.
+	//
+	// Types that are valid to be assigned to Value:
+	//
+	//	*Value_BoolValue
+	//	*Value_IntValue
+	//	*Value_DoubleValue
+	//	*Value_BytesValue
+	//	*Value_HexValue
+	Value         isValue_Value `protobuf_oneof:"value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Value) Reset() {
+	*x = Value{}
+	mi := &file_tero_policy_v1_shared_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Value) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Value) ProtoMessage() {}
+
+func (x *Value) ProtoReflect() protoreflect.Message {
+	mi := &file_tero_policy_v1_shared_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Value.ProtoReflect.Descriptor instead.
+func (*Value) Descriptor() ([]byte, []int) {
+	return file_tero_policy_v1_shared_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Value) GetValue() isValue_Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *Value) GetBoolValue() bool {
+	if x != nil {
+		if x, ok := x.Value.(*Value_BoolValue); ok {
+			return x.BoolValue
+		}
+	}
+	return false
+}
+
+func (x *Value) GetIntValue() int64 {
+	if x != nil {
+		if x, ok := x.Value.(*Value_IntValue); ok {
+			return x.IntValue
+		}
+	}
+	return 0
+}
+
+func (x *Value) GetDoubleValue() float64 {
+	if x != nil {
+		if x, ok := x.Value.(*Value_DoubleValue); ok {
+			return x.DoubleValue
+		}
+	}
+	return 0
+}
+
+func (x *Value) GetBytesValue() []byte {
+	if x != nil {
+		if x, ok := x.Value.(*Value_BytesValue); ok {
+			return x.BytesValue
+		}
+	}
+	return nil
+}
+
+func (x *Value) GetHexValue() string {
+	if x != nil {
+		if x, ok := x.Value.(*Value_HexValue); ok {
+			return x.HexValue
+		}
+	}
+	return ""
+}
+
+type isValue_Value interface {
+	isValue_Value()
+}
+
+type Value_BoolValue struct {
+	BoolValue bool `protobuf:"varint,1,opt,name=bool_value,json=boolValue,proto3,oneof"`
+}
+
+type Value_IntValue struct {
+	IntValue int64 `protobuf:"varint,2,opt,name=int_value,json=intValue,proto3,oneof"`
+}
+
+type Value_DoubleValue struct {
+	DoubleValue float64 `protobuf:"fixed64,3,opt,name=double_value,json=doubleValue,proto3,oneof"`
+}
+
+type Value_BytesValue struct {
+	// Raw bytes (base64 in proto JSON).
+	BytesValue []byte `protobuf:"bytes,4,opt,name=bytes_value,json=bytesValue,proto3,oneof"`
+}
+
+type Value_HexValue struct {
+	// Bytes encoded as a hexadecimal string (even length; case-insensitive on
+	// input, canonically lowercase). Decoded to bytes at policy-compile time;
+	// an invalid hex string MUST be rejected.
+	HexValue string `protobuf:"bytes,5,opt,name=hex_value,json=hexValue,proto3,oneof"`
+}
+
+func (*Value_BoolValue) isValue_Value() {}
+
+func (*Value_IntValue) isValue_Value() {}
+
+func (*Value_DoubleValue) isValue_Value() {}
+
+func (*Value_BytesValue) isValue_Value() {}
+
+func (*Value_HexValue) isValue_Value() {}
+
+// NumericValue carries a typed number for the comparison matchers (`gt`, `gte`,
+// `lt`, `lte`). It deliberately admits only int and double so that non-numeric
+// comparisons (against a bool or bytes) are unrepresentable in the schema rather
+// than rejected at compile time. int and double are compared in a single
+// numeric domain, and int_value preserves full 64-bit precision for large
+// integer fields (e.g. nanosecond timestamps) that a double cannot represent
+// exactly.
+//
+// YAML/JSON shorthand selects the variant from the literal's type:
+//
+//	gte: 500   ->  int_value
+//	lt: 0.5    ->  double_value
+type NumericValue struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Exactly one must be set.
+	//
+	// Types that are valid to be assigned to Value:
+	//
+	//	*NumericValue_IntValue
+	//	*NumericValue_DoubleValue
+	Value         isNumericValue_Value `protobuf_oneof:"value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NumericValue) Reset() {
+	*x = NumericValue{}
+	mi := &file_tero_policy_v1_shared_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NumericValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NumericValue) ProtoMessage() {}
+
+func (x *NumericValue) ProtoReflect() protoreflect.Message {
+	mi := &file_tero_policy_v1_shared_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NumericValue.ProtoReflect.Descriptor instead.
+func (*NumericValue) Descriptor() ([]byte, []int) {
+	return file_tero_policy_v1_shared_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *NumericValue) GetValue() isNumericValue_Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *NumericValue) GetIntValue() int64 {
+	if x != nil {
+		if x, ok := x.Value.(*NumericValue_IntValue); ok {
+			return x.IntValue
+		}
+	}
+	return 0
+}
+
+func (x *NumericValue) GetDoubleValue() float64 {
+	if x != nil {
+		if x, ok := x.Value.(*NumericValue_DoubleValue); ok {
+			return x.DoubleValue
+		}
+	}
+	return 0
+}
+
+type isNumericValue_Value interface {
+	isNumericValue_Value()
+}
+
+type NumericValue_IntValue struct {
+	IntValue int64 `protobuf:"varint,1,opt,name=int_value,json=intValue,proto3,oneof"`
+}
+
+type NumericValue_DoubleValue struct {
+	DoubleValue float64 `protobuf:"fixed64,2,opt,name=double_value,json=doubleValue,proto3,oneof"`
+}
+
+func (*NumericValue_IntValue) isNumericValue_Value() {}
+
+func (*NumericValue_DoubleValue) isNumericValue_Value() {}
+
 var File_tero_policy_v1_shared_proto protoreflect.FileDescriptor
 
 const file_tero_policy_v1_shared_proto_rawDesc = "" +
 	"\n" +
 	"\x1btero/policy/v1/shared.proto\x12\x0etero.policy.v1\"#\n" +
 	"\rAttributePath\x12\x12\n" +
-	"\x04path\x18\x01 \x03(\tR\x04pathB1Z/github.com/usetero/policy/gen/go/tero/policy/v1b\x06proto3"
+	"\x04path\x18\x01 \x03(\tR\x04path\"\xb7\x01\n" +
+	"\x05Value\x12\x1f\n" +
+	"\n" +
+	"bool_value\x18\x01 \x01(\bH\x00R\tboolValue\x12\x1d\n" +
+	"\tint_value\x18\x02 \x01(\x03H\x00R\bintValue\x12#\n" +
+	"\fdouble_value\x18\x03 \x01(\x01H\x00R\vdoubleValue\x12!\n" +
+	"\vbytes_value\x18\x04 \x01(\fH\x00R\n" +
+	"bytesValue\x12\x1d\n" +
+	"\thex_value\x18\x05 \x01(\tH\x00R\bhexValueB\a\n" +
+	"\x05value\"[\n" +
+	"\fNumericValue\x12\x1d\n" +
+	"\tint_value\x18\x01 \x01(\x03H\x00R\bintValue\x12#\n" +
+	"\fdouble_value\x18\x02 \x01(\x01H\x00R\vdoubleValueB\a\n" +
+	"\x05valueB1Z/github.com/usetero/policy/gen/go/tero/policy/v1b\x06proto3"
 
 var (
 	file_tero_policy_v1_shared_proto_rawDescOnce sync.Once
@@ -124,9 +399,11 @@ func file_tero_policy_v1_shared_proto_rawDescGZIP() []byte {
 	return file_tero_policy_v1_shared_proto_rawDescData
 }
 
-var file_tero_policy_v1_shared_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_tero_policy_v1_shared_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_tero_policy_v1_shared_proto_goTypes = []any{
 	(*AttributePath)(nil), // 0: tero.policy.v1.AttributePath
+	(*Value)(nil),         // 1: tero.policy.v1.Value
+	(*NumericValue)(nil),  // 2: tero.policy.v1.NumericValue
 }
 var file_tero_policy_v1_shared_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -141,13 +418,24 @@ func file_tero_policy_v1_shared_proto_init() {
 	if File_tero_policy_v1_shared_proto != nil {
 		return
 	}
+	file_tero_policy_v1_shared_proto_msgTypes[1].OneofWrappers = []any{
+		(*Value_BoolValue)(nil),
+		(*Value_IntValue)(nil),
+		(*Value_DoubleValue)(nil),
+		(*Value_BytesValue)(nil),
+		(*Value_HexValue)(nil),
+	}
+	file_tero_policy_v1_shared_proto_msgTypes[2].OneofWrappers = []any{
+		(*NumericValue_IntValue)(nil),
+		(*NumericValue_DoubleValue)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tero_policy_v1_shared_proto_rawDesc), len(file_tero_policy_v1_shared_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
