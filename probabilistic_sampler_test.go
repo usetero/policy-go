@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/hex"
 	"fmt"
 	"testing"
 
@@ -8,6 +9,18 @@ import (
 	"github.com/usetero/policy-go/internal/engine"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
+
+// mustHexDecode decodes a hex string to raw bytes. Panics on invalid input —
+// only intended for test fixtures where the input is a literal we control.
+// The sampler now operates on raw bytes; tests that historically wrote
+// 32-char hex strings as TraceID bytes must decode them first.
+func mustHexDecode(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic("mustHexDecode: " + err.Error())
+	}
+	return b
+}
 
 // traceAccessorFromOpts is a test-only helper that materializes a
 // *engine.TraceAccessor from options. The production hot path keeps the
@@ -20,7 +33,7 @@ func traceAccessorFromOpts[T any](opts []TraceOption[T]) *engine.TraceAccessor[T
 
 func TestExtractRandomnessFromTraceID_Hex32(t *testing.T) {
 	// 32-char hex trace ID: last 14 hex chars = 56 bits of randomness
-	traceID := []byte("0123456789abcdef0123456789abcdef")
+	traceID := mustHexDecode("0123456789abcdef0123456789abcdef")
 	r := extractRandomnessFromTraceID(traceID)
 	assert.NotZero(t, r)
 	// Should be masked to 56 bits
@@ -87,7 +100,7 @@ func TestParseTracestateRandomness(t *testing.T) {
 }
 
 func TestProbabilisticSample_EdgeCases(t *testing.T) {
-	traceID := []byte("0123456789abcdef0123456789abcdef")
+	traceID := mustHexDecode("0123456789abcdef0123456789abcdef")
 
 	// 100% always keeps
 	assert.True(t, probabilisticSample(traceID, 100))
@@ -97,7 +110,7 @@ func TestProbabilisticSample_EdgeCases(t *testing.T) {
 }
 
 func TestProbabilisticSample_Deterministic(t *testing.T) {
-	traceID := []byte("0123456789abcdef0123456789abcdef")
+	traceID := mustHexDecode("0123456789abcdef0123456789abcdef")
 	result1 := probabilisticSample(traceID, 50)
 	result2 := probabilisticSample(traceID, 50)
 	assert.Equal(t, result1, result2, "same input should produce same result")
@@ -108,7 +121,7 @@ func TestProbabilisticSample_Distribution(t *testing.T) {
 	total := 1000
 
 	for i := 0; i < total; i++ {
-		traceID := []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*72057594037927))
+		traceID := mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*72057594037927))
 		if probabilisticSample(traceID, 50) {
 			kept++
 		}
@@ -116,12 +129,6 @@ func TestProbabilisticSample_Distribution(t *testing.T) {
 
 	keepRate := float64(kept) / float64(total) * 100
 	assert.InDelta(t, 50.0, keepRate, 15.0, "sampling rate should be roughly 50%% (got %.1f%%)", keepRate)
-}
-
-func TestHexDecode(t *testing.T) {
-	dst := make([]byte, 3)
-	hexDecode(dst, []byte("ff00ab"))
-	assert.Equal(t, []byte{0xff, 0x00, 0xab}, dst)
 }
 
 func TestFindOTelEntry(t *testing.T) {
@@ -238,7 +245,7 @@ func TestShouldSampleTraceHashSeedZero(t *testing.T) {
 	// seed=0 should behave like the default (extract R from trace ID)
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, true)
 	span := &SimpleSpanRecord{
-		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+		TraceID: mustHexDecode("0123456789abcdef0123456789abcdef"),
 	}
 
 	result1, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
@@ -251,7 +258,7 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 	policy1 := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 42, true)
 	policy2 := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 99, true)
 	span := &SimpleSpanRecord{
-		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+		TraceID: mustHexDecode("0123456789abcdef0123456789abcdef"),
 	}
 
 	// Same seed → same result
@@ -263,7 +270,7 @@ func TestShouldSampleTraceHashSeedNonZero(t *testing.T) {
 	differentCount := 0
 	for i := 0; i < 100; i++ {
 		s := &SimpleSpanRecord{
-			TraceID: []byte(fmt.Sprintf("%032x", i)),
+			TraceID: mustHexDecode(fmt.Sprintf("%032x", i)),
 		}
 		r1, _, _ := shouldSampleTrace(policy1, s, traceAccessorFromOpts(SimpleSpanOptions()))
 		r2, _, _ := shouldSampleTrace(policy2, s, traceAccessorFromOpts(SimpleSpanOptions()))
@@ -280,7 +287,7 @@ func TestShouldSampleTraceHashSeedDistribution(t *testing.T) {
 	total := 1000
 	for i := 0; i < total; i++ {
 		span := &SimpleSpanRecord{
-			TraceID: []byte(fmt.Sprintf("%032x", i)),
+			TraceID: mustHexDecode(fmt.Sprintf("%032x", i)),
 		}
 		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
@@ -304,7 +311,7 @@ func TestShouldSampleTraceProportional(t *testing.T) {
 	for i := 0; i < total; i++ {
 		// Distribute trace IDs across the full 56-bit space
 		span := &SimpleSpanRecord{
-			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
+			TraceID:    mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
 		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
@@ -327,7 +334,7 @@ func TestShouldSampleTraceProportionalNoThreshold(t *testing.T) {
 	total := 1000
 	for i := 0; i < total; i++ {
 		span := &SimpleSpanRecord{
-			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
+			TraceID: mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
 		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
@@ -347,7 +354,7 @@ func TestShouldSampleTraceEqualizing(t *testing.T) {
 	total := 1000
 	for i := 0; i < total; i++ {
 		span := &SimpleSpanRecord{
-			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
+			TraceID: mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 		}
 		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
 			kept++
@@ -370,7 +377,7 @@ func TestShouldSampleTraceEqualizingHigherIncoming(t *testing.T) {
 	total := 100
 	for i := 0; i < total; i++ {
 		span := &SimpleSpanRecord{
-			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
+			TraceID:    mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(maxThreshold/uint64(total)))),
 			TraceState: traceState,
 		}
 		if keep, _, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions())); keep {
@@ -453,7 +460,7 @@ func TestShouldSampleTraceReturnsThreshold(t *testing.T) {
 	// hash_seed mode should return calculateRejectionThreshold(percentage)
 	policy := makeTracePolicy(50, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, true)
 	span := &SimpleSpanRecord{
-		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+		TraceID: mustHexDecode("0123456789abcdef0123456789abcdef"),
 	}
 
 	_, threshold, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
@@ -463,7 +470,7 @@ func TestShouldSampleTraceReturnsThreshold(t *testing.T) {
 func TestShouldSampleTrace100PercentReturnsZeroThreshold(t *testing.T) {
 	policy := makeTracePolicy(100, policyv1.SamplingMode_SAMPLING_MODE_HASH_SEED, 0, true)
 	span := &SimpleSpanRecord{
-		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+		TraceID: mustHexDecode("0123456789abcdef0123456789abcdef"),
 	}
 
 	keep, threshold, _ := shouldSampleTrace(policy, span, traceAccessorFromOpts(SimpleSpanOptions()))
@@ -477,7 +484,7 @@ func TestShouldSampleTraceEqualizingReturnsIncomingThreshold(t *testing.T) {
 	traceState := []byte("ot=th:e6666666666666") // T_s for 10%
 
 	span := &SimpleSpanRecord{
-		TraceID:    []byte("0123456789abcdef0123456789abcdef"),
+		TraceID:    mustHexDecode("0123456789abcdef0123456789abcdef"),
 		TraceState: traceState,
 	}
 

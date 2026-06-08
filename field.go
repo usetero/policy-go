@@ -53,6 +53,40 @@ var ParseKeep = engine.ParseKeep
 // FIELD REFERENCE TYPES
 // ============================================================================
 
+// TypedValue is the typed value of a single field, returned by the consumer's
+// TypedValue accessor for the equals/gt/gte/lt/lte matchers. Construct with
+// TypedValueString/Bool/Int/Double/Bytes; the zero value (Kind == Absent)
+// signals a missing field.
+type TypedValue = engine.TypedValue
+
+// TypedValueKind discriminates TypedValue variants.
+type TypedValueKind = engine.TypedValueKind
+
+// TypedValueKind constants.
+const (
+	TypedValueAbsent = engine.TypedValueAbsent
+	TypedValueString = engine.TypedValueString
+	TypedValueBool   = engine.TypedValueBool
+	TypedValueInt    = engine.TypedValueInt
+	TypedValueDouble = engine.TypedValueDouble
+	TypedValueBytes  = engine.TypedValueBytes
+)
+
+// TypedValueOfString returns a TypedValue holding s.
+func TypedValueOfString(s string) TypedValue { return TypedValue{Kind: TypedValueString, Str: s} }
+
+// TypedValueOfBool returns a TypedValue holding b.
+func TypedValueOfBool(b bool) TypedValue { return TypedValue{Kind: TypedValueBool, Bool: b} }
+
+// TypedValueOfInt returns a TypedValue holding i.
+func TypedValueOfInt(i int64) TypedValue { return TypedValue{Kind: TypedValueInt, Int: i} }
+
+// TypedValueOfDouble returns a TypedValue holding d.
+func TypedValueOfDouble(d float64) TypedValue { return TypedValue{Kind: TypedValueDouble, Double: d} }
+
+// TypedValueOfBytes returns a TypedValue holding b.
+func TypedValueOfBytes(b []byte) TypedValue { return TypedValue{Kind: TypedValueBytes, Bytes: b} }
+
 // Re-export field types from engine package for public use.
 type (
 	// AttrScope identifies the scope for attribute lookups.
@@ -318,6 +352,7 @@ type logOptKind uint8
 const (
 	logOptValue logOptKind = iota + 1
 	logOptExists
+	logOptTypedValue
 	logOptSet
 	logOptDelete
 	logOptMove
@@ -329,6 +364,7 @@ type LogOption[T any] struct {
 	kind   logOptKind
 	value  func(T, LogFieldRef) []byte
 	exists func(T, LogFieldRef) bool
+	typed  func(T, LogFieldRef) TypedValue
 	set    func(T, LogFieldRef, string)
 	del    func(T, LogFieldRef) bool
 	move   func(T, LogFieldRef, LogFieldRef)
@@ -344,6 +380,8 @@ func applyLogOpts[T any](a *engine.LogAccessor[T], opts []LogOption[T]) {
 			a.Value = opts[i].value
 		case logOptExists:
 			a.Exists = opts[i].exists
+		case logOptTypedValue:
+			a.TypedValue = opts[i].typed
 		case logOptSet:
 			a.Set = opts[i].set
 		case logOptDelete:
@@ -359,6 +397,7 @@ type metricOptKind uint8
 const (
 	metricOptValue metricOptKind = iota + 1
 	metricOptExists
+	metricOptTypedValue
 )
 
 // MetricOption configures one accessor primitive on a single EvaluateMetric call.
@@ -366,6 +405,7 @@ type MetricOption[T any] struct {
 	kind   metricOptKind
 	value  func(T, MetricFieldRef) []byte
 	exists func(T, MetricFieldRef) bool
+	typed  func(T, MetricFieldRef) TypedValue
 }
 
 func applyMetricOpts[T any](a *engine.MetricAccessor[T], opts []MetricOption[T]) {
@@ -375,6 +415,8 @@ func applyMetricOpts[T any](a *engine.MetricAccessor[T], opts []MetricOption[T])
 			a.Value = opts[i].value
 		case metricOptExists:
 			a.Exists = opts[i].exists
+		case metricOptTypedValue:
+			a.TypedValue = opts[i].typed
 		}
 	}
 }
@@ -384,6 +426,7 @@ type traceOptKind uint8
 const (
 	traceOptValue traceOptKind = iota + 1
 	traceOptExists
+	traceOptTypedValue
 	traceOptSet
 )
 
@@ -392,6 +435,7 @@ type TraceOption[T any] struct {
 	kind   traceOptKind
 	value  func(T, TraceFieldRef) []byte
 	exists func(T, TraceFieldRef) bool
+	typed  func(T, TraceFieldRef) TypedValue
 	set    func(T, TraceFieldRef, string)
 }
 
@@ -402,6 +446,8 @@ func applyTraceOpts[T any](a *engine.TraceAccessor[T], opts []TraceOption[T]) {
 			a.Value = opts[i].value
 		case traceOptExists:
 			a.Exists = opts[i].exists
+		case traceOptTypedValue:
+			a.TypedValue = opts[i].typed
 		case traceOptSet:
 			a.Set = opts[i].set
 		}
@@ -425,6 +471,14 @@ func WithLogValue[T any](f func(T, LogFieldRef) []byte) LogOption[T] {
 // WithLogExists sets the Exists accessor function.
 func WithLogExists[T any](f func(T, LogFieldRef) bool) LogOption[T] {
 	return LogOption[T]{kind: logOptExists, exists: f}
+}
+
+// WithLogTypedValue sets the TypedValue accessor used by typed matchers
+// (equals/gt/gte/lt/lte). If unset, the engine wraps the Value accessor as
+// TypedValue.String, so string-targeted typed matchers still work but non-string
+// matchers always non-match.
+func WithLogTypedValue[T any](f func(T, LogFieldRef) TypedValue) LogOption[T] {
+	return LogOption[T]{kind: logOptTypedValue, typed: f}
 }
 
 // WithLogSet sets the Set accessor function.
@@ -456,6 +510,12 @@ func WithMetricExists[T any](f func(T, MetricFieldRef) bool) MetricOption[T] {
 	return MetricOption[T]{kind: metricOptExists, exists: f}
 }
 
+// WithMetricTypedValue sets the TypedValue accessor for typed matchers. See
+// WithLogTypedValue for fallback semantics.
+func WithMetricTypedValue[T any](f func(T, MetricFieldRef) TypedValue) MetricOption[T] {
+	return MetricOption[T]{kind: metricOptTypedValue, typed: f}
+}
+
 // ============================================================================
 // TRACE OPTIONS
 // ============================================================================
@@ -468,6 +528,12 @@ func WithTraceValue[T any](f func(T, TraceFieldRef) []byte) TraceOption[T] {
 // WithTraceExists sets the Exists accessor function.
 func WithTraceExists[T any](f func(T, TraceFieldRef) bool) TraceOption[T] {
 	return TraceOption[T]{kind: traceOptExists, exists: f}
+}
+
+// WithTraceTypedValue sets the TypedValue accessor for typed matchers. See
+// WithLogTypedValue for fallback semantics.
+func WithTraceTypedValue[T any](f func(T, TraceFieldRef) TypedValue) TraceOption[T] {
+	return TraceOption[T]{kind: traceOptTypedValue, typed: f}
 }
 
 // WithTraceSet sets the Set accessor function. Configure this on spans where

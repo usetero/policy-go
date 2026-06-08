@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"strings"
 
 	"github.com/usetero/policy-go/internal/engine"
@@ -12,6 +13,62 @@ import (
 
 // maxThreshold is 2^56, the maximum value for the 56-bit threshold/randomness space
 const maxThreshold uint64 = 1 << 56
+
+// typedValueToBytes coerces a typed field value into a raw-byte representation
+// suitable for hashing or threshold extraction. Bytes pass through verbatim;
+// strings yield their UTF-8 bytes; ints and doubles are big-endian encoded;
+// bools become a single byte. An absent field returns nil.
+//
+// This is the bridge between the v1.5 typed-value model and the byte-oriented
+// sampling primitives (FNV hash, trace-ID randomness extraction).
+func typedValueToBytes(v engine.TypedValue) []byte {
+	switch v.Kind {
+	case engine.TypedValueBytes:
+		return v.Bytes
+	case engine.TypedValueString:
+		return []byte(v.Str)
+	case engine.TypedValueInt:
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], uint64(v.Int))
+		return b[:]
+	case engine.TypedValueDouble:
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], math.Float64bits(v.Double))
+		return b[:]
+	case engine.TypedValueBool:
+		if v.Bool {
+			return []byte{1}
+		}
+		return []byte{0}
+	}
+	return nil
+}
+
+// sampleBytesLog reads a log field as raw bytes for sampling. Uses the
+// TypedValue accessor when available so bytes-typed fields (trace_id, span_id)
+// yield raw bytes rather than their hex rendering; falls back to the string
+// Value accessor for consumers that haven't adopted TypedValue.
+func sampleBytesLog[T any](c *engine.LogAccessor[T], rec T, ref engine.LogFieldRef) []byte {
+	if c.TypedValue != nil {
+		return typedValueToBytes(c.TypedValue(rec, ref))
+	}
+	if c.Value == nil {
+		return nil
+	}
+	return c.Value(rec, ref)
+}
+
+// sampleBytesTrace reads a span field as raw bytes for sampling. See
+// sampleBytesLog for fallback semantics.
+func sampleBytesTrace[T any](c *engine.TraceAccessor[T], span T, ref engine.TraceFieldRef) []byte {
+	if c.TypedValue != nil {
+		return typedValueToBytes(c.TypedValue(span, ref))
+	}
+	if c.Value == nil {
+		return nil
+	}
+	return c.Value(span, ref)
+}
 
 // probabilisticSample determines if a record should be kept using OTel consistent
 // probability sampling. It extracts 56-bit randomness from the input (treating it
@@ -190,10 +247,10 @@ func shouldSampleLog[T any](policy *engine.CompiledPolicy[engine.LogField], reco
 		return false
 	}
 
-	// Get the value to sample on
+	// Get the value to sample on as raw bytes (via TypedValue when available).
 	var sampleInput []byte
 	if policy.SampleKey != nil {
-		sampleInput = c.Value(record, *policy.SampleKey)
+		sampleInput = sampleBytesLog(c, record, *policy.SampleKey)
 	}
 
 	// If no sample key or the field is empty, we can't do consistent sampling
@@ -236,23 +293,21 @@ func getTraceRandomness[T any](span T, c *engine.TraceAccessor[T]) (uint64, bool
 		}
 	}
 
-	// Fall back to trace ID
-	traceIDRef := engine.SpanTraceID()
-	traceID := c.Value(span, traceIDRef)
+	// Fall back to trace ID (raw bytes via TypedValue when available).
+	traceID := sampleBytesTrace(c, span, engine.SpanTraceID())
 	if len(traceID) == 0 {
 		return 0, false
 	}
 
 	// Extract least-significant 56 bits from trace ID
-	// Trace IDs are typically 16 bytes (128 bits), we want the last 7 bytes (56 bits)
+	// Trace IDs are 16 bytes (128 bits); we want the last 7 bytes (56 bits)
 	return extractRandomnessFromTraceID(traceID), true
 }
 
 // getTraceRandomnessWithSeed hashes the trace ID with a seed using FNV-64a
 // to produce deterministic 56-bit randomness.
 func getTraceRandomnessWithSeed[T any](span T, c *engine.TraceAccessor[T], seed uint32) (uint64, bool) {
-	traceIDRef := engine.SpanTraceID()
-	traceID := c.Value(span, traceIDRef)
+	traceID := sampleBytesTrace(c, span, engine.SpanTraceID())
 	if len(traceID) == 0 {
 		return 0, false
 	}
@@ -265,40 +320,30 @@ func getTraceRandomnessWithSeed[T any](span T, c *engine.TraceAccessor[T], seed 
 	return h.Sum64() & (maxThreshold - 1), true
 }
 
-// extractRandomnessFromTraceID extracts the least-significant 56 bits from a trace ID.
-// Per OTel spec, this is the source of randomness when explicit rv is not present.
+// extractRandomnessFromTraceID extracts the least-significant 56 bits from a
+// raw-byte trace ID. Per OTel spec, this is the source of randomness when
+// explicit rv is not present. The input MUST be raw bytes (W3C trace IDs are
+// 16 bytes); consumers that previously returned hex-encoded trace IDs via the
+// Value accessor should switch to providing the TypedValue accessor so the
+// sampler sees raw bytes.
 func extractRandomnessFromTraceID(traceID []byte) uint64 {
-	// Handle both binary (16 bytes) and hex-encoded (32 bytes) trace IDs
 	var raw []byte
-	if len(traceID) == 32 {
-		// Hex-encoded, decode the last 14 hex chars (7 bytes = 56 bits)
-		raw = make([]byte, 7)
-		hexDecode(raw, traceID[len(traceID)-14:])
-	} else if len(traceID) >= 7 {
-		// Binary format, take last 7 bytes
+	switch {
+	case len(traceID) >= 7:
+		// W3C trace IDs are 16 bytes; take the last 7 (56 bits).
 		raw = traceID[len(traceID)-7:]
-	} else if len(traceID) > 0 {
-		// Short trace ID, use what we have
+	case len(traceID) > 0:
+		// Shorter than 7 bytes — use whatever's there.
 		raw = traceID
-	} else {
+	default:
 		return 0
 	}
 
-	// Convert to uint64 (big-endian)
 	var result uint64
 	for _, b := range raw {
 		result = (result << 8) | uint64(b)
 	}
-
-	// Mask to 56 bits
 	return result & (maxThreshold - 1)
-}
-
-// hexDecode decodes hex bytes into dst. Simple implementation for trace ID parsing.
-func hexDecode(dst, src []byte) {
-	for i := 0; i < len(dst) && i*2+1 < len(src); i++ {
-		dst[i] = hexVal(src[i*2])<<4 | hexVal(src[i*2+1])
-	}
 }
 
 func hexVal(c byte) byte {

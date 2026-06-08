@@ -266,11 +266,10 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if refErr != nil {
 					continue
 				}
-				if tm, ok := extractTypedMatch(m); ok {
-					err := tm.validate()
+				if cm, ok, err := extractTypedMatcher(m); ok {
 					addErr(fmt.Sprintf("log: match[%d]", i), err)
 					if err == nil {
-						logBuilder.addTypedCheck(ref, tm.op, tm.eq, tm.num, m.GetNegate(), id, idx, i)
+						logBuilder.addTypedCheck(ref, cm, m.GetNegate(), id, idx, i)
 					}
 					continue
 				}
@@ -302,11 +301,10 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if refErr != nil {
 					continue
 				}
-				if tm, ok := extractTypedMatch(m); ok {
-					err := tm.validate()
+				if cm, ok, err := extractTypedMatcher(m); ok {
 					addErr(fmt.Sprintf("metric: match[%d]", i), err)
 					if err == nil {
-						metricBuilder.addTypedCheck(ref, tm.op, tm.eq, tm.num, m.GetNegate(), id, idx, i)
+						metricBuilder.addTypedCheck(ref, cm, m.GetNegate(), id, idx, i)
 					}
 					continue
 				}
@@ -334,11 +332,10 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if refErr != nil {
 					continue
 				}
-				if tm, ok := extractTypedMatch(m); ok {
-					err := tm.validate()
+				if cm, ok, err := extractTypedMatcher(m); ok {
 					addErr(fmt.Sprintf("trace: match[%d]", i), err)
 					if err == nil {
-						traceBuilder.addTypedCheck(ref, tm.op, tm.eq, tm.num, m.GetNegate(), id, idx, i)
+						traceBuilder.addTypedCheck(ref, cm, m.GetNegate(), id, idx, i)
 					}
 					continue
 				}
