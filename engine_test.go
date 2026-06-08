@@ -2201,7 +2201,7 @@ func TestEvaluateTraceSamplingWithTracestateRandomness(t *testing.T) {
 	spanKept := &SimpleSpanRecord{
 		Name:       []byte("GET /api/users"),
 		TraceID:    mustHexDecode("00000000000000000000000000000001"), // TraceID doesn't matter when rv is present
-		TraceState: []byte("ot=rv:80000000000000"),             // Exactly at 50% threshold
+		TraceState: []byte("ot=rv:80000000000000"),                    // Exactly at 50% threshold
 	}
 
 	spanDropped := &SimpleSpanRecord{
