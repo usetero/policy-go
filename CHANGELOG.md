@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.0](https://github.com/usetero/policy-go/compare/v1.7.0...v1.8.0) (2026-06-08)
+
+
+### Features
+
+* better error handling and validation ([#68](https://github.com/usetero/policy-go/issues/68)) ([5bf623a](https://github.com/usetero/policy-go/commit/5bf623aaca708e0f6680508f6bf835f19b758ba2))
+* typed implementations ([#72](https://github.com/usetero/policy-go/issues/72)) ([74ae3b7](https://github.com/usetero/policy-go/commit/74ae3b7a91702e375f2d4689ec55ea9c3aaaf9b7))
+* upgrade protos to 1.5.0 ([#71](https://github.com/usetero/policy-go/issues/71)) ([9864b97](https://github.com/usetero/policy-go/commit/9864b97989ff94f7a3ffb3ea00defa6f875a8b7e))
+
 ## [1.7.0](https://github.com/usetero/policy-go/compare/v1.6.0...v1.7.0) (2026-05-13)
 
 
