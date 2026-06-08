@@ -164,6 +164,38 @@ func SimpleLogMoveValue(r *SimpleLogRecord, from, to LogFieldRef) {
 	}
 }
 
+// SimpleLogGetTypedValue returns the field's typed value for the typed
+// matchers (equals/gt/gte/lt/lte) and for raw-bytes sampling. Bytes fields
+// (trace_id, span_id) return TypedValueBytes; all other built-in fields and
+// string-valued attributes return TypedValueString. Numeric/bool attributes
+// stored as native Go types are exposed with their respective Kind.
+func SimpleLogGetTypedValue(r *SimpleLogRecord, ref LogFieldRef) TypedValue {
+	if ref.IsField() {
+		switch ref.Field {
+		case LogFieldTraceID:
+			if r.TraceID == nil {
+				return TypedValue{}
+			}
+			return TypedValueOfBytes(r.TraceID)
+		case LogFieldSpanID:
+			if r.SpanID == nil {
+				return TypedValue{}
+			}
+			return TypedValueOfBytes(r.SpanID)
+		}
+		b := SimpleLogGetValue(r, ref)
+		if b == nil {
+			return TypedValue{}
+		}
+		return TypedValueOfString(string(b))
+	}
+	v, ok := lookupPath(simpleLogAttrs(r, ref), ref.AttrPath)
+	if !ok {
+		return TypedValue{}
+	}
+	return typedValueFromAny(v)
+}
+
 // SimpleLogOptions returns the LogOption slice that wires *SimpleLogRecord up
 // to the SimpleLog* accessor functions. Spread it into EvaluateLog:
 //
@@ -172,6 +204,7 @@ func SimpleLogOptions() []LogOption[*SimpleLogRecord] {
 	return []LogOption[*SimpleLogRecord]{
 		WithLogValue(SimpleLogGetValue),
 		WithLogExists(SimpleLogHasValue),
+		WithLogTypedValue(SimpleLogGetTypedValue),
 		WithLogSet(SimpleLogSetValue),
 		WithLogDelete(SimpleLogDeleteValue),
 		WithLogMove(SimpleLogMoveValue),
@@ -365,12 +398,32 @@ func simpleMetricAttrs(r *SimpleMetricRecord, ref MetricFieldRef) map[string]any
 	}
 }
 
+// SimpleMetricGetTypedValue returns the typed value of a metric field for the
+// equals/gt/gte/lt/lte matchers. Metrics have no bytes-typed built-in fields,
+// so every well-known field is exposed as TypedValueString. Attribute lookups
+// preserve their native Go type via typedValueFromAny.
+func SimpleMetricGetTypedValue(r *SimpleMetricRecord, ref MetricFieldRef) TypedValue {
+	if ref.IsField() {
+		b := SimpleMetricGetValue(r, ref)
+		if b == nil {
+			return TypedValue{}
+		}
+		return TypedValueOfString(string(b))
+	}
+	v, ok := lookupPath(simpleMetricAttrs(r, ref), ref.AttrPath)
+	if !ok {
+		return TypedValue{}
+	}
+	return typedValueFromAny(v)
+}
+
 // SimpleMetricOptions returns the MetricOption slice that wires
 // *SimpleMetricRecord up to the SimpleMetric* accessor functions.
 func SimpleMetricOptions() []MetricOption[*SimpleMetricRecord] {
 	return []MetricOption[*SimpleMetricRecord]{
 		WithMetricValue(SimpleMetricGetValue),
 		WithMetricExists(SimpleMetricHasValue),
+		WithMetricTypedValue(SimpleMetricGetTypedValue),
 	}
 }
 
@@ -549,12 +602,56 @@ func simpleSpanEnsureAttrs(r *SimpleSpanRecord, ref TraceFieldRef) map[string]an
 	}
 }
 
+// SimpleSpanGetTypedValue returns the field's typed value for typed matchers
+// and raw-bytes sampling. The W3C identifier fields (trace_id, span_id,
+// parent_span_id, link_trace_id) return TypedValueBytes so the sampler reads
+// raw bytes; all other built-in fields and string attributes return
+// TypedValueString. Numeric/bool attributes stored as native Go types are
+// exposed with their respective Kind.
+func SimpleSpanGetTypedValue(r *SimpleSpanRecord, ref TraceFieldRef) TypedValue {
+	if ref.IsField() {
+		switch ref.Field {
+		case TraceFieldTraceID:
+			if r.TraceID == nil {
+				return TypedValue{}
+			}
+			return TypedValueOfBytes(r.TraceID)
+		case TraceFieldSpanID:
+			if r.SpanID == nil {
+				return TypedValue{}
+			}
+			return TypedValueOfBytes(r.SpanID)
+		case TraceFieldParentSpanID:
+			if r.ParentSpanID == nil {
+				return TypedValue{}
+			}
+			return TypedValueOfBytes(r.ParentSpanID)
+		case TraceFieldLinkTraceID:
+			if len(r.LinkTraceIDs) == 0 || r.LinkTraceIDs[0] == nil {
+				return TypedValue{}
+			}
+			return TypedValueOfBytes(r.LinkTraceIDs[0])
+		}
+		b := SimpleSpanGetValue(r, ref)
+		if b == nil {
+			return TypedValue{}
+		}
+		return TypedValueOfString(string(b))
+	}
+	v, ok := lookupPath(simpleSpanAttrs(r, ref), ref.AttrPath)
+	if !ok {
+		return TypedValue{}
+	}
+	return typedValueFromAny(v)
+}
+
 // SimpleSpanOptions returns the TraceOption slice that wires *SimpleSpanRecord
 // up to the SimpleSpan* accessor functions.
 func SimpleSpanOptions() []TraceOption[*SimpleSpanRecord] {
 	return []TraceOption[*SimpleSpanRecord]{
 		WithTraceValue(SimpleSpanGetValue),
 		WithTraceExists(SimpleSpanHasValue),
+		WithTraceTypedValue(SimpleSpanGetTypedValue),
 		WithTraceSet(SimpleSpanSetValue),
 	}
 }
@@ -620,4 +717,56 @@ func toBytes(val any) []byte {
 	default:
 		return nil
 	}
+}
+
+// lookupPath navigates nested maps and returns the raw Go value plus a
+// presence bool. Unlike traversePath it preserves the original type so the
+// typed-value accessor can expose ints/floats/bools as their native Kind.
+func lookupPath(m map[string]any, path []string) (any, bool) {
+	if len(path) == 0 || m == nil {
+		return nil, false
+	}
+	val, ok := m[path[0]]
+	if !ok {
+		return nil, false
+	}
+	if len(path) == 1 {
+		return val, true
+	}
+	nested, ok := val.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return lookupPath(nested, path[1:])
+}
+
+// typedValueFromAny maps a Go scalar to its TypedValue variant. Anything that
+// isn't a recognized scalar collapses to TypedValueAbsent — typed matchers
+// fail-open on opaque values per spec.
+func typedValueFromAny(v any) TypedValue {
+	switch x := v.(type) {
+	case string:
+		return TypedValueOfString(x)
+	case []byte:
+		return TypedValueOfBytes(x)
+	case bool:
+		return TypedValueOfBool(x)
+	case int:
+		return TypedValueOfInt(int64(x))
+	case int32:
+		return TypedValueOfInt(int64(x))
+	case int64:
+		return TypedValueOfInt(x)
+	case uint:
+		return TypedValueOfInt(int64(x))
+	case uint32:
+		return TypedValueOfInt(int64(x))
+	case uint64:
+		return TypedValueOfInt(int64(x))
+	case float32:
+		return TypedValueOfDouble(float64(x))
+	case float64:
+		return TypedValueOfDouble(x)
+	}
+	return TypedValue{}
 }

@@ -39,6 +39,13 @@ type LogAccessor[T any] struct {
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref LogFieldRef) bool
 
+	// TypedValue returns the field's typed value for the equals/gt/gte/lt/lte
+	// matchers. Return a TypedValue with Kind==TypedValueAbsent if the field is
+	// missing. Override to expose non-string field values (bool, int, double,
+	// bytes). When nil, the engine wraps the Value accessor as
+	// TypedValue.String, so string-targeted typed matchers still work.
+	TypedValue func(rec T, ref LogFieldRef) TypedValue
+
 	// Set writes a string value at ref, creating the field if necessary.
 	Set func(rec T, ref LogFieldRef, value string)
 
@@ -57,6 +64,10 @@ type MetricAccessor[T any] struct {
 
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref MetricFieldRef) bool
+
+	// TypedValue returns the field's typed value for equals/gt/gte/lt/lte
+	// matchers. See LogAccessor.TypedValue for the default-fallback semantics.
+	TypedValue func(rec T, ref MetricFieldRef) TypedValue
 }
 
 // TraceAccessor bundles the per-record accessor functions the engine needs to
@@ -67,6 +78,10 @@ type TraceAccessor[T any] struct {
 
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref TraceFieldRef) bool
+
+	// TypedValue returns the field's typed value for equals/gt/gte/lt/lte
+	// matchers. See LogAccessor.TypedValue for the default-fallback semantics.
+	TypedValue func(rec T, ref TraceFieldRef) TypedValue
 
 	// Set writes a string value at ref, creating the field if necessary.
 	Set func(rec T, ref TraceFieldRef, value string)

@@ -133,12 +133,23 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		}
 	}
 
-	// Typed comparison checks (equals/gt/gte/lt/lte) are compiled but not yet
-	// evaluated. Their MatcherCount contribution means policies containing any
-	// typed matcher stay inert at eval time (matchCounts cannot reach the
-	// declared MatcherCount), matching the fail-open requirement until a
-	// follow-up implements typed evaluation.
-	_ = matchers.TypedChecks
+	// Process typed comparison checks (equals/gt/gte/lt/lte). Type mismatch
+	// or absent values fail-open (non-match).
+	for _, check := range matchers.TypedChecks() {
+		if disqualified[check.PolicyIndex] {
+			continue
+		}
+		fv := logTypedValue(c, record, check.Ref)
+		matched := check.Matcher.Evaluate(fv)
+		if check.Negate {
+			matched = !matched
+		}
+		if matched {
+			matchCounts[check.PolicyIndex]++
+		} else {
+			disqualified[check.PolicyIndex] = true
+		}
+	}
 
 	// Process Hyperscan databases
 	for _, entry := range matchers.Databases() {
@@ -358,8 +369,22 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 		}
 	}
 
-	// Typed checks compiled but not yet evaluated — see EvaluateLog.
-	_ = matchers.TypedChecks
+	// Process typed comparison checks.
+	for _, check := range matchers.TypedChecks() {
+		if disqualified[check.PolicyIndex] {
+			continue
+		}
+		fv := metricTypedValue(c, metric, check.Ref)
+		matched := check.Matcher.Evaluate(fv)
+		if check.Negate {
+			matched = !matched
+		}
+		if matched {
+			matchCounts[check.PolicyIndex]++
+		} else {
+			disqualified[check.PolicyIndex] = true
+		}
+	}
 
 	// Process Hyperscan databases
 	for _, entry := range matchers.Databases() {
@@ -524,8 +549,22 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 		}
 	}
 
-	// Typed checks compiled but not yet evaluated — see EvaluateLog.
-	_ = matchers.TypedChecks
+	// Process typed comparison checks.
+	for _, check := range matchers.TypedChecks() {
+		if disqualified[check.PolicyIndex] {
+			continue
+		}
+		fv := traceTypedValue(c, span, check.Ref)
+		matched := check.Matcher.Evaluate(fv)
+		if check.Negate {
+			matched = !matched
+		}
+		if matched {
+			matchCounts[check.PolicyIndex]++
+		} else {
+			disqualified[check.PolicyIndex] = true
+		}
+	}
 
 	// Process Hyperscan databases
 	for _, entry := range matchers.Databases() {
@@ -644,4 +683,54 @@ func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField
 	}
 
 	return ResultKeep
+}
+
+// logTypedValue returns the field's typed value for ref. If the consumer
+// supplied a TypedValue accessor, defer to it. Otherwise fall back to the
+// string Value accessor and wrap a present result as TypedValue.String — this
+// matches the Rust SDK's default trait impl and means string-targeted typed
+// matchers (equals against an exact string... wait no, equals has no string
+// variant per spec) still get the right answer without forcing every consumer
+// to implement TypedValue. Consumers who want bool/int/double/bytes matching
+// must implement TypedValue.
+func logTypedValue[T any](c *engine.LogAccessor[T], rec T, ref engine.LogFieldRef) engine.TypedValue {
+	if c.TypedValue != nil {
+		return c.TypedValue(rec, ref)
+	}
+	if c.Value == nil {
+		return engine.TypedValue{}
+	}
+	v := c.Value(rec, ref)
+	if v == nil {
+		return engine.TypedValue{}
+	}
+	return engine.TypedValue{Kind: engine.TypedValueString, Str: string(v)}
+}
+
+func metricTypedValue[T any](c *engine.MetricAccessor[T], rec T, ref engine.MetricFieldRef) engine.TypedValue {
+	if c.TypedValue != nil {
+		return c.TypedValue(rec, ref)
+	}
+	if c.Value == nil {
+		return engine.TypedValue{}
+	}
+	v := c.Value(rec, ref)
+	if v == nil {
+		return engine.TypedValue{}
+	}
+	return engine.TypedValue{Kind: engine.TypedValueString, Str: string(v)}
+}
+
+func traceTypedValue[T any](c *engine.TraceAccessor[T], rec T, ref engine.TraceFieldRef) engine.TypedValue {
+	if c.TypedValue != nil {
+		return c.TypedValue(rec, ref)
+	}
+	if c.Value == nil {
+		return engine.TypedValue{}
+	}
+	v := c.Value(rec, ref)
+	if v == nil {
+		return engine.TypedValue{}
+	}
+	return engine.TypedValue{Kind: engine.TypedValueString, Str: string(v)}
 }

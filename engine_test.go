@@ -2039,7 +2039,7 @@ func TestEvaluateTraceSamplingDistribution(t *testing.T) {
 		// Multiply by a large prime to spread values across the range
 		randomness := uint64(i) * 72057594037927 // ~2^56 / 1000 to spread evenly
 		// W3C trace IDs are 32 hex chars (128 bits). Last 14 hex chars (56 bits) are used for randomness.
-		traceID := []byte(fmt.Sprintf("%018x%014x", uint64(0), randomness))
+		traceID := mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), randomness))
 		span := &SimpleSpanRecord{
 			Name:    []byte("GET /api/users"),
 			TraceID: traceID,
@@ -2162,7 +2162,7 @@ func TestEvaluateTraceSampling0Percent(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		span := &SimpleSpanRecord{
 			Name:    []byte("GET /api/users"),
-			TraceID: []byte(fmt.Sprintf("%032x", i)),
+			TraceID: mustHexDecode(fmt.Sprintf("%032x", i)),
 		}
 		result := EvaluateTrace(engine, span, SimpleSpanOptions()...)
 		assert.Equal(t, ResultDrop, result, "0%% sampling should drop all spans")
@@ -2200,13 +2200,13 @@ func TestEvaluateTraceSamplingWithTracestateRandomness(t *testing.T) {
 	// rv value of 0x7fffffffffffff is just below 50% threshold, should be dropped
 	spanKept := &SimpleSpanRecord{
 		Name:       []byte("GET /api/users"),
-		TraceID:    []byte("00000000000000000000000000000001"), // TraceID doesn't matter when rv is present
-		TraceState: []byte("ot=rv:80000000000000"),             // Exactly at 50% threshold
+		TraceID:    mustHexDecode("00000000000000000000000000000001"), // TraceID doesn't matter when rv is present
+		TraceState: []byte("ot=rv:80000000000000"),                    // Exactly at 50% threshold
 	}
 
 	spanDropped := &SimpleSpanRecord{
 		Name:       []byte("GET /api/users"),
-		TraceID:    []byte("00000000000000000000000000000002"),
+		TraceID:    mustHexDecode("00000000000000000000000000000002"),
 		TraceState: []byte("ot=rv:7fffffffffffff"), // Just below 50% threshold
 	}
 
@@ -2244,7 +2244,7 @@ func TestEvaluateTraceSamplingConsistentAcrossSpans(t *testing.T) {
 	engine := NewPolicyEngine(registry)
 
 	// Create multiple spans from the same trace
-	traceID := []byte("0123456789abcdef0123456789abcdef")
+	traceID := mustHexDecode("0123456789abcdef0123456789abcdef")
 
 	span1 := &SimpleSpanRecord{
 		Name:    []byte("GET /api/users"),
@@ -3858,7 +3858,7 @@ func TestEvaluateTraceHashSeedMode(t *testing.T) {
 	// Same span should produce same result (deterministic)
 	span := &SimpleSpanRecord{
 		Name:    []byte("GET /api/users"),
-		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+		TraceID: mustHexDecode("0123456789abcdef0123456789abcdef"),
 	}
 
 	r1 := EvaluateTrace(eng, span, SimpleSpanOptions()...)
@@ -3902,7 +3902,7 @@ func TestEvaluateTraceProportionalMode(t *testing.T) {
 	for i := 0; i < total; i++ {
 		span := &SimpleSpanRecord{
 			Name:    []byte("GET /api/users"),
-			TraceID: []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/uint64(total)))),
+			TraceID: mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/uint64(total)))),
 		}
 		if isTraceKept(EvaluateTrace(eng, span, SimpleSpanOptions()...)) {
 			kept++
@@ -3947,7 +3947,7 @@ func TestEvaluateTraceEqualizingMode(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		span := &SimpleSpanRecord{
 			Name:       []byte("GET /api/users"),
-			TraceID:    []byte(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/20))),
+			TraceID:    mustHexDecode(fmt.Sprintf("%018x%014x", uint64(0), uint64(i)*uint64(1<<56/20))),
 			TraceState: traceState,
 		}
 		result := EvaluateTrace(engine, span, SimpleSpanOptions()...)
@@ -4066,7 +4066,7 @@ func TestEvaluateTraceThresholdWriteBack(t *testing.T) {
 	// (high randomness value >= 50% threshold)
 	span := &SimpleSpanRecord{
 		Name:    []byte("GET /api/users"),
-		TraceID: []byte("00000000000000000080000000000000"),
+		TraceID: mustHexDecode("00000000000000000080000000000000"),
 	}
 
 	var writtenRef TraceFieldRef
@@ -4115,7 +4115,7 @@ func TestEvaluateTraceThresholdWriteBackDropped(t *testing.T) {
 	// Use a trace ID with low randomness that will be dropped at 50%
 	span := &SimpleSpanRecord{
 		Name:    []byte("GET /api/users"),
-		TraceID: []byte("00000000000000000000000000000001"),
+		TraceID: mustHexDecode("00000000000000000000000000000001"),
 	}
 
 	called := false
@@ -4164,7 +4164,7 @@ func TestEvaluateTraceSamplingResultCode(t *testing.T) {
 
 	span := &SimpleSpanRecord{
 		Name:    []byte("GET /api/users"),
-		TraceID: []byte("00000000000000000080000000000000"),
+		TraceID: mustHexDecode("00000000000000000080000000000000"),
 	}
 
 	result := EvaluateTrace(eng, span, SimpleSpanOptions()...)
@@ -4200,7 +4200,7 @@ func TestEvaluateTrace100PercentWritesZeroThreshold(t *testing.T) {
 
 	span := &SimpleSpanRecord{
 		Name:    []byte("GET /api/users"),
-		TraceID: []byte("0123456789abcdef0123456789abcdef"),
+		TraceID: mustHexDecode("0123456789abcdef0123456789abcdef"),
 	}
 
 	var writtenValue string
