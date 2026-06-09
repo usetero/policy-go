@@ -516,12 +516,13 @@ func TestCompileValidPolicyHasNoErrors(t *testing.T) {
 	assert.Empty(t, result.Errors)
 }
 
-// TestCompileBrokenPolicyIsInert verifies the design choice that a policy
-// with compile errors is still added to the compiled set but its broken
-// matchers are skipped, so its MatcherCount can never be reached and the
-// policy never matches anything at evaluation. This means errors get
-// reported without risking false-positive matches from half-built policies.
-func TestCompileBrokenPolicyIsInert(t *testing.T) {
+// TestCompileBrokenPolicyIsExcluded verifies that a policy with any compile
+// error is excluded from the compiled set entirely — it is not registered,
+// claims no dense index, and contributes none of its matchers (even the
+// well-formed ones) to the index. This matches policy-rs/policy-zig, where a
+// broken policy is absent rather than present-but-inert, so it never counts a
+// hit and never participates in most-restrictive-wins resolution.
+func TestCompileBrokenPolicyIsExcluded(t *testing.T) {
 	p := logPolicy([]*policyv1.LogMatcher{
 		{
 			Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{}}, // broken
@@ -539,16 +540,44 @@ func TestCompileBrokenPolicyIsInert(t *testing.T) {
 
 	require.Contains(t, result.Errors, p.GetId())
 
-	policy, ok := result.Logs.GetPolicy(p.GetId())
-	require.True(t, ok, "broken policy still gets a compiled entry")
-	assert.Equal(t, 2, policy.MatcherCount, "MatcherCount reflects the proto, not the registered subset")
+	_, ok := result.Logs.GetPolicy(p.GetId())
+	assert.False(t, ok, "broken policy must not be registered")
+	assert.Equal(t, 0, result.Logs.PolicyCount(), "broken policy claims no dense index")
 
-	// The first matcher was skipped (broken). The Hyperscan db only
-	// contains the second matcher. matchCounts can hit 1 at evaluation but
-	// never 2, so the policy stays inert.
+	// Not even the well-formed second matcher reaches the index — the whole
+	// policy is dropped.
 	totalPatterns := 0
 	for _, entry := range result.Logs.Databases() {
 		totalPatterns += len(entry.Database.PatternIndex())
 	}
-	assert.Equal(t, 1, totalPatterns, "only the well-formed matcher was registered")
+	assert.Equal(t, 0, totalPatterns, "no matcher from a broken policy is registered")
+}
+
+// TestCompileBrokenPolicyDoesNotShiftValidIndices verifies that excluding a
+// broken policy leaves the surviving policies densely indexed (0..N-1) with no
+// gap where the broken policy would have been.
+func TestCompileBrokenPolicyDoesNotShiftValidIndices(t *testing.T) {
+	broken := logPolicy([]*policyv1.LogMatcher{{
+		Field: &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{}}, // broken
+		Match: &policyv1.LogMatcher_Exists{Exists: true},
+	}}, "all")
+	broken.Id = "a-broken"
+	valid := logPolicy([]*policyv1.LogMatcher{{
+		Field: &policyv1.LogMatcher_LogField{LogField: policyv1.LogField_LOG_FIELD_BODY},
+		Match: &policyv1.LogMatcher_Contains{Contains: "ok"},
+	}}, "all")
+	valid.Id = "b-valid"
+
+	stats := map[string]*PolicyStats{"a-broken": {}, "b-valid": {}}
+	result, err := NewCompiler().Compile([]*policyv1.Policy{broken, valid}, stats)
+	require.NoError(t, err)
+	defer result.Close()
+
+	require.Contains(t, result.Errors, "a-broken")
+	require.Equal(t, 1, result.Logs.PolicyCount(), "only the valid policy is indexed")
+
+	policy, ok := result.Logs.GetPolicy("b-valid")
+	require.True(t, ok)
+	assert.Equal(t, 0, policy.Index, "valid policy occupies index 0 — no gap left by the broken one")
+	assert.Same(t, policy, result.Logs.PolicyByIndex(0))
 }

@@ -212,11 +212,11 @@ func NewCompiler() *Compiler {
 // Compile compiles a set of proto policies into CompileResult with separate
 // CompiledMatchers for logs, metrics, and traces. Per-policy compile failures
 // (bad regex, empty attribute path, unspecified field enum, missing match
-// oneof, etc.) are reported via CompileResult.Errors. A broken policy is
-// still added to the matchers but with one or more matchers skipped, so its
-// matchCount can never be reached at evaluation — it stays inert. The
-// function's own error return is reserved for batch-level failures (e.g.,
-// Hyperscan init).
+// oneof, invalid keep/transform, etc.) are reported via CompileResult.Errors.
+// A broken policy is excluded from the matchers entirely — it is never
+// reserved, evaluated, or counted, and takes no part in most-restrictive-wins
+// resolution — matching policy-rs/policy-zig. The function's own error return
+// is reserved for batch-level failures (e.g., Hyperscan init).
 func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompileResult, error) {
 	// Sort policies by ID for deterministic transform ordering per spec.
 	slices.SortFunc(policies, func(a, b *policyv1.Policy) int {
@@ -245,7 +245,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 
 		// Process log target
 		if log := p.GetLog(); log != nil {
-			idx := logBuilder.reservePolicy(id)
+			staging := &policyStaging[LogField]{}
 
 			keep, err := ParseKeep(log.GetKeep())
 			addErr("log: keep", err)
@@ -269,7 +269,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if cm, ok, err := extractTypedMatcher(m); ok {
 					addErr(fmt.Sprintf("log: match[%d]", i), err)
 					if err == nil {
-						logBuilder.addTypedCheck(ref, cm, m.GetNegate(), id, idx, i)
+						staging.addTypedCheck(ref, cm, m.GetNegate(), i)
 					}
 					continue
 				}
@@ -278,17 +278,23 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if patErr != nil {
 					continue
 				}
-				logBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+				staging.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), i)
 			}
 
 			transforms, err := compileLogTransform(log.GetTransform())
 			addErr("log: transform", err)
-			logBuilder.finalizePolicy(id, idx, keep, len(log.GetMatch()), sampleKey, policyStats, transforms)
+
+			// Only index the policy if it compiled cleanly; a policy with any
+			// compile error is excluded entirely so it is never evaluated or
+			// counted, matching policy-rs/policy-zig.
+			if policyErr == nil {
+				logBuilder.commitPolicy(id, staging, keep, len(log.GetMatch()), sampleKey, policyStats, transforms)
+			}
 		}
 
 		// Process metric target
 		if metric := p.GetMetric(); metric != nil {
-			idx := metricBuilder.reservePolicy(id)
+			staging := &policyStaging[MetricField]{}
 
 			keep := Keep{Action: KeepNone}
 			if metric.GetKeep() {
@@ -304,7 +310,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if cm, ok, err := extractTypedMatcher(m); ok {
 					addErr(fmt.Sprintf("metric: match[%d]", i), err)
 					if err == nil {
-						metricBuilder.addTypedCheck(ref, cm, m.GetNegate(), id, idx, i)
+						staging.addTypedCheck(ref, cm, m.GetNegate(), i)
 					}
 					continue
 				}
@@ -313,15 +319,17 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if patErr != nil {
 					continue
 				}
-				metricBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+				staging.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), i)
 			}
 
-			metricBuilder.finalizePolicy(id, idx, keep, len(metric.GetMatch()), nil, policyStats, nil)
+			if policyErr == nil {
+				metricBuilder.commitPolicy(id, staging, keep, len(metric.GetMatch()), nil, policyStats, nil)
+			}
 		}
 
 		// Process trace target
 		if trace := p.GetTrace(); trace != nil {
-			idx := traceBuilder.reservePolicy(id)
+			staging := &policyStaging[TraceField]{}
 
 			keep, err := parseTraceSamplingConfig(trace.GetKeep())
 			addErr("trace: keep", err)
@@ -335,7 +343,7 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if cm, ok, err := extractTypedMatcher(m); ok {
 					addErr(fmt.Sprintf("trace: match[%d]", i), err)
 					if err == nil {
-						traceBuilder.addTypedCheck(ref, cm, m.GetNegate(), id, idx, i)
+						staging.addTypedCheck(ref, cm, m.GetNegate(), i)
 					}
 					continue
 				}
@@ -344,10 +352,12 @@ func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*Policy
 				if patErr != nil {
 					continue
 				}
-				traceBuilder.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), id, idx, i)
+				staging.addMatcher(ref, pattern, isExistence, mustExist, m.GetNegate(), m.GetCaseInsensitive(), i)
 			}
 
-			traceBuilder.finalizePolicy(id, idx, keep, len(trace.GetMatch()), nil, policyStats, nil)
+			if policyErr == nil {
+				traceBuilder.commitPolicy(id, staging, keep, len(trace.GetMatch()), nil, policyStats, nil)
+			}
 		}
 
 		if policyErr != nil {
