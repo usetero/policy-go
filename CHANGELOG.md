@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/usetero/policy-go/compare/v1.8.0...v1.8.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* do not count on policy error ([#73](https://github.com/usetero/policy-go/issues/73)) ([1c4e26d](https://github.com/usetero/policy-go/commit/1c4e26db0f34866034121358df0c10058d13841c))
+
 ## [1.8.0](https://github.com/usetero/policy-go/compare/v1.7.0...v1.8.0) (2026-06-08)
 
 
