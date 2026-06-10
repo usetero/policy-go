@@ -74,6 +74,76 @@ func (b *matchersBuilder[T]) addMatcher(ref FieldRef[T], pattern string, isExist
 	b.groupKeys[keyStr] = key
 }
 
+// pendingMatcher records an addMatcher call buffered in a policyStaging until
+// the policy is committed.
+type pendingMatcher[T FieldType] struct {
+	ref             FieldRef[T]
+	pattern         string
+	isExistence     bool
+	mustExist       bool
+	negated         bool
+	caseInsensitive bool
+	matcherIndex    int
+}
+
+// pendingTypedCheck records an addTypedCheck call buffered in a policyStaging
+// until the policy is committed.
+type pendingTypedCheck[T FieldType] struct {
+	ref          FieldRef[T]
+	matcher      CompiledTypedMatcher
+	negate       bool
+	matcherIndex int
+}
+
+// policyStaging buffers one policy's matchers so the whole policy can be
+// committed to the builder atomically — or discarded entirely if any part of it
+// (action or matcher) fails to compile. Discarding keeps a broken policy out of
+// the matcher index so it is never reserved, evaluated, or counted, matching
+// policy-rs/policy-zig. Buffering also means a policy's dense index is only
+// claimed at commit time, so excluded policies leave no gap in the index space.
+type policyStaging[T FieldType] struct {
+	matchers []pendingMatcher[T]
+	typed    []pendingTypedCheck[T]
+}
+
+// addMatcher buffers a matcher; see matchersBuilder.addMatcher for semantics.
+func (s *policyStaging[T]) addMatcher(ref FieldRef[T], pattern string, isExistence bool, mustExist bool, negated bool, caseInsensitive bool, matcherIndex int) {
+	s.matchers = append(s.matchers, pendingMatcher[T]{
+		ref:             ref,
+		pattern:         pattern,
+		isExistence:     isExistence,
+		mustExist:       mustExist,
+		negated:         negated,
+		caseInsensitive: caseInsensitive,
+		matcherIndex:    matcherIndex,
+	})
+}
+
+// addTypedCheck buffers a typed check; see matchersBuilder.addTypedCheck.
+func (s *policyStaging[T]) addTypedCheck(ref FieldRef[T], matcher CompiledTypedMatcher, negate bool, matcherIndex int) {
+	s.typed = append(s.typed, pendingTypedCheck[T]{
+		ref:          ref,
+		matcher:      matcher,
+		negate:       negate,
+		matcherIndex: matcherIndex,
+	})
+}
+
+// commitPolicy reserves a dense index for the staged policy, replays its
+// buffered matchers against the builder, and finalizes it. Call this only for a
+// policy that compiled cleanly; a policy with any compile error should have its
+// staging dropped (simply not committed) so it never enters the index.
+func (b *matchersBuilder[T]) commitPolicy(policyID string, staging *policyStaging[T], keep Keep, matcherCount int, sampleKey *FieldRef[T], stats *PolicyStats, transforms []TransformOp) {
+	idx := b.reservePolicy(policyID)
+	for _, m := range staging.matchers {
+		b.addMatcher(m.ref, m.pattern, m.isExistence, m.mustExist, m.negated, m.caseInsensitive, policyID, idx, m.matcherIndex)
+	}
+	for _, t := range staging.typed {
+		b.addTypedCheck(t.ref, t.matcher, t.negate, policyID, idx, t.matcherIndex)
+	}
+	b.finalizePolicy(policyID, idx, keep, matcherCount, sampleKey, stats, transforms)
+}
+
 // addTypedCheck registers a typed comparison (equals/gt/gte/lt/lte). These
 // bypass Hyperscan entirely — the comparison runs at eval time against the
 // consumer's TypedValue accessor (with a string-Value fallback when the
