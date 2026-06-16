@@ -1,13 +1,16 @@
 module github.com/usetero/policy-go/examples
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/usetero/policy-go/backend/teroscan v0.0.0-00010101000000-000000000000
 	github.com/usetero/policy-go/policy v0.0.0-00010101000000-000000000000
 )
 
+require github.com/flier/gohs v1.2.3 // indirect
+
 require (
+	github.com/usetero/policy-go/backend/hyperscan v0.0.0-00010101000000-000000000000
 	github.com/usetero/policy-go/proto v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
@@ -24,3 +27,5 @@ replace github.com/usetero/policy-go/policy => ../policy
 replace github.com/usetero/policy-go/backend/teroscan => ../backend/teroscan
 
 replace github.com/usetero/policy-go/proto => ../proto
+
+replace github.com/usetero/policy-go/backend/hyperscan => ../backend/hyperscan

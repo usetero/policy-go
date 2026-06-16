@@ -1,6 +1,6 @@
 module github.com/usetero/policy-go/backend/teroscan
 
-go 1.24.0
+go 1.25.0
 
 require github.com/usetero/policy-go/policy v0.0.0-00010101000000-000000000000
 

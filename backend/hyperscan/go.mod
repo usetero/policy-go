@@ -1,6 +1,6 @@
 module github.com/usetero/policy-go/backend/hyperscan
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/flier/gohs v1.2.3

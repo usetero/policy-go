@@ -68,6 +68,11 @@ tasks:
     cmds:
       - (cd policy && go test -bench=. -benchmem ./bench/...)
 
+  bench:backends:
+    desc: Compare teroscan vs hyperscan across policy counts (logs/metrics/traces; needs cgo)
+    cmds:
+      - (cd examples && go test -bench=BenchmarkBackends -benchmem ./backendbench/)
+
   bench:cpu:
     desc: Run benchmarks with CPU profiling
     cmds:

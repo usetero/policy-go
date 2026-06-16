@@ -1,6 +1,6 @@
 module github.com/usetero/policy-go/proto
 
-go 1.24.0
+go 1.25.0
 
 require (
 	go.opentelemetry.io/proto/otlp v1.9.0

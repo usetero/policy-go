@@ -38,7 +38,7 @@ go get github.com/usetero/policy-go/backend/hyperscan
 
 ### Requirements
 
-- Go 1.24+
+- Go 1.25+
 - A regex backend wired via `WithRegexBackend` (see Quick Start)
 - For the **hyperscan** backend only: the Hyperscan/Vectorscan library (via
   [gohs](https://github.com/flier/gohs), needs cgo). On macOS: `brew install
