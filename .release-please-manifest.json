@@ -1,6 +1,6 @@
 {
-  "proto": "0.0.0",
+  "proto": "1.8.1",
   "policy": "1.8.1",
-  "backend/teroscan": "0.0.0",
-  "backend/hyperscan": "0.0.0"
+  "backend/teroscan": "1.8.1",
+  "backend/hyperscan": "1.8.1"
 }
