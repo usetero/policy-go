@@ -1,0 +1,9 @@
+go 1.24.0
+
+use (
+	./backend/hyperscan
+	./backend/teroscan
+	./examples
+	./policy
+	./proto
+)

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/flier/gohs/hyperscan"
+	"github.com/usetero/policy-go/policy/regexbackend"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -19,24 +19,19 @@ type PatternRef struct {
 	MatcherIndex int
 }
 
-// CompiledDatabase holds a Hyperscan database and scratch space for a group of patterns.
+// CompiledDatabase wraps a regexbackend.Matcher for a group of patterns, adding
+// the pattern→policy index and a pool of reusable match-result slices. The regex
+// engine itself (scratch management, scanning) lives behind the Matcher.
 type CompiledDatabase struct {
-	db           hyperscan.BlockDatabase
-	scratch      *hyperscan.Scratch
-	scratchPool  sync.Pool
+	matcher      regexbackend.Matcher
 	matchedPool  sync.Pool    // Pool for []bool match results
 	patternIndex []PatternRef // maps pattern ID → policy
 }
 
 // Close releases resources associated with the compiled database.
 func (c *CompiledDatabase) Close() error {
-	if c.scratch != nil {
-		if err := c.scratch.Free(); err != nil {
-			return err
-		}
-	}
-	if c.db != nil {
-		return c.db.Close()
+	if c.matcher != nil {
+		return c.matcher.Close()
 	}
 	return nil
 }
@@ -49,23 +44,10 @@ func (c *CompiledDatabase) PatternIndex() []PatternRef {
 // Scan scans the input data against the compiled database and returns which patterns matched.
 // The caller must call ReleaseMatched when done with the result to return it to the pool.
 func (c *CompiledDatabase) Scan(data []byte) ([]bool, error) {
-	// Get or create a scratch from the pool
-	var scratch *hyperscan.Scratch
-	if pooled := c.scratchPool.Get(); pooled != nil {
-		scratch = pooled.(*hyperscan.Scratch)
-	} else {
-		var err error
-		scratch, err = c.scratch.Clone()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Get or create matched slice from pool
+	// Get or create matched slice from pool, pre-zeroed for the matcher.
 	var matched []bool
 	if pooled := c.matchedPool.Get(); pooled != nil {
 		matched = pooled.([]bool)
-		// Clear the slice
 		for i := range matched {
 			matched[i] = false
 		}
@@ -73,15 +55,7 @@ func (c *CompiledDatabase) Scan(data []byte) ([]bool, error) {
 		matched = make([]bool, len(c.patternIndex))
 	}
 
-	err := c.db.Scan(data, scratch, func(id uint, from, to uint64, flags uint, context any) error {
-		matched[id] = true
-		return nil
-	}, nil)
-
-	// Return scratch to pool
-	c.scratchPool.Put(scratch)
-
-	if err != nil {
+	if err := c.matcher.Scan(data, matched); err != nil {
 		c.matchedPool.Put(matched)
 		return nil, err
 	}
@@ -96,7 +70,7 @@ func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
 	}
 }
 
-// ExistenceCheck represents a field existence check that can't be compiled to Hyperscan.
+// ExistenceCheck represents a field existence check that cannot be compiled to a regex pattern.
 type ExistenceCheck[T FieldType] struct {
 	Ref         FieldRef[T]
 	MustExist   bool
@@ -201,12 +175,29 @@ func (r *CompileResult) Close() error {
 	return nil
 }
 
-// Compiler compiles policies into Hyperscan databases.
-type Compiler struct{}
+// Compiler compiles policies into matcher databases using a pluggable regex backend.
+type Compiler struct {
+	backend regexbackend.Backend
+}
 
-// NewCompiler creates a new Compiler.
-func NewCompiler() *Compiler {
-	return &Compiler{}
+// CompilerOption configures a Compiler.
+type CompilerOption func(*Compiler)
+
+// WithBackend sets the regex backend. The core module references no
+// implementation, so there is no default: when unset, compiling any regex
+// pattern errors.
+func WithBackend(b regexbackend.Backend) CompilerOption {
+	return func(c *Compiler) { c.backend = b }
+}
+
+// NewCompiler creates a new Compiler. Pass WithBackend; without it the compiler
+// has no regex backend and compiling any pattern errors.
+func NewCompiler(opts ...CompilerOption) *Compiler {
+	c := &Compiler{backend: defaultBackend}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // Compile compiles a set of proto policies into CompileResult with separate
@@ -216,16 +207,16 @@ func NewCompiler() *Compiler {
 // A broken policy is excluded from the matchers entirely — it is never
 // reserved, evaluated, or counted, and takes no part in most-restrictive-wins
 // resolution — matching policy-rs/policy-zig. The function's own error return
-// is reserved for batch-level failures (e.g., Hyperscan init).
+// is reserved for batch-level failures (e.g., backend init).
 func (c *Compiler) Compile(policies []*policyv1.Policy, stats map[string]*PolicyStats) (*CompileResult, error) {
 	// Sort policies by ID for deterministic transform ordering per spec.
 	slices.SortFunc(policies, func(a, b *policyv1.Policy) int {
 		return cmp.Compare(a.GetId(), b.GetId())
 	})
 
-	logBuilder := newMatchersBuilder[LogField]()
-	metricBuilder := newMatchersBuilder[MetricField]()
-	traceBuilder := newMatchersBuilder[TraceField]()
+	logBuilder := newMatchersBuilder[LogField](c.backend)
+	metricBuilder := newMatchersBuilder[MetricField](c.backend)
+	traceBuilder := newMatchersBuilder[TraceField](c.backend)
 	var perPolicyErrors map[string][]string
 
 	for _, p := range policies {

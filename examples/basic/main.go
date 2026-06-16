@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/usetero/policy-go"
+	"github.com/usetero/policy-go/backend/teroscan"
+	"github.com/usetero/policy-go/policy"
 )
 
 // ExampleLogRecord is a simple log record for demonstration.
@@ -99,7 +100,7 @@ func main() {
 	}
 
 	// Create a registry to manage policies
-	registry := policy.NewPolicyRegistry()
+	registry := policy.NewPolicyRegistry(policy.WithRegexBackend(teroscan.New()))
 
 	// Create a config loader with error handling
 	loader := policy.NewConfigLoader(registry).

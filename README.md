@@ -23,25 +23,27 @@ matching and designed for hot-reload support.
 ## Installation
 
 ```bash
-go get github.com/usetero/policy-go
+go get github.com/usetero/policy-go/policy
+```
+
+You also need a **regex backend**. The core library ships none — pick one:
+
+```bash
+# Pure Go, no cgo (default choice):
+go get github.com/usetero/policy-go/backend/teroscan
+
+# Or Hyperscan for higher throughput (requires cgo + the hyperscan library):
+go get github.com/usetero/policy-go/backend/hyperscan
 ```
 
 ### Requirements
 
-- Go 1.21+
-- Hyperscan library (via [gohs](https://github.com/flier/gohs))
-
-On macOS with Homebrew:
-
-```bash
-brew install hyperscan
-```
-
-On Ubuntu/Debian:
-
-```bash
-apt-get install libhyperscan-dev
-```
+- Go 1.24+
+- A regex backend wired via `WithRegexBackend` (see Quick Start)
+- For the **hyperscan** backend only: the Hyperscan/Vectorscan library (via
+  [gohs](https://github.com/flier/gohs), needs cgo). On macOS: `brew install
+  vectorscan`; on Ubuntu/Debian: `apt-get install libhyperscan-dev`. The
+  **teroscan** backend has no such requirement.
 
 ## Quick Start
 
@@ -53,7 +55,8 @@ import (
     "log"
     "time"
 
-    "github.com/usetero/policy-go"
+    "github.com/usetero/policy-go/policy"
+    "github.com/usetero/policy-go/backend/teroscan"
 )
 
 // Define your log record type
@@ -141,8 +144,8 @@ func existsPath(m map[string]any, path []string) bool {
 }
 
 func main() {
-    // Create a registry
-    registry := policy.NewPolicyRegistry()
+    // Create a registry, wiring a regex backend (teroscan = pure Go, no cgo).
+    registry := policy.NewPolicyRegistry(policy.WithRegexBackend(teroscan.New()))
 
     // Create a file provider with hot reload
     provider := policy.NewFileProvider("policies.json",
@@ -187,11 +190,11 @@ func main() {
 ### PolicyRegistry
 
 The registry manages policies from multiple providers. When policies change, it
-automatically recompiles the Hyperscan database and produces a new immutable
-snapshot.
+automatically recompiles the pattern database (via the configured regex backend)
+and produces a new immutable snapshot.
 
 ```go
-registry := policy.NewPolicyRegistry()
+registry := policy.NewPolicyRegistry(policy.WithRegexBackend(teroscan.New()))
 
 // Register providers
 handle, _ := registry.Register(fileProvider)

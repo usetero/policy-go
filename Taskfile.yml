@@ -2,6 +2,8 @@ version: "3"
 
 vars:
   PROJECT_NAME: policy-go
+  # Workspace modules. Each is built/tested independently; root is workspace-only.
+  MODULES: proto policy backend/teroscan backend/hyperscan examples
 
 tasks:
   default:
@@ -11,14 +13,16 @@ tasks:
 
   # Build tasks
   build:
-    desc: Build the library
+    desc: Build all modules
     cmds:
-      - go build ./...
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go build ./...)
 
   clean:
     desc: Clean build artifacts
     cmds:
-      - go clean ./...
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go clean ./...)
       - rm -rf coverage/
 
   # Code quality
@@ -33,39 +37,42 @@ tasks:
       - test -z "$(gofmt -l .)"
 
   lint:
-    desc: Run linter
+    desc: Run linter across all modules
     cmds:
-      - go vet ./...
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go vet ./...)
 
   # Testing
   test:
-    desc: Run tests
+    desc: Run tests across all modules
     cmds:
-      - go test ./...
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go test ./...)
 
   test:verbose:
     desc: Run tests with verbose output
     cmds:
-      - go test -v ./...
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go test -v ./...)
 
   test:coverage:
-    desc: Run tests with coverage
+    desc: Run tests with coverage (core module)
     cmds:
       - mkdir -p coverage
-      - go test -coverprofile=coverage/coverage.out ./...
+      - (cd policy && go test -coverprofile=../coverage/coverage.out ./...)
       - go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
   # Benchmarks
   bench:
     desc: Run benchmarks
     cmds:
-      - go test -bench=. -benchmem ./bench/...
+      - (cd policy && go test -bench=. -benchmem ./bench/...)
 
   bench:cpu:
     desc: Run benchmarks with CPU profiling
     cmds:
       - mkdir -p profiles
-      - go test -bench=. -benchmem -cpuprofile=profiles/cpu.prof ./bench/...
+      - (cd policy && go test -bench=. -benchmem -cpuprofile=../profiles/cpu.prof ./bench/...)
       - echo "CPU profile saved to profiles/cpu.prof"
       - echo "View with 'go tool pprof profiles/cpu.prof'"
 
@@ -73,14 +80,14 @@ tasks:
     desc: Run benchmarks with memory profiling
     cmds:
       - mkdir -p profiles
-      - go test -bench=. -benchmem -memprofile=profiles/mem.prof ./bench/...
+      - (cd policy && go test -bench=. -benchmem -memprofile=../profiles/mem.prof ./bench/...)
       - echo "Memory profile saved to profiles/mem.prof"
       - echo "View with 'go tool pprof profiles/mem.prof'"
 
   bench:compare:
     desc: Run benchmarks and save for comparison
     cmds:
-      - go test -bench=. -benchmem -count=10 ./bench/... | tee bench.txt
+      - (cd policy && go test -bench=. -benchmem -count=10 ./bench/...) | tee bench.txt
       - echo "Results saved to bench.txt"
       - echo "Compare with 'benchstat old.txt new.txt'"
 
@@ -88,24 +95,26 @@ tasks:
   deps:
     desc: Download dependencies
     cmds:
-      - go mod download
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go mod download)
 
   deps:tidy:
     desc: Tidy dependencies
     cmds:
-      - go mod tidy
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go mod tidy)
 
   deps:update:
     desc: Update dependencies
     cmds:
-      - go get -u ./...
-      - go mod tidy
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go get -u ./... && go mod tidy)
 
   # Documentation
   docs:
     desc: Generate documentation
     cmds:
-      - go doc -all ./...
+      - (cd policy && go doc -all ./...)
 
   # Development workflows
   do:
@@ -203,21 +212,23 @@ tasks:
       - task: test
       - task: build
 
-  # Proto
+  # Proto (its own module under proto/; go_package = github.com/usetero/policy-go/proto/...)
   proto:export:
     desc: Export proto files from buf registry
+    dir: proto
     cmds:
-      - mkdir -p proto
-      - buf export buf.build/opentelemetry/opentelemetry -o proto
-      - buf export buf.build/tero/policy -o proto
+      - buf export buf.build/opentelemetry/opentelemetry -o .
+      - buf export buf.build/tero/policy -o .
 
   proto:generate:
     desc: Generate Go code from proto files
     deps: [proto:export]
+    dir: proto
     cmds:
-      - buf generate proto
+      - buf generate .
 
   proto:clean:
     desc: Clean generated proto files
+    dir: proto
     cmds:
-      - rm -rf proto internal/proto
+      - find . -name '*.pb.go' -delete

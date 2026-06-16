@@ -1,6 +1,6 @@
 package policy
 
-import "github.com/usetero/policy-go/internal/engine"
+import "github.com/usetero/policy-go/policy/internal/engine"
 
 // Re-export types from internal/engine.
 type (

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/usetero/policy-go/internal/engine"
+	"github.com/usetero/policy-go/policy/internal/engine"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -31,7 +31,7 @@ type providerEntry struct {
 }
 
 // PolicyRegistry manages policies from multiple providers.
-// It recompiles the Hyperscan database when policies change
+// It recompiles the regex pattern database when policies change
 // and produces read-only snapshots for evaluation.
 type PolicyRegistry struct {
 	mu                        sync.RWMutex
@@ -47,12 +47,21 @@ type PolicyRegistry struct {
 	onRecompile               func(error)
 }
 
-// NewPolicyRegistry creates a new PolicyRegistry.
-func NewPolicyRegistry() *PolicyRegistry {
+// NewPolicyRegistry creates a new PolicyRegistry. It has no default regex
+// backend: pass WithRegexBackend with the teroscan (pure-Go) or hyperscan (cgo)
+// backend. A registry without one errors when it compiles a regex-based policy.
+func NewPolicyRegistry(opts ...RegistryOption) *PolicyRegistry {
+	var cfg registryConfig
+	if testBackend != nil {
+		cfg.compilerOpts = append(cfg.compilerOpts, engine.WithBackend(testBackend))
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return &PolicyRegistry{
 		providers: make(map[ProviderId]*providerEntry),
 		stats:     make(map[string]*engine.PolicyStats),
-		compiler:  engine.NewCompiler(),
+		compiler:  engine.NewCompiler(cfg.compilerOpts...),
 	}
 }
 
@@ -219,7 +228,7 @@ func (r *PolicyRegistry) recompileLocked() error {
 	r.compileErrors = result.Errors
 
 	// Create new snapshots
-	// Note: Old snapshots remain valid - Hyperscan resources are cleaned up
+	// Note: Old snapshots remain valid - backend resources are cleaned up
 	// by Go's garbage collector via finalizers set by the gohs library.
 	r.logSnapshot = newPolicySnapshot(result.Logs, r.stats)
 	r.metricSnapshot = newPolicySnapshot(result.Metrics, r.stats)
