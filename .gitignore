@@ -29,6 +29,7 @@ Thumbs.db
 
 # Build output
 dist/
+examples/conformance/runner
 
 # Proto exports (regenerated from buf registry)
 proto/**/*.proto
