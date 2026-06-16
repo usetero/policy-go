@@ -73,6 +73,130 @@ tasks:
     cmds:
       - (cd examples && go test -bench=BenchmarkBackends -benchmem ./backendbench/)
 
+  # Conformance: run the policy-conformance testcases against the local workspace.
+  # Requires ../policy-conformance to exist (sibling directory).
+  # POLICY_BACKEND env var is inherited by the runner; defaults to teroscan.
+  conformance:build:
+    desc: Build the conformance runner binary (examples/conformance/runner)
+    dir: examples
+    cmds:
+      - go build -o conformance/runner ./conformance/
+
+  conformance:teroscan:
+    desc: Run conformance testcases with the teroscan (pure-Go) backend
+    deps: [conformance:build]
+    cmds:
+      - task: conformance:run
+        vars: { BACKEND: teroscan }
+
+  conformance:hyperscan:
+    desc: Run conformance testcases with the hyperscan (cgo) backend (needs cgo)
+    deps: [conformance:build]
+    cmds:
+      - task: conformance:run
+        vars: { BACKEND: hyperscan }
+
+  conformance:run:
+    desc: Run conformance loop; called by conformance:teroscan / conformance:hyperscan
+    internal: true
+    vars:
+      BACKEND: '{{.BACKEND | default "teroscan"}}'
+      RUNNER: '{{.TASKFILE_DIR}}/examples/conformance/runner'
+      TESTCASES: '{{.TASKFILE_DIR}}/../policy-conformance/testcases'
+    cmds:
+      - |
+        export POLICY_BACKEND="{{.BACKEND}}"
+        set +e
+        RUNNER="{{.RUNNER}}"
+        TC_DIR="{{.TESTCASES}}"
+
+        if [ ! -d "$TC_DIR" ]; then
+          echo "SKIP: $TC_DIR not found (clone policy-conformance as a sibling of policy-go)"
+          exit 0
+        fi
+
+        # Normalize proto JSON: strip defaults (null/""/0/{}/[]/false/unspecified enums),
+        # coerce string-encoded integers, map enum strings to numbers.
+        # Copied from policy-conformance Taskfile.
+        normalize='def enums: {"SPAN_KIND_INTERNAL":1,"SPAN_KIND_SERVER":2,"SPAN_KIND_CLIENT":3,"SPAN_KIND_PRODUCER":4,"SPAN_KIND_CONSUMER":5,"STATUS_CODE_OK":1,"STATUS_CODE_ERROR":2,"AGGREGATION_TEMPORALITY_DELTA":1,"AGGREGATION_TEMPORALITY_CUMULATIVE":2,"SEVERITY_NUMBER_TRACE":1,"SEVERITY_NUMBER_TRACE2":2,"SEVERITY_NUMBER_TRACE3":3,"SEVERITY_NUMBER_TRACE4":4,"SEVERITY_NUMBER_DEBUG":5,"SEVERITY_NUMBER_DEBUG2":6,"SEVERITY_NUMBER_DEBUG3":7,"SEVERITY_NUMBER_DEBUG4":8,"SEVERITY_NUMBER_INFO":9,"SEVERITY_NUMBER_INFO2":10,"SEVERITY_NUMBER_INFO3":11,"SEVERITY_NUMBER_INFO4":12,"SEVERITY_NUMBER_WARN":13,"SEVERITY_NUMBER_WARN2":14,"SEVERITY_NUMBER_WARN3":15,"SEVERITY_NUMBER_WARN4":16,"SEVERITY_NUMBER_ERROR":17,"SEVERITY_NUMBER_ERROR2":18,"SEVERITY_NUMBER_ERROR3":19,"SEVERITY_NUMBER_ERROR4":20,"SEVERITY_NUMBER_FATAL":21,"SEVERITY_NUMBER_FATAL2":22,"SEVERITY_NUMBER_FATAL3":23,"SEVERITY_NUMBER_FATAL4":24}; walk(if type == "object" then with_entries(select(.value != null and .value != [] and .value != "" and .value != 0 and .value != {} and .value != false and (.value | IN("SEVERITY_NUMBER_UNSPECIFIED","STATUS_CODE_UNSET","SPAN_KIND_UNSPECIFIED","AGGREGATION_TEMPORALITY_UNSPECIFIED") | not)) | if .value | type == "string" then .value = (enums[.value] // .value) else . end) elif type == "string" and test("^[0-9]+$") then tonumber elif type == "number" and (. | floor) == . then (. | floor) else . end)'
+        detect_signal='if .resourceLogs then "log" elif .resourceMetrics then "metric" elif .resourceSpans then "trace" else "unknown" end'
+        merge_stats='[.[].policies[]] | group_by(.policy_id) | map({policy_id: .[0].policy_id, hits: (map(.hits) | add), misses: (map(.misses // 0) | add)}) | map(if .misses == 0 then del(.misses) else . end) | sort_by(.policy_id) | {policies: .}'
+
+        PASS=0; FAIL=0
+        for tc in "$TC_DIR"/*/; do
+          name=$(basename "$tc")
+
+          # Skip testcases that require an HTTP/gRPC provider
+          if [ -f "${tc}provider_only" ]; then
+            continue
+          fi
+
+          # Collect all input files (input.json or input_N.json)
+          inputs=$(ls "$tc"input.json "$tc"input_*.json 2>/dev/null)
+          if [ -z "$inputs" ]; then
+            continue
+          fi
+
+          tc_fail=0
+          stats_files=""
+
+          for input in $inputs; do
+            suffix=$(basename "$input" .json | sed 's/^input//')  # "" or "_1" etc.
+            if [ -z "$suffix" ]; then
+              expected="$tc/expected.json"
+            else
+              expected="$tc/expected${suffix}.json"
+            fi
+            [ -f "$expected" ] || continue
+
+            signal=$(jq -r "$detect_signal" "$input" 2>/dev/null)
+            if [ "$signal" = "unknown" ] || [ -z "$signal" ]; then
+              continue
+            fi
+
+            tmpout=$(mktemp)
+            tmpstats=$(mktemp)
+            err=$("$RUNNER" --policies "$tc/policies.json" --input "$input" --output "$tmpout" --stats "$tmpstats" --signal "$signal" 2>&1)
+            rc=$?
+            if [ $rc -ne 0 ]; then
+              echo "FAIL $name${suffix}: runner exited $rc: $err"
+              tc_fail=1
+            else
+              got=$(jq -S "$normalize" "$tmpout" 2>/dev/null)
+              exp=$(jq -S "$normalize" "$expected" 2>/dev/null)
+              if [ "$got" != "$exp" ]; then
+                echo "FAIL $name${suffix}: output mismatch"
+                diff <(echo "$exp") <(echo "$got")
+                tc_fail=1
+              fi
+              stats_files="$stats_files $tmpstats"
+            fi
+            rm -f "$tmpout"
+          done
+
+          # Compare merged stats if expected_stats.json exists
+          if [ -f "$tc/expected_stats.json" ] && [ -n "$stats_files" ]; then
+            got_stats=$(jq -sS "$merge_stats" $stats_files 2>/dev/null)
+            exp_stats=$(jq -S "$merge_stats" "$tc/expected_stats.json" 2>/dev/null || jq -S '.' "$tc/expected_stats.json" 2>/dev/null)
+            if [ "$got_stats" != "$exp_stats" ]; then
+              echo "FAIL $name: stats mismatch"
+              diff <(echo "$exp_stats") <(echo "$got_stats")
+              tc_fail=1
+            fi
+          fi
+          rm -f $stats_files
+
+          if [ $tc_fail -eq 0 ]; then
+            PASS=$((PASS+1))
+          else
+            FAIL=$((FAIL+1))
+          fi
+        done
+
+        echo ""
+        echo "Results (POLICY_BACKEND={{.BACKEND}}): PASS=$PASS FAIL=$FAIL"
+        [ $FAIL -eq 0 ]
+
   bench:cpu:
     desc: Run benchmarks with CPU profiling
     cmds:
