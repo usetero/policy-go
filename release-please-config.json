@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
+  "include-component-in-tag": true,
+  "tag-separator": "/",
+  "packages": {
+    "proto": { "release-type": "go", "component": "proto" },
+    "policy": { "release-type": "go", "component": "policy" },
+    "backend/teroscan": { "release-type": "go", "component": "backend/teroscan" },
+    "backend/hyperscan": { "release-type": "go", "component": "backend/hyperscan" }
+  }
+}

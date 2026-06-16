@@ -8,7 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/usetero/policy-go"
+	"github.com/usetero/policy-go/backend/teroscan"
+	"github.com/usetero/policy-go/policy"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -101,7 +102,7 @@ func main() {
 	}
 
 	// Create a registry to manage policies
-	registry := policy.NewPolicyRegistry()
+	registry := policy.NewPolicyRegistry(policy.WithRegexBackend(teroscan.New()))
 	// registry.SetIncludeZeroHitPolicyStats(true)
 
 	// Create a gRPC provider connecting to Tero

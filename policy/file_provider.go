@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/usetero/policy-go/internal/jsonpolicy"
+	"github.com/usetero/policy-go/policy/internal/jsonpolicy"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 

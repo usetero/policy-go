@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/usetero/policy-go/internal/engine"
+	"github.com/usetero/policy-go/policy/internal/engine"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 

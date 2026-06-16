@@ -96,7 +96,7 @@ func TestPolicyStats(t *testing.T) {
 }
 
 func TestNewMatchersBuilder(t *testing.T) {
-	builder := newMatchersBuilder[LogField]()
+	builder := newMatchersBuilder[LogField](defaultBackend)
 
 	assert.NotNil(t, builder.groups)
 	assert.NotNil(t, builder.policies)

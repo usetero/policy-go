@@ -3,7 +3,7 @@ package policy
 import (
 	"iter"
 
-	"github.com/usetero/policy-go/internal/engine"
+	"github.com/usetero/policy-go/policy/internal/engine"
 )
 
 // PolicySnapshot is an immutable, read-only view of compiled policies for a single telemetry type.

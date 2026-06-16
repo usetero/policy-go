@@ -5,11 +5,12 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/flier/gohs/hyperscan"
+	"github.com/usetero/policy-go/policy/regexbackend"
 )
 
 // matchersBuilder accumulates matchers and builds a CompiledMatchers.
 type matchersBuilder[T FieldType] struct {
+	backend         regexbackend.Backend
 	groups          map[matchKeyString][]patternEntry
 	groupKeys       map[matchKeyString]MatchKey[T]
 	existenceChecks []ExistenceCheck[T]
@@ -19,9 +20,10 @@ type matchersBuilder[T FieldType] struct {
 	policyIndices   map[string]int
 }
 
-// newMatchersBuilder creates a new builder.
-func newMatchersBuilder[T FieldType]() *matchersBuilder[T] {
+// newMatchersBuilder creates a new builder using the given regex backend.
+func newMatchersBuilder[T FieldType](backend regexbackend.Backend) *matchersBuilder[T] {
 	return &matchersBuilder[T]{
+		backend:       backend,
 		groups:        make(map[matchKeyString][]patternEntry),
 		groupKeys:     make(map[matchKeyString]MatchKey[T]),
 		policies:      make(map[string]*CompiledPolicy[T]),
@@ -201,7 +203,7 @@ func (b *matchersBuilder[T]) build() (*CompiledMatchers[T], error) {
 	// Compile each group
 	for keyStr, entries := range b.groups {
 		key := b.groupKeys[keyStr]
-		db, err := compileGroup(entries, key.CaseInsensitive)
+		db, err := compileGroup(b.backend, entries, key.CaseInsensitive)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compile patterns for %v: %w", keyStr, err)
 		}
@@ -238,24 +240,22 @@ func makeMatchKeyString[T FieldType](k MatchKey[T]) matchKeyString {
 	return matchKeyString(s.String())
 }
 
-// compileGroup compiles a group of patterns into a Hyperscan database.
-func compileGroup(entries []patternEntry, caseInsensitive bool) (*CompiledDatabase, error) {
-	patterns := make([]*hyperscan.Pattern, len(entries))
-	patternIndex := make([]PatternRef, len(entries))
-
-	flags := hyperscan.SingleMatch
-	if caseInsensitive {
-		flags |= hyperscan.Caseless
+// compileGroup compiles a group of patterns into a CompiledDatabase using the
+// configured regex backend.
+func compileGroup(backend regexbackend.Backend, entries []patternEntry, caseInsensitive bool) (*CompiledDatabase, error) {
+	if backend == nil {
+		return nil, fmt.Errorf("no regex backend configured: build with cgo for the default Hyperscan backend, or supply one via policy.WithRegexBackend")
 	}
+
+	patterns := make([]string, len(entries))
+	patternIndex := make([]PatternRef, len(entries))
 
 	for i, e := range entries {
 		if _, err := regexp.Compile(e.pattern); err != nil {
 			return nil, fmt.Errorf("invalid regex %q: %w", e.pattern, err)
 		}
 
-		patterns[i] = hyperscan.NewPattern(e.pattern, flags)
-		patterns[i].Id = i
-
+		patterns[i] = e.pattern
 		patternIndex[i] = PatternRef{
 			PolicyID:     e.policyID,
 			PolicyIndex:  e.policyIndex,
@@ -263,20 +263,13 @@ func compileGroup(entries []patternEntry, caseInsensitive bool) (*CompiledDataba
 		}
 	}
 
-	db, err := hyperscan.NewBlockDatabase(patterns...)
+	matcher, err := backend.Compile(patterns, caseInsensitive)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compile hyperscan database: %w", err)
-	}
-
-	scratch, err := hyperscan.NewScratch(db)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to allocate scratch: %w", err)
+		return nil, err
 	}
 
 	return &CompiledDatabase{
-		db:           db,
-		scratch:      scratch,
+		matcher:      matcher,
 		patternIndex: patternIndex,
 	}, nil
 }

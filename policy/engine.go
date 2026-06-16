@@ -3,7 +3,7 @@ package policy
 import (
 	"sync"
 
-	"github.com/usetero/policy-go/internal/engine"
+	"github.com/usetero/policy-go/policy/internal/engine"
 )
 
 // evalState holds reusable slices for policy evaluation to avoid allocations.
@@ -151,7 +151,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		}
 	}
 
-	// Process Hyperscan databases
+	// Process regex pattern databases
 	for _, entry := range matchers.Databases() {
 		key := entry.Key
 		db := entry.Database
@@ -386,7 +386,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 		}
 	}
 
-	// Process Hyperscan databases
+	// Process regex pattern databases
 	for _, entry := range matchers.Databases() {
 		key := entry.Key
 		db := entry.Database
@@ -566,7 +566,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 		}
 	}
 
-	// Process Hyperscan databases
+	// Process regex pattern databases
 	for _, entry := range matchers.Databases() {
 		key := entry.Key
 		db := entry.Database

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/usetero/policy-go"
+	"github.com/usetero/policy-go/policy"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
@@ -132,7 +132,7 @@ func traversePath(m map[string]any, path []string) []byte {
 func setupBenchmark(b *testing.B) (*policy.PolicyRegistry, *policy.PolicyEngine) {
 	b.Helper()
 
-	registry := policy.NewPolicyRegistry()
+	registry := policy.NewPolicyRegistry(policy.WithRegexBackend(benchBackend{}))
 	provider := policy.NewFileProvider(filepath.Join("..", "testdata", "policies.json"))
 
 	_, err := registry.Register(provider)
@@ -215,7 +215,7 @@ func (p *benchStaticProvider) SetStatsCollector(collector policy.StatsCollector)
 func setupTransformBenchmark(b *testing.B, transforms *policyv1.LogTransform) (*policy.PolicyRegistry, *policy.PolicyEngine) {
 	b.Helper()
 
-	registry := policy.NewPolicyRegistry()
+	registry := policy.NewPolicyRegistry(policy.WithRegexBackend(benchBackend{}))
 	provider := &benchStaticProvider{
 		policies: []*policyv1.Policy{
 			{
@@ -552,7 +552,7 @@ func BenchmarkCompile(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		registry := policy.NewPolicyRegistry()
+		registry := policy.NewPolicyRegistry(policy.WithRegexBackend(benchBackend{}))
 		provider := policy.NewFileProvider(filepath.Join("..", "testdata", "policies.json"))
 		_, err := registry.Register(provider)
 		if err != nil {
