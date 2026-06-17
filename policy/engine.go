@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/usetero/policy-go/policy/internal/engine"
@@ -10,6 +11,8 @@ import (
 type evalState struct {
 	matchCounts    []int
 	disqualified   []bool
+	seenTouch      []bool // which matchCounts entries are non-zero (dedup + selective reset)
+	touchedList    []int  // compact list of touched policy indices for final loop
 	matchedIndices []int
 	matchedCount   int
 }
@@ -101,15 +104,31 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 	if cap(state.matchCounts) < policyCount {
 		state.matchCounts = make([]int, policyCount)
 		state.disqualified = make([]bool, policyCount)
+		state.seenTouch = make([]bool, policyCount)
 		state.matchedIndices = make([]int, policyCount)
-	} else {
+		state.touchedList = state.touchedList[:0]
+	} else if len(state.matchCounts) != policyCount {
+		// Policy count changed — full clear to handle stale seenTouch beyond new boundary.
 		state.matchCounts = state.matchCounts[:policyCount]
 		state.disqualified = state.disqualified[:policyCount]
+		state.seenTouch = state.seenTouch[:policyCount]
 		state.matchedIndices = state.matchedIndices[:policyCount]
-		for i := range state.matchCounts {
+		clear(state.matchCounts)
+		clear(state.disqualified)
+		clear(state.seenTouch)
+		state.touchedList = state.touchedList[:0]
+	} else {
+		// Same count — selective reset: only touched indices, O(matched) not O(N).
+		state.matchCounts = state.matchCounts[:policyCount]
+		state.disqualified = state.disqualified[:policyCount]
+		state.seenTouch = state.seenTouch[:policyCount]
+		state.matchedIndices = state.matchedIndices[:policyCount]
+		for _, i := range state.touchedList {
 			state.matchCounts[i] = 0
-			state.disqualified[i] = false
+			state.seenTouch[i] = false
 		}
+		state.touchedList = state.touchedList[:0]
+		clear(state.disqualified)
 	}
 	state.matchedCount = 0
 
@@ -129,7 +148,12 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		} else if !check.MustExist && exists {
 			disqualified[check.PolicyIndex] = true
 		} else {
-			matchCounts[check.PolicyIndex]++
+			pi := check.PolicyIndex
+			matchCounts[pi]++
+			if !state.seenTouch[pi] {
+				state.seenTouch[pi] = true
+				state.touchedList = append(state.touchedList, pi)
+			}
 		}
 	}
 
@@ -145,7 +169,12 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 			matched = !matched
 		}
 		if matched {
-			matchCounts[check.PolicyIndex]++
+			pi := check.PolicyIndex
+			matchCounts[pi]++
+			if !state.seenTouch[pi] {
+				state.seenTouch[pi] = true
+				state.touchedList = append(state.touchedList, pi)
+			}
 		} else {
 			disqualified[check.PolicyIndex] = true
 		}
@@ -169,49 +198,59 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 			continue
 		}
 
-		// Scan the value using the database
-		matched, err := db.Scan(value)
-		if err != nil {
-			continue
-		}
-
-		// Update match counts based on results
-		for patternID, patternRef := range db.PatternIndex() {
-			if disqualified[patternRef.PolicyIndex] {
+		if key.Negated {
+			matched, err := db.ScanAll(value)
+			if err != nil {
 				continue
 			}
-
-			if key.Negated {
-				// Negated match - pattern should NOT match
+			for patternID, patternRef := range db.PatternIndex() {
+				if disqualified[patternRef.PolicyIndex] {
+					continue
+				}
 				if matched[patternID] {
 					disqualified[patternRef.PolicyIndex] = true
 				} else {
-					matchCounts[patternRef.PolicyIndex]++
-				}
-			} else {
-				// Normal match - pattern should match
-				if matched[patternID] {
-					matchCounts[patternRef.PolicyIndex]++
+					pi := patternRef.PolicyIndex
+					matchCounts[pi]++
+					if !state.seenTouch[pi] {
+						state.seenTouch[pi] = true
+						state.touchedList = append(state.touchedList, pi)
+					}
 				}
 			}
+			db.ReleaseMatched(matched)
+		} else {
+			hits, err := db.Scan(value)
+			if err != nil {
+				continue
+			}
+			for _, patternID := range hits {
+				ref := db.PatternIndex()[patternID]
+				pi := ref.PolicyIndex
+				if !disqualified[pi] {
+					matchCounts[pi]++
+					if !state.seenTouch[pi] {
+						state.seenTouch[pi] = true
+						state.touchedList = append(state.touchedList, pi)
+					}
+				}
+			}
+			db.ReleaseHits(hits)
 		}
-
-		// Return matched slice to pool
-		db.ReleaseMatched(matched)
 	}
 
 	// Find all matching policies and track the most restrictive one
 	var bestPolicy *engine.CompiledPolicy[engine.LogField]
 	bestRestrictiveness := -1
 
-	for i := range policyCount {
+	slices.Sort(state.touchedList)
+	for _, i := range state.touchedList {
 		if disqualified[i] {
 			continue
 		}
 
 		policy := matchers.PolicyByIndex(i)
 
-		// Check if all matchers are satisfied
 		if matchCounts[i] < policy.MatcherCount {
 			continue
 		}
@@ -219,7 +258,6 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		state.matchedIndices[state.matchedCount] = i
 		state.matchedCount++
 
-		// Select most restrictive
 		restrictiveness := policy.Keep.Restrictiveness()
 		if restrictiveness > bestRestrictiveness {
 			bestPolicy = policy
@@ -337,15 +375,31 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 	if cap(state.matchCounts) < policyCount {
 		state.matchCounts = make([]int, policyCount)
 		state.disqualified = make([]bool, policyCount)
+		state.seenTouch = make([]bool, policyCount)
 		state.matchedIndices = make([]int, policyCount)
-	} else {
+		state.touchedList = state.touchedList[:0]
+	} else if len(state.matchCounts) != policyCount {
+		// Policy count changed — full clear to handle stale seenTouch beyond new boundary.
 		state.matchCounts = state.matchCounts[:policyCount]
 		state.disqualified = state.disqualified[:policyCount]
+		state.seenTouch = state.seenTouch[:policyCount]
 		state.matchedIndices = state.matchedIndices[:policyCount]
-		for i := range state.matchCounts {
+		clear(state.matchCounts)
+		clear(state.disqualified)
+		clear(state.seenTouch)
+		state.touchedList = state.touchedList[:0]
+	} else {
+		// Same count — selective reset: only touched indices, O(matched) not O(N).
+		state.matchCounts = state.matchCounts[:policyCount]
+		state.disqualified = state.disqualified[:policyCount]
+		state.seenTouch = state.seenTouch[:policyCount]
+		state.matchedIndices = state.matchedIndices[:policyCount]
+		for _, i := range state.touchedList {
 			state.matchCounts[i] = 0
-			state.disqualified[i] = false
+			state.seenTouch[i] = false
 		}
+		state.touchedList = state.touchedList[:0]
+		clear(state.disqualified)
 	}
 	state.matchedCount = 0
 
@@ -365,7 +419,12 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 		} else if !check.MustExist && exists {
 			disqualified[check.PolicyIndex] = true
 		} else {
-			matchCounts[check.PolicyIndex]++
+			pi := check.PolicyIndex
+			matchCounts[pi]++
+			if !state.seenTouch[pi] {
+				state.seenTouch[pi] = true
+				state.touchedList = append(state.touchedList, pi)
+			}
 		}
 	}
 
@@ -380,7 +439,12 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 			matched = !matched
 		}
 		if matched {
-			matchCounts[check.PolicyIndex]++
+			pi := check.PolicyIndex
+			matchCounts[pi]++
+			if !state.seenTouch[pi] {
+				state.seenTouch[pi] = true
+				state.touchedList = append(state.touchedList, pi)
+			}
 		} else {
 			disqualified[check.PolicyIndex] = true
 		}
@@ -401,37 +465,53 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 			continue
 		}
 
-		matched, err := db.Scan(value)
-		if err != nil {
-			continue
-		}
-
-		for patternID, patternRef := range db.PatternIndex() {
-			if disqualified[patternRef.PolicyIndex] {
+		if key.Negated {
+			matched, err := db.ScanAll(value)
+			if err != nil {
 				continue
 			}
-
-			if key.Negated {
+			for patternID, patternRef := range db.PatternIndex() {
+				if disqualified[patternRef.PolicyIndex] {
+					continue
+				}
 				if matched[patternID] {
 					disqualified[patternRef.PolicyIndex] = true
 				} else {
-					matchCounts[patternRef.PolicyIndex]++
-				}
-			} else {
-				if matched[patternID] {
-					matchCounts[patternRef.PolicyIndex]++
+					pi := patternRef.PolicyIndex
+					matchCounts[pi]++
+					if !state.seenTouch[pi] {
+						state.seenTouch[pi] = true
+						state.touchedList = append(state.touchedList, pi)
+					}
 				}
 			}
+			db.ReleaseMatched(matched)
+		} else {
+			hits, err := db.Scan(value)
+			if err != nil {
+				continue
+			}
+			for _, patternID := range hits {
+				ref := db.PatternIndex()[patternID]
+				pi := ref.PolicyIndex
+				if !disqualified[pi] {
+					matchCounts[pi]++
+					if !state.seenTouch[pi] {
+						state.seenTouch[pi] = true
+						state.touchedList = append(state.touchedList, pi)
+					}
+				}
+			}
+			db.ReleaseHits(hits)
 		}
-
-		db.ReleaseMatched(matched)
 	}
 
 	// Find the most restrictive matching policy
 	var bestPolicy *engine.CompiledPolicy[engine.MetricField]
 	bestRestrictiveness := -1
 
-	for i := range policyCount {
+	slices.Sort(state.touchedList)
+	for _, i := range state.touchedList {
 		if disqualified[i] {
 			continue
 		}
@@ -517,15 +597,31 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 	if cap(state.matchCounts) < policyCount {
 		state.matchCounts = make([]int, policyCount)
 		state.disqualified = make([]bool, policyCount)
+		state.seenTouch = make([]bool, policyCount)
 		state.matchedIndices = make([]int, policyCount)
-	} else {
+		state.touchedList = state.touchedList[:0]
+	} else if len(state.matchCounts) != policyCount {
+		// Policy count changed — full clear to handle stale seenTouch beyond new boundary.
 		state.matchCounts = state.matchCounts[:policyCount]
 		state.disqualified = state.disqualified[:policyCount]
+		state.seenTouch = state.seenTouch[:policyCount]
 		state.matchedIndices = state.matchedIndices[:policyCount]
-		for i := range state.matchCounts {
+		clear(state.matchCounts)
+		clear(state.disqualified)
+		clear(state.seenTouch)
+		state.touchedList = state.touchedList[:0]
+	} else {
+		// Same count — selective reset: only touched indices, O(matched) not O(N).
+		state.matchCounts = state.matchCounts[:policyCount]
+		state.disqualified = state.disqualified[:policyCount]
+		state.seenTouch = state.seenTouch[:policyCount]
+		state.matchedIndices = state.matchedIndices[:policyCount]
+		for _, i := range state.touchedList {
 			state.matchCounts[i] = 0
-			state.disqualified[i] = false
+			state.seenTouch[i] = false
 		}
+		state.touchedList = state.touchedList[:0]
+		clear(state.disqualified)
 	}
 	state.matchedCount = 0
 
@@ -545,7 +641,12 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 		} else if !check.MustExist && exists {
 			disqualified[check.PolicyIndex] = true
 		} else {
-			matchCounts[check.PolicyIndex]++
+			pi := check.PolicyIndex
+			matchCounts[pi]++
+			if !state.seenTouch[pi] {
+				state.seenTouch[pi] = true
+				state.touchedList = append(state.touchedList, pi)
+			}
 		}
 	}
 
@@ -560,7 +661,12 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 			matched = !matched
 		}
 		if matched {
-			matchCounts[check.PolicyIndex]++
+			pi := check.PolicyIndex
+			matchCounts[pi]++
+			if !state.seenTouch[pi] {
+				state.seenTouch[pi] = true
+				state.touchedList = append(state.touchedList, pi)
+			}
 		} else {
 			disqualified[check.PolicyIndex] = true
 		}
@@ -581,37 +687,53 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 			continue
 		}
 
-		matched, err := db.Scan(value)
-		if err != nil {
-			continue
-		}
-
-		for patternID, patternRef := range db.PatternIndex() {
-			if disqualified[patternRef.PolicyIndex] {
+		if key.Negated {
+			matched, err := db.ScanAll(value)
+			if err != nil {
 				continue
 			}
-
-			if key.Negated {
+			for patternID, patternRef := range db.PatternIndex() {
+				if disqualified[patternRef.PolicyIndex] {
+					continue
+				}
 				if matched[patternID] {
 					disqualified[patternRef.PolicyIndex] = true
 				} else {
-					matchCounts[patternRef.PolicyIndex]++
-				}
-			} else {
-				if matched[patternID] {
-					matchCounts[patternRef.PolicyIndex]++
+					pi := patternRef.PolicyIndex
+					matchCounts[pi]++
+					if !state.seenTouch[pi] {
+						state.seenTouch[pi] = true
+						state.touchedList = append(state.touchedList, pi)
+					}
 				}
 			}
+			db.ReleaseMatched(matched)
+		} else {
+			hits, err := db.Scan(value)
+			if err != nil {
+				continue
+			}
+			for _, patternID := range hits {
+				ref := db.PatternIndex()[patternID]
+				pi := ref.PolicyIndex
+				if !disqualified[pi] {
+					matchCounts[pi]++
+					if !state.seenTouch[pi] {
+						state.seenTouch[pi] = true
+						state.touchedList = append(state.touchedList, pi)
+					}
+				}
+			}
+			db.ReleaseHits(hits)
 		}
-
-		db.ReleaseMatched(matched)
 	}
 
 	// Find the most restrictive matching policy
 	var bestPolicy *engine.CompiledPolicy[engine.TraceField]
 	bestRestrictiveness := -1
 
-	for i := range policyCount {
+	slices.Sort(state.touchedList)
+	for _, i := range state.touchedList {
 		if disqualified[i] {
 			continue
 		}

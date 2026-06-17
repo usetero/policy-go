@@ -20,11 +20,15 @@ func TestScan(t *testing.T) {
 		{"qux lower", [3]bool{false, false, true}}, // caseless
 		{"nothing", [3]bool{false, false, false}},
 	} {
-		matched := make([]bool, 3)
-		if err := m.Scan([]byte(tc.data), matched); err != nil {
+		hits, err := m.Scan([]byte(tc.data), nil)
+		if err != nil {
 			t.Fatalf("scan %q: %v", tc.data, err)
 		}
-		if [3]bool(matched) != tc.want {
+		var matched [3]bool
+		for _, id := range hits {
+			matched[id] = true
+		}
+		if matched != tc.want {
 			t.Errorf("scan %q = %v, want %v", tc.data, matched, tc.want)
 		}
 	}

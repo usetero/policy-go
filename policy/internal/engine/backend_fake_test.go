@@ -31,13 +31,13 @@ func (fakeBackend) Compile(patterns []string, caseInsensitive bool) (regexbacken
 
 type fakeMatcher struct{ res []*regexp.Regexp }
 
-func (m *fakeMatcher) Scan(data []byte, matched []bool) error {
+func (m *fakeMatcher) Scan(data []byte, hits []int) ([]int, error) {
 	for i, re := range m.res {
 		if re.Match(data) {
-			matched[i] = true
+			hits = append(hits, i)
 		}
 	}
-	return nil
+	return hits, nil
 }
 
 func (m *fakeMatcher) Close() error { return nil }

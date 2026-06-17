@@ -30,13 +30,13 @@ func (benchBackend) Compile(patterns []string, caseInsensitive bool) (policy.Reg
 
 type benchMatcher struct{ res []*regexp.Regexp }
 
-func (m *benchMatcher) Scan(data []byte, matched []bool) error {
+func (m *benchMatcher) Scan(data []byte, hits []int) ([]int, error) {
 	for i, re := range m.res {
 		if re.Match(data) {
-			matched[i] = true
+			hits = append(hits, i)
 		}
 	}
-	return nil
+	return hits, nil
 }
 
 func (m *benchMatcher) Close() error { return nil }
