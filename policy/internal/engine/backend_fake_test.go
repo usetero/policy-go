@@ -31,16 +31,7 @@ func (fakeBackend) Compile(patterns []string, caseInsensitive bool) (regexbacken
 
 type fakeMatcher struct{ res []*regexp.Regexp }
 
-func (m *fakeMatcher) Scan(data []byte, matched []bool) error {
-	for i, re := range m.res {
-		if re.Match(data) {
-			matched[i] = true
-		}
-	}
-	return nil
-}
-
-func (m *fakeMatcher) ScanHits(data []byte, hits []int) ([]int, error) {
+func (m *fakeMatcher) Scan(data []byte, hits []int) ([]int, error) {
 	for i, re := range m.res {
 		if re.Match(data) {
 			hits = append(hits, i)

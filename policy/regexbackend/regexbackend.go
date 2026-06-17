@@ -24,14 +24,10 @@ type Backend interface {
 // Matcher scans input bytes against a compiled group of patterns. Matchers must
 // be safe for concurrent use by multiple goroutines.
 type Matcher interface {
-	// Scan sets matched[i] = true for each pattern index i that occurs in data.
-	// matched is sized to the number of patterns and pre-zeroed by the caller;
-	// implementations only set true and must not clear or grow it.
-	Scan(data []byte, matched []bool) error
-	// ScanHits appends the index of each matching pattern to hits and returns
-	// the extended slice. hits may be nil or a pre-allocated pooled slice
-	// (passed in at len 0). Order of appended IDs is unspecified.
-	ScanHits(data []byte, hits []int) ([]int, error)
+	// Scan appends the index of each matching pattern to hits and returns the
+	// extended slice. hits may be nil or a pre-allocated pooled slice (passed
+	// in at len 0). Order of appended IDs is unspecified.
+	Scan(data []byte, hits []int) ([]int, error)
 	// Close releases resources held by the matcher.
 	Close() error
 }

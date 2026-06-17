@@ -208,12 +208,12 @@ func TestCompilerCompileExactMatch(t *testing.T) {
 
 	// Scan for exact match (dots should be escaped)
 	for _, entry := range compiled.Logs.Databases() {
-		matched, err := entry.Database.Scan([]byte("hello.world"))
+		matched, err := entry.Database.ScanAll([]byte("hello.world"))
 		require.NoError(t, err)
 		assert.True(t, matched[0], "expected exact match")
 
 		// Should not match with different character
-		matched, err = entry.Database.Scan([]byte("helloXworld"))
+		matched, err = entry.Database.ScanAll([]byte("helloXworld"))
 		require.NoError(t, err)
 		assert.False(t, matched[0], "should not match")
 	}
@@ -284,7 +284,7 @@ func TestCompiledDatabaseScan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, matched)
 		})
@@ -327,7 +327,7 @@ func TestCompiledDatabaseScanConcurrent(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			for j := 0; j < 100; j++ {
-				matched, err := db.Scan([]byte("this is a test message"))
+				matched, err := db.ScanAll([]byte("this is a test message"))
 				assert.NoError(t, err)
 				assert.True(t, len(matched) > 0 && matched[0], "expected pattern to match")
 			}
@@ -449,7 +449,7 @@ func TestCompilerStartsWith(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
 			db.ReleaseMatched(matched)
@@ -502,7 +502,7 @@ func TestCompilerEndsWith(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
 			db.ReleaseMatched(matched)
@@ -555,7 +555,7 @@ func TestCompilerContains(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
 			db.ReleaseMatched(matched)
@@ -609,7 +609,7 @@ func TestCompilerCaseInsensitive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
 			db.ReleaseMatched(matched)
@@ -662,7 +662,7 @@ func TestCompilerCaseInsensitiveStartsWith(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
 			db.ReleaseMatched(matched)
@@ -949,7 +949,7 @@ func TestCompilerSpecialCharactersEscaped(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matched, err := db.Scan([]byte(tt.input))
+			matched, err := db.ScanAll([]byte(tt.input))
 			require.NoError(t, err)
 			assert.Equal(t, tt.matches, matched[0], "input: %s", tt.input)
 			db.ReleaseMatched(matched)

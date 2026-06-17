@@ -42,38 +42,14 @@ func (c *CompiledDatabase) PatternIndex() []PatternRef {
 	return c.patternIndex
 }
 
-// Scan borrows a []bool from the pool, clears it, delegates to the matcher,
-// and returns the result. Call ReleaseMatched when done.
-func (c *CompiledDatabase) Scan(data []byte) ([]bool, error) {
-	var matched []bool
-	if pooled := c.matchedPool.Get(); pooled != nil {
-		matched = pooled.([]bool)
-		clear(matched)
-	} else {
-		matched = make([]bool, len(c.patternIndex))
-	}
-	if err := c.matcher.Scan(data, matched); err != nil {
-		c.matchedPool.Put(matched)
-		return nil, err
-	}
-	return matched, nil
-}
-
-// ReleaseMatched returns a matched slice to the pool.
-func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
-	if matched != nil {
-		c.matchedPool.Put(matched)
-	}
-}
-
-// ScanHits borrows a []int from the pool, delegates to the matcher's ScanHits,
-// and returns the hit-ID slice. Call ReleaseHits when done.
-func (c *CompiledDatabase) ScanHits(data []byte) ([]int, error) {
+// Scan borrows a []int from the pool, delegates to the matcher, and returns
+// the hit-ID slice. Call ReleaseHits when done.
+func (c *CompiledDatabase) Scan(data []byte) ([]int, error) {
 	var hits []int
 	if pooled := c.hitsPool.Get(); pooled != nil {
 		hits = pooled.([]int)[:0]
 	}
-	result, err := c.matcher.ScanHits(data, hits)
+	result, err := c.matcher.Scan(data, hits)
 	if err != nil {
 		c.hitsPool.Put(hits[:0])
 		return nil, err
@@ -85,6 +61,35 @@ func (c *CompiledDatabase) ScanHits(data []byte) ([]int, error) {
 func (c *CompiledDatabase) ReleaseHits(hits []int) {
 	if hits != nil {
 		c.hitsPool.Put(hits[:0])
+	}
+}
+
+// ScanAll scans data and returns a pooled []bool with matched[i]=true for each
+// matching pattern. Used by the negated path, which must know what did NOT fire.
+// Call ReleaseMatched when done.
+func (c *CompiledDatabase) ScanAll(data []byte) ([]bool, error) {
+	hits, err := c.Scan(data)
+	if err != nil {
+		return nil, err
+	}
+	var matched []bool
+	if pooled := c.matchedPool.Get(); pooled != nil {
+		matched = pooled.([]bool)
+		clear(matched)
+	} else {
+		matched = make([]bool, len(c.patternIndex))
+	}
+	for _, id := range hits {
+		matched[id] = true
+	}
+	c.ReleaseHits(hits)
+	return matched, nil
+}
+
+// ReleaseMatched returns a matched slice to the pool.
+func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
+	if matched != nil {
+		c.matchedPool.Put(matched)
 	}
 }
 

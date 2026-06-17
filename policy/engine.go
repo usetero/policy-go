@@ -199,7 +199,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		}
 
 		if key.Negated {
-			matched, err := db.Scan(value)
+			matched, err := db.ScanAll(value)
 			if err != nil {
 				continue
 			}
@@ -220,7 +220,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 			}
 			db.ReleaseMatched(matched)
 		} else {
-			hits, err := db.ScanHits(value)
+			hits, err := db.Scan(value)
 			if err != nil {
 				continue
 			}
@@ -466,7 +466,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 		}
 
 		if key.Negated {
-			matched, err := db.Scan(value)
+			matched, err := db.ScanAll(value)
 			if err != nil {
 				continue
 			}
@@ -487,7 +487,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 			}
 			db.ReleaseMatched(matched)
 		} else {
-			hits, err := db.ScanHits(value)
+			hits, err := db.Scan(value)
 			if err != nil {
 				continue
 			}
@@ -688,7 +688,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 		}
 
 		if key.Negated {
-			matched, err := db.Scan(value)
+			matched, err := db.ScanAll(value)
 			if err != nil {
 				continue
 			}
@@ -709,7 +709,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 			}
 			db.ReleaseMatched(matched)
 		} else {
-			hits, err := db.ScanHits(value)
+			hits, err := db.Scan(value)
 			if err != nil {
 				continue
 			}

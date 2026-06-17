@@ -53,16 +53,7 @@ var _ regexbackend.Matcher = (*matcher)(nil)
 // ponytail: naive O(patterns) scan — one unanchored regexp search per pattern.
 // Correct (matches Hyperscan SingleMatch "occurs anywhere" semantics) but not
 // single-pass. Swap a real multi-pattern engine in here if it shows up in profiles.
-func (m *matcher) Scan(data []byte, matched []bool) error {
-	for i, re := range m.res {
-		if re.Match(data) {
-			matched[i] = true
-		}
-	}
-	return nil
-}
-
-func (m *matcher) ScanHits(data []byte, hits []int) ([]int, error) {
+func (m *matcher) Scan(data []byte, hits []int) ([]int, error) {
 	for i, re := range m.res {
 		if re.Match(data) {
 			hits = append(hits, i)

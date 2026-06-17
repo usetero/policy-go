@@ -68,20 +68,7 @@ func (m *matcher) getScratch() (*hyperscan.Scratch, error) {
 	return m.base.Clone()
 }
 
-func (m *matcher) Scan(data []byte, matched []bool) error {
-	s, err := m.getScratch()
-	if err != nil {
-		return err
-	}
-	err = m.db.Scan(data, s, func(id uint, from, to uint64, flags uint, context any) error {
-		matched[id] = true
-		return nil
-	}, nil)
-	m.scratchPool.Put(s)
-	return err
-}
-
-func (m *matcher) ScanHits(data []byte, hits []int) ([]int, error) {
+func (m *matcher) Scan(data []byte, hits []int) ([]int, error) {
 	s, err := m.getScratch()
 	if err != nil {
 		return hits, err
