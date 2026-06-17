@@ -62,4 +62,13 @@ func (m *matcher) Scan(data []byte, matched []bool) error {
 	return nil
 }
 
+func (m *matcher) ScanHits(data []byte, hits []int) ([]int, error) {
+	for i, re := range m.res {
+		if re.Match(data) {
+			hits = append(hits, i)
+		}
+	}
+	return hits, nil
+}
+
 func (m *matcher) Close() error { return nil }

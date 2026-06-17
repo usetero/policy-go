@@ -40,4 +40,13 @@ func (m *fakeMatcher) Scan(data []byte, matched []bool) error {
 	return nil
 }
 
+func (m *fakeMatcher) ScanHits(data []byte, hits []int) ([]int, error) {
+	for i, re := range m.res {
+		if re.Match(data) {
+			hits = append(hits, i)
+		}
+	}
+	return hits, nil
+}
+
 func (m *fakeMatcher) Close() error { return nil }

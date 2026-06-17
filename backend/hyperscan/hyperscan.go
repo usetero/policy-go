@@ -41,13 +41,13 @@ func (backend) Compile(patterns []string, caseInsensitive bool) (regexbackend.Ma
 		return nil, fmt.Errorf("failed to compile hyperscan database: %w", err)
 	}
 
-	scratch, err := hyperscan.NewScratch(db)
+	base, err := hyperscan.NewScratch(db)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to allocate scratch: %w", err)
 	}
 
-	return &matcher{db: db, scratch: scratch}, nil
+	return &matcher{db: db, base: base}, nil
 }
 
 // matcher holds a Hyperscan block database plus a pool of scratch spaces. gohs
@@ -55,36 +55,48 @@ func (backend) Compile(patterns []string, caseInsensitive bool) (regexbackend.Ma
 // pool (cloning the base scratch when the pool is empty).
 type matcher struct {
 	db          hyperscan.BlockDatabase
-	scratch     *hyperscan.Scratch
+	base        *hyperscan.Scratch
 	scratchPool sync.Pool
 }
 
 var _ regexbackend.Matcher = (*matcher)(nil)
 
-func (m *matcher) Scan(data []byte, matched []bool) error {
-	var scratch *hyperscan.Scratch
+func (m *matcher) getScratch() (*hyperscan.Scratch, error) {
 	if pooled := m.scratchPool.Get(); pooled != nil {
-		scratch = pooled.(*hyperscan.Scratch)
-	} else {
-		var err error
-		scratch, err = m.scratch.Clone()
-		if err != nil {
-			return err
-		}
+		return pooled.(*hyperscan.Scratch), nil
 	}
+	return m.base.Clone()
+}
 
-	err := m.db.Scan(data, scratch, func(id uint, from, to uint64, flags uint, context any) error {
+func (m *matcher) Scan(data []byte, matched []bool) error {
+	s, err := m.getScratch()
+	if err != nil {
+		return err
+	}
+	err = m.db.Scan(data, s, func(id uint, from, to uint64, flags uint, context any) error {
 		matched[id] = true
 		return nil
 	}, nil)
-
-	m.scratchPool.Put(scratch)
+	m.scratchPool.Put(s)
 	return err
 }
 
+func (m *matcher) ScanHits(data []byte, hits []int) ([]int, error) {
+	s, err := m.getScratch()
+	if err != nil {
+		return hits, err
+	}
+	err = m.db.Scan(data, s, func(id uint, from, to uint64, flags uint, context any) error {
+		hits = append(hits, int(id))
+		return nil
+	}, nil)
+	m.scratchPool.Put(s)
+	return hits, err
+}
+
 func (m *matcher) Close() error {
-	if m.scratch != nil {
-		if err := m.scratch.Free(); err != nil {
+	if m.base != nil {
+		if err := m.base.Free(); err != nil {
 			return err
 		}
 	}

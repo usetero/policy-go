@@ -20,11 +20,12 @@ type PatternRef struct {
 }
 
 // CompiledDatabase wraps a regexbackend.Matcher for a group of patterns, adding
-// the pattern→policy index and a pool of reusable match-result slices. The regex
-// engine itself (scratch management, scanning) lives behind the Matcher.
+// the pattern→policy index. The regex engine itself (scratch management, scanning)
+// lives behind the Matcher.
 type CompiledDatabase struct {
 	matcher      regexbackend.Matcher
-	matchedPool  sync.Pool    // Pool for []bool match results
+	matchedPool  sync.Pool // Pool for []bool — negated path (needs "what didn't fire")
+	hitsPool     sync.Pool // Pool for []int  — non-negated path (only firing IDs)
 	patternIndex []PatternRef // maps pattern ID → policy
 }
 
@@ -41,25 +42,20 @@ func (c *CompiledDatabase) PatternIndex() []PatternRef {
 	return c.patternIndex
 }
 
-// Scan scans the input data against the compiled database and returns which patterns matched.
-// The caller must call ReleaseMatched when done with the result to return it to the pool.
+// Scan borrows a []bool from the pool, clears it, delegates to the matcher,
+// and returns the result. Call ReleaseMatched when done.
 func (c *CompiledDatabase) Scan(data []byte) ([]bool, error) {
-	// Get or create matched slice from pool, pre-zeroed for the matcher.
 	var matched []bool
 	if pooled := c.matchedPool.Get(); pooled != nil {
 		matched = pooled.([]bool)
-		for i := range matched {
-			matched[i] = false
-		}
+		clear(matched)
 	} else {
 		matched = make([]bool, len(c.patternIndex))
 	}
-
 	if err := c.matcher.Scan(data, matched); err != nil {
 		c.matchedPool.Put(matched)
 		return nil, err
 	}
-
 	return matched, nil
 }
 
@@ -67,6 +63,28 @@ func (c *CompiledDatabase) Scan(data []byte) ([]bool, error) {
 func (c *CompiledDatabase) ReleaseMatched(matched []bool) {
 	if matched != nil {
 		c.matchedPool.Put(matched)
+	}
+}
+
+// ScanHits borrows a []int from the pool, delegates to the matcher's ScanHits,
+// and returns the hit-ID slice. Call ReleaseHits when done.
+func (c *CompiledDatabase) ScanHits(data []byte) ([]int, error) {
+	var hits []int
+	if pooled := c.hitsPool.Get(); pooled != nil {
+		hits = pooled.([]int)[:0]
+	}
+	result, err := c.matcher.ScanHits(data, hits)
+	if err != nil {
+		c.hitsPool.Put(hits[:0])
+		return nil, err
+	}
+	return result, nil
+}
+
+// ReleaseHits returns a hits slice to the pool.
+func (c *CompiledDatabase) ReleaseHits(hits []int) {
+	if hits != nil {
+		c.hitsPool.Put(hits[:0])
 	}
 }
 

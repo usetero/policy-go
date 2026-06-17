@@ -39,4 +39,13 @@ func (m *benchMatcher) Scan(data []byte, matched []bool) error {
 	return nil
 }
 
+func (m *benchMatcher) ScanHits(data []byte, hits []int) ([]int, error) {
+	for i, re := range m.res {
+		if re.Match(data) {
+			hits = append(hits, i)
+		}
+	}
+	return hits, nil
+}
+
 func (m *benchMatcher) Close() error { return nil }
