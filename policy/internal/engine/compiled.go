@@ -24,8 +24,8 @@ type PatternRef struct {
 // lives behind the Matcher.
 type CompiledDatabase struct {
 	matcher      regexbackend.Matcher
-	matchedPool  sync.Pool // Pool for []bool — negated path (needs "what didn't fire")
-	hitsPool     sync.Pool // Pool for []int  — non-negated path (only firing IDs)
+	matchedPool  sync.Pool    // Pool for []bool — negated path (needs "what didn't fire")
+	hitsPool     sync.Pool    // Pool for []int  — non-negated path (only firing IDs)
 	patternIndex []PatternRef // maps pattern ID → policy
 }
 
