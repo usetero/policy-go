@@ -30,6 +30,7 @@ Thumbs.db
 # Build output
 dist/
 examples/conformance/runner
+examples/validate/validator
 
 # Proto exports (regenerated from buf registry)
 proto/**/*.proto

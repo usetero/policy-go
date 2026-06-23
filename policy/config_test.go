@@ -97,23 +97,6 @@ func TestParseConfigFileProvider(t *testing.T) {
 	assert.Equal(t, "/etc/policies.json", p.Path)
 }
 
-func TestParseConfigIncludeZeroHitPolicyStats(t *testing.T) {
-	json := `{
-		"include_zero_hit_policy_stats": true,
-		"policy_providers": [
-			{
-				"type": "file",
-				"id": "local-policies",
-				"path": "/etc/policies.json"
-			}
-		]
-	}`
-
-	config, err := ParseConfig([]byte(json))
-	require.NoError(t, err)
-	assert.True(t, config.IncludeZeroHitPolicyStats)
-}
-
 func TestParseConfigFileProviderWithPollInterval(t *testing.T) {
 	json := `{
 		"policy_providers": [
@@ -420,7 +403,6 @@ func TestConfigLoaderLoadIncludeZeroHitPolicyStats(t *testing.T) {
 	require.NoError(t, err)
 
 	config := &Config{
-		IncludeZeroHitPolicyStats: true,
 		Providers: []ProviderConfig{
 			{
 				Type: "file",

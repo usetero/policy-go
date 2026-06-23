@@ -103,7 +103,6 @@ func main() {
 
 	// Create a registry to manage policies
 	registry := policy.NewPolicyRegistry(policy.WithRegexBackend(teroscan.New()))
-	// registry.SetIncludeZeroHitPolicyStats(true)
 
 	// Create a gRPC provider connecting to Tero
 	provider := policy.NewHttpProvider("https://sync.usetero.dev/v1/policy/sync",
