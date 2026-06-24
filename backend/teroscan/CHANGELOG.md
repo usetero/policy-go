@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/usetero/policy-go/compare/backend/teroscan/v1.9.1...backend/teroscan/v1.10.0) (2026-06-24)
+
+
+### Features
+
+* improve performance ([#84](https://github.com/usetero/policy-go/issues/84)) ([33d8cd1](https://github.com/usetero/policy-go/commit/33d8cd1667f046d8f8e064b9a04fbba8dcf76f0b))
+
 ## [1.9.1](https://github.com/usetero/policy-go/compare/backend/teroscan/v1.9.0...backend/teroscan/v1.9.1) (2026-06-16)
 
 
