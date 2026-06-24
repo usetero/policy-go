@@ -3075,7 +3075,6 @@ func TestEvaluateLogTransformStatsRecorded(t *testing.T) {
 
 func TestEvaluateLogTransformStatsResetAfterCollect(t *testing.T) {
 	registry := NewPolicyRegistry()
-	registry.SetIncludeZeroHitPolicyStats(true)
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
 			Id:   "stats-reset",
@@ -4413,7 +4412,6 @@ func TestEvaluateLogTransformRedactRegexStatsRecordMiss(t *testing.T) {
 
 func TestCompileInvalidRedactRegexReportsPerPolicy(t *testing.T) {
 	registry := NewPolicyRegistry()
-	registry.SetIncludeZeroHitPolicyStats(true)
 	var compileErr error
 	registry.SetOnRecompile(func(err error) {
 		compileErr = err

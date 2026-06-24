@@ -73,6 +73,16 @@ tasks:
     cmds:
       - (cd examples && go test -bench=BenchmarkBackends -benchmem ./backendbench/)
 
+  # Validate a policy JSON file.
+  # Usage: task validate FILE=path/to/policies.json
+  validate:
+    desc: Validate a policy JSON file (task validate FILE=<path>)
+    cmds:
+      - |
+        FILE="{{.FILE}}"
+        [[ "$FILE" = /* ]] || FILE="$PWD/$FILE"
+        cd "{{.TASKFILE_DIR}}/examples" && go run ./validate/ --file "$FILE"
+
   # Conformance: run the policy-conformance testcases against the local workspace.
   # Requires ../policy-conformance to exist (sibling directory).
   # POLICY_BACKEND env var is inherited by the runner; defaults to teroscan.

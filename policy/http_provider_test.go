@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -754,6 +755,104 @@ func TestHttpProvider_Load_WithStatsCollector(t *testing.T) {
 
 	_, err := p.Load()
 	require.NoError(t, err)
+}
+
+func TestHttpProvider_Load_ZeroHitPoliciesReportedToBackend(t *testing.T) {
+	data, err := os.ReadFile("testdata/five-policies.json")
+	require.NoError(t, err)
+	var resp policyv1.SyncResponse
+	require.NoError(t, protojson.Unmarshal(data, &resp))
+
+	registry := NewPolicyRegistry()
+	handle, err := registry.Register(newStaticProvider(resp.Policies))
+	require.NoError(t, err)
+	defer handle.Unregister()
+
+	var capturedStatuses []*policyv1.PolicySyncStatus
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+		capturedStatuses = req.GetPolicyStatuses()
+
+		out, _ := proto.Marshal(&policyv1.SyncResponse{Hash: "test"})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.Write(out)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeProtobuf))
+	p.SetStatsCollector(registry.CollectStats)
+	_, err = p.Load()
+	require.NoError(t, err)
+
+	require.Len(t, capturedStatuses, 5)
+	ids := make([]string, len(capturedStatuses))
+	for i, s := range capturedStatuses {
+		ids[i] = s.GetId()
+		assert.Empty(t, s.GetErrors(), "policy %s should have no compile errors", s.GetId())
+	}
+	assert.ElementsMatch(t, []string{
+		"log_event_policy:019e84c2-4e25-7bf4-824c-772805e6d64b",
+		"log_event_policy:019e98f8-99cf-7022-83b2-add8ca12aa92",
+		"log_event_policy:019e9951-ee14-738a-ae73-e86f050a4543",
+		"log_event_policy:c8b30b43-8e5a-5108-adc7-b9f746ffa6b9",
+		"log_event_policy:fde62bcb-e202-42b2-bdf1-49259f35eb63",
+	}, ids)
+}
+
+func TestHttpProvider_Load_StatsWithHits(t *testing.T) {
+	data, err := os.ReadFile("testdata/five-policies.json")
+	require.NoError(t, err)
+	var syncResp policyv1.SyncResponse
+	require.NoError(t, protojson.Unmarshal(data, &syncResp))
+
+	registry := NewPolicyRegistry()
+	handle, err := registry.Register(newStaticProvider(syncResp.Policies))
+	require.NoError(t, err)
+	defer handle.Unregister()
+
+	eng := NewPolicyEngine(registry)
+
+	// Hit policy 1: logAttribute["otel"]["event_name"] == "gen_ai.choice"
+	EvaluateLog(eng, &SimpleLogRecord{
+		LogAttributes: map[string]any{"otel": map[string]any{"event_name": "gen_ai.choice"}},
+	}, SimpleLogOptions()...)
+
+	// Hit policy 2: resourceAttribute["service.name"] == "frontend-proxy" AND body contains "DEBUG trace"
+	EvaluateLog(eng, &SimpleLogRecord{
+		Body:               []byte("DEBUG trace: some message"),
+		ResourceAttributes: map[string]any{"service.name": "frontend-proxy"},
+	}, SimpleLogOptions()...)
+
+	var capturedStatuses []*policyv1.PolicySyncStatus
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req policyv1.SyncRequest
+		proto.Unmarshal(body, &req)
+		capturedStatuses = req.GetPolicyStatuses()
+		out, _ := proto.Marshal(&policyv1.SyncResponse{Hash: "test"})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.Write(out)
+	}))
+	defer server.Close()
+
+	p := NewHttpProvider(server.URL, WithContentType(ContentTypeProtobuf))
+	p.SetStatsCollector(registry.CollectStats)
+	_, err = p.Load()
+	require.NoError(t, err)
+
+	require.Len(t, capturedStatuses, 5)
+	statusMap := make(map[string]*policyv1.PolicySyncStatus, 5)
+	for _, s := range capturedStatuses {
+		statusMap[s.GetId()] = s
+	}
+
+	assert.Equal(t, int64(1), statusMap["log_event_policy:019e84c2-4e25-7bf4-824c-772805e6d64b"].GetMatchHits())
+	assert.Equal(t, int64(1), statusMap["log_event_policy:019e98f8-99cf-7022-83b2-add8ca12aa92"].GetMatchHits())
+	assert.Equal(t, int64(0), statusMap["log_event_policy:019e9951-ee14-738a-ae73-e86f050a4543"].GetMatchHits())
+	assert.Equal(t, int64(0), statusMap["log_event_policy:c8b30b43-8e5a-5108-adc7-b9f746ffa6b9"].GetMatchHits())
+	assert.Equal(t, int64(0), statusMap["log_event_policy:fde62bcb-e202-42b2-bdf1-49259f35eb63"].GetMatchHits())
 }
 
 func TestHttpProvider_Load_HTTPError(t *testing.T) {
