@@ -4,25 +4,10 @@
   "group-pull-request-title-pattern": "chore: release ${branch}",
   "include-component-in-tag": true,
   "tag-separator": "/",
-  "plugins": [
-    {
-      "type": "linked-versions",
-      "groupName": "policy",
-      "components": ["policy", "backend/teroscan", "backend/hyperscan"]
-    }
-  ],
   "packages": {
     "proto": { "release-type": "go", "component": "proto" },
     "policy": { "release-type": "go", "component": "policy" },
-    "backend/teroscan": {
-      "release-type": "go",
-      "component": "backend/teroscan",
-      "extra-files": [{ "type": "generic", "path": "go.mod" }]
-    },
-    "backend/hyperscan": {
-      "release-type": "go",
-      "component": "backend/hyperscan",
-      "extra-files": [{ "type": "generic", "path": "go.mod" }]
-    }
+    "backend/teroscan": { "release-type": "go", "component": "backend/teroscan" },
+    "backend/hyperscan": { "release-type": "go", "component": "backend/hyperscan" }
   }
 }
