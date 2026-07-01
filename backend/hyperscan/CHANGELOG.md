@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.1](https://github.com/usetero/policy-go/compare/backend/hyperscan/v1.10.0...backend/hyperscan/v1.10.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* dep bumps ([#88](https://github.com/usetero/policy-go/issues/88)) ([e370aa3](https://github.com/usetero/policy-go/commit/e370aa3481e3ffa19075e5e586f5594835d3967a))
+* revert release-please auto-bump of policy dep in backends ([#90](https://github.com/usetero/policy-go/issues/90)) ([de3c2b0](https://github.com/usetero/policy-go/commit/de3c2b03a4479e9f4991c0867776b773802a8a90))
+
 ## [1.10.0](https://github.com/usetero/policy-go/compare/backend/hyperscan/v1.9.1...backend/hyperscan/v1.10.0) (2026-06-24)
 
 
