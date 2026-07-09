@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/usetero/policy-go/compare/proto/v1.9.1...proto/v1.10.0) (2026-07-09)
+
+
+### Features
+
+* bump protos to latest ([#93](https://github.com/usetero/policy-go/issues/93)) ([36c7bd5](https://github.com/usetero/policy-go/commit/36c7bd5ce5eefe1dbe537b198e6db87e6279a225))
+
 ## [1.9.1](https://github.com/usetero/policy-go/compare/proto/v1.9.0...proto/v1.9.1) (2026-07-01)
 
 
