@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -35,12 +36,18 @@ type LogAccessor[T any] struct {
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref LogFieldRef) bool
 
-	// TypedValue is the single field-read accessor. It returns the field's
-	// typed value for both the typed matchers (equals/gt/gte/lt/lte) and the
-	// string pattern matchers (regex/exact/starts_with/ends_with/contains and
-	// equals.string_value): string fields are pattern-matched via their String
-	// bytes, identifier fields via their Bytes. Return a TypedValue with
-	// Kind==TypedValueAbsent if the field is missing.
+	// TypedValue is the single field-read accessor, driving every value-based
+	// matcher (equals/gt/gte/lt/lte and the string pattern matchers) plus
+	// sampling. Return the field's natural typed value; the engine converts as
+	// each matcher needs.
+	//
+	// Contract for identifier fields (trace_id, span_id): return the RAW bytes
+	// as TypedValueBytes, never a hex string. equals.hex_value and sampling
+	// compare/hash those raw bytes, and the engine hex-renders them itself for
+	// the string pattern matchers. Returning a hex TypedValueString instead
+	// breaks sampling (it would hash the ASCII hex) and hex_value equality.
+	//
+	// Return Kind==TypedValueAbsent if the field is missing.
 	TypedValue func(rec T, ref LogFieldRef) TypedValue
 
 	// Set writes a string value at ref, creating the field if necessary.
@@ -78,11 +85,17 @@ type TraceAccessor[T any] struct {
 
 // textValue returns the textual content of a typed value for regex redaction.
 // String and Bytes fields are textual; every other kind (and absent) is not.
-func textValue(v TypedValue) (string, bool) {
+// Identifier byte-fields (hexID) render as lowercase hex so redact regexes,
+// which authors write against the hex form, match — matching how the string
+// pattern matchers see those fields.
+func textValue(v TypedValue, hexID bool) (string, bool) {
 	switch v.Kind {
 	case TypedValueString:
 		return v.Str, true
 	case TypedValueBytes:
+		if hexID {
+			return hex.EncodeToString(v.Bytes), true
+		}
 		return string(v.Bytes), true
 	default:
 		return "", false
@@ -114,7 +127,7 @@ func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
 			if a.TypedValue == nil {
 				return false
 			}
-			curStr, ok := textValue(a.TypedValue(rec, op.Ref))
+			curStr, ok := textValue(a.TypedValue(rec, op.Ref), LogRefIsHexID(op.Ref))
 			if !ok {
 				return false
 			}

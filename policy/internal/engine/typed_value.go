@@ -107,7 +107,10 @@ func (m CompiledTypedMatcher) Evaluate(field TypedValue) bool {
 // equalsMatch implements the equals semantics: same type and same value, with
 // int/double cross-domain promotion (so int 5 equals double 5.0). All other
 // type pairings are non-matches. caseInsensitive folds case for string
-// comparisons only.
+// comparisons only. equals.string_value is string-typed equality: it matches
+// String fields only. Byte fields (identifiers) are compared via
+// equals.hex_value, and their hex rendering is only ever produced for the
+// string *pattern* matchers, never here.
 func equalsMatch(field TypedValue, target CompiledValue, caseInsensitive bool) bool {
 	switch target.Kind {
 	case TypedValueString:

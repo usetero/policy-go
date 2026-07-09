@@ -120,6 +120,16 @@ func TestEvaluateEqualsStringValue(t *testing.T) {
 	assert.False(t, sensitive.Evaluate(TypedValue{Kind: TypedValueAbsent}))
 }
 
+// TestEvaluateEqualsStringValueRejectsBytes documents that equals.string_value
+// is string-typed equality: it never matches a Bytes field (e.g. trace_id).
+// Byte equality is expressed with equals.hex_value; hex rendering only happens
+// for the string *pattern* matchers, not here.
+func TestEvaluateEqualsStringValueRejectsBytes(t *testing.T) {
+	idBytes := []byte{0x8a, 0x3f, 0x0e, 0x12, 0x34, 0x56, 0x78, 0x90}
+	m := CompiledTypedMatcher{Op: TypedOpEquals, Equals: CompiledValue{Kind: TypedValueString, Str: "8a3f0e1234567890"}}
+	assert.False(t, m.Evaluate(TypedValue{Kind: TypedValueBytes, Bytes: idBytes}))
+}
+
 func TestCompileRegistersAllTypedOps(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{"p": {}}

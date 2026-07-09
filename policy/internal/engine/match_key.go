@@ -105,6 +105,22 @@ func (r FieldRef[T]) IsField() bool {
 	return !r.IsAttribute()
 }
 
+// LogRefIsHexID reports whether ref names an identifier field stored as raw
+// bytes but authored and matched as lowercase hex (trace_id, span_id). String,
+// regex, and equals matchers compare against the hex rendering of these fields.
+func LogRefIsHexID(r LogFieldRef) bool {
+	return r.IsField() && (r.Field == LogFieldTraceID || r.Field == LogFieldSpanID)
+}
+
+// TraceRefIsHexID reports whether ref names a hex-authored identifier field
+// (trace_id, span_id, parent_span_id). See LogRefIsHexID. link_trace_id is
+// deliberately excluded: the proto documents only these three as hex-rendered
+// identifiers, and link_trace_id is matched as raw text like event_name.
+func TraceRefIsHexID(r TraceFieldRef) bool {
+	return r.IsField() && (r.Field == TraceFieldTraceID || r.Field == TraceFieldSpanID ||
+		r.Field == TraceFieldParentSpanID)
+}
+
 // IsResourceAttr returns true if this is a resource attribute reference.
 func (r FieldRef[T]) IsResourceAttr() bool {
 	return r.AttrScope == AttrScopeResource && len(r.AttrPath) > 0

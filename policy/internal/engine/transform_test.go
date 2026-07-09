@@ -1,12 +1,36 @@
 package engine
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
+
+// TestApplyLogTransformRedactHexID verifies regex redaction matches a
+// hex-authored identifier field against its hex rendering, not its raw bytes.
+func TestApplyLogTransformRedactHexID(t *testing.T) {
+	idBytes := []byte{0x8a, 0x3f, 0x0e, 0x12, 0x34, 0x56, 0x78, 0x90} // hex: 8a3f0e1234567890
+	op := TransformOp{
+		Kind:  TransformRedact,
+		Ref:   LogTraceID(),
+		Value: "[ID]",
+		Regex: regexp.MustCompile(`^[0-9a-f]{16}$`),
+	}
+
+	var written string
+	var wrote bool
+	acc := &LogAccessor[int]{
+		TypedValue: func(int, LogFieldRef) TypedValue { return TypedValue{Kind: TypedValueBytes, Bytes: idBytes} },
+		Set:        func(_ int, _ LogFieldRef, v string) { written, wrote = v, true },
+	}
+
+	assert.True(t, ApplyLogTransform(0, op, acc), "hex-rendered id should match the hex regex")
+	assert.True(t, wrote)
+	assert.Equal(t, "[ID]", written)
+}
 
 func TestCompileLogTransformNil(t *testing.T) {
 	ops, err := compileLogTransform(nil)

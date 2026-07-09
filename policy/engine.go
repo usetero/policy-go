@@ -186,7 +186,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		key := entry.Key
 		db := entry.Database
 
-		value := scanBytes(logTypedValue(c, record, key.Ref), isLogHexIDField(key.Ref))
+		value := scanBytes(logTypedValue(c, record, key.Ref), engine.LogRefIsHexID(key.Ref))
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified
 			// unless this is a negated match (which would succeed on absence)
@@ -678,7 +678,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 		key := entry.Key
 		db := entry.Database
 
-		value := scanBytes(traceTypedValue(c, span, key.Ref), isTraceHexIDField(key.Ref))
+		value := scanBytes(traceTypedValue(c, span, key.Ref), engine.TraceRefIsHexID(key.Ref))
 		if len(value) == 0 {
 			if !key.Negated {
 				for _, patternRef := range db.PatternIndex() {
@@ -851,15 +851,4 @@ func scanBytes(v engine.TypedValue, hexID bool) []byte {
 	default:
 		return nil
 	}
-}
-
-// isLogHexIDField reports whether ref names a hex-authored identifier field.
-func isLogHexIDField(ref engine.LogFieldRef) bool {
-	return ref.IsField() && (ref.Field == engine.LogFieldTraceID || ref.Field == engine.LogFieldSpanID)
-}
-
-// isTraceHexIDField reports whether ref names a hex-authored identifier field.
-func isTraceHexIDField(ref engine.TraceFieldRef) bool {
-	return ref.IsField() && (ref.Field == engine.TraceFieldTraceID ||
-		ref.Field == engine.TraceFieldSpanID || ref.Field == engine.TraceFieldParentSpanID)
 }
