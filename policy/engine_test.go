@@ -1168,17 +1168,21 @@ func TestEvaluateTraceWithEventAttribute(t *testing.T) {
 }
 
 func TestEvaluateTraceWithLinkTraceID(t *testing.T) {
+	// link_trace_id is a raw 16-byte identifier authored in lowercase hex, so a
+	// policy matches it against the field's hex rendering — not the raw bytes.
+	linkID := []byte{0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb}
+
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
 			Id:   "drop-linked-to-test",
-			Name: "Drop Spans Linked to Test Traces",
+			Name: "Drop Spans Linked to a Specific Trace",
 			Target: &policyv1.Policy_Trace{
 				Trace: &policyv1.TraceTarget{
 					Match: []*policyv1.TraceMatcher{
 						{
-							Field: &policyv1.TraceMatcher_LinkTraceId{LinkTraceId: "test-"},
-							Match: &policyv1.TraceMatcher_StartsWith{StartsWith: "test-"},
+							Field: &policyv1.TraceMatcher_LinkTraceId{LinkTraceId: "deadbeef00112233445566778899aabb"},
+							Match: &policyv1.TraceMatcher_Exact{Exact: "deadbeef00112233445566778899aabb"},
 						},
 					},
 					Keep: &policyv1.TraceSamplingConfig{Percentage: 0},
@@ -1194,11 +1198,11 @@ func TestEvaluateTraceWithLinkTraceID(t *testing.T) {
 
 	span := &SimpleSpanRecord{
 		Name:         []byte("process request"),
-		LinkTraceIDs: [][]byte{[]byte("test-trace-123")},
+		LinkTraceIDs: [][]byte{linkID},
 	}
 
 	result := EvaluateTrace(engine, span, SimpleSpanOptions()...)
-	assert.Equal(t, ResultDrop, result)
+	assert.Equal(t, ResultDrop, result, "hex-authored link_trace_id should match the raw 16-byte link id")
 }
 
 func TestEvaluateTraceMultipleMatchers(t *testing.T) {

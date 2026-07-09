@@ -113,12 +113,12 @@ func LogRefIsHexID(r LogFieldRef) bool {
 }
 
 // TraceRefIsHexID reports whether ref names a hex-authored identifier field
-// (trace_id, span_id, parent_span_id). See LogRefIsHexID. link_trace_id is
-// deliberately excluded: the proto documents only these three as hex-rendered
-// identifiers, and link_trace_id is matched as raw text like event_name.
+// (trace_id, span_id, parent_span_id, link_trace_id). See LogRefIsHexID.
+// link_trace_id is included: the proto documents it as authored in lowercase
+// hex and matched against link trace ids, which are raw 16-byte identifiers.
 func TraceRefIsHexID(r TraceFieldRef) bool {
 	return r.IsField() && (r.Field == TraceFieldTraceID || r.Field == TraceFieldSpanID ||
-		r.Field == TraceFieldParentSpanID)
+		r.Field == TraceFieldParentSpanID || r.Field == TraceFieldLinkTraceID)
 }
 
 // IsResourceAttr returns true if this is a resource attribute reference.
