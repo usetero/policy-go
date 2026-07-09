@@ -98,7 +98,12 @@ func benchMoveValue(r *BenchLogRecord, from, to policy.LogFieldRef) {
 // allocate a fresh variadic slice per iteration — mirroring how production
 // callers should reuse their option slice.
 var benchLogOpts = []policy.LogOption[*BenchLogRecord]{
-	policy.WithLogValue(benchGetValue),
+	policy.WithLogTypedValue(func(r *BenchLogRecord, ref policy.LogFieldRef) policy.TypedValue {
+		if b := benchGetValue(r, ref); b != nil {
+			return policy.TypedValueOfString(string(b))
+		}
+		return policy.TypedValue{}
+	}),
 	policy.WithLogExists(benchHasValue),
 	policy.WithLogSet(benchSetValue),
 	policy.WithLogDelete(benchDeleteValue),

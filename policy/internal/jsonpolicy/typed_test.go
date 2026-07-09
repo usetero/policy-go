@@ -129,8 +129,10 @@ func TestParseEqualsCanonicalBytesValue(t *testing.T) {
 // equals — rejected forms
 // ============================================================================
 
-func TestParseEqualsRejectsStringLiteral(t *testing.T) {
-	_, err := NewParser().ParseBytes([]byte(`{
+// As of policy v1.6.0 a bare string in `equals` is accepted and maps to
+// string_value (superseding the deprecated `exact` matcher).
+func TestParseEqualsStringLiteral(t *testing.T) {
+	pols, err := NewParser().ParseBytes([]byte(`{
 		"policies": [{
 			"id": "p", "name": "P",
 			"log": {
@@ -139,8 +141,10 @@ func TestParseEqualsRejectsStringLiteral(t *testing.T) {
 			}
 		}]
 	}`))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "string literal not allowed")
+	require.NoError(t, err)
+	eq := pols[0].GetLog().GetMatch()[0].GetEquals()
+	require.NotNil(t, eq)
+	assert.Equal(t, "foo", eq.GetStringValue())
 }
 
 func TestParseEqualsRejectsBadHex(t *testing.T) {

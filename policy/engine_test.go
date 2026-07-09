@@ -10,11 +10,22 @@ import (
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
+// withLogStringValue adapts a []byte field accessor to the TypedValue accessor
+// (as a String) for tests written against the removed WithLogValue primitive.
+func withLogStringValue[T any](f func(T, LogFieldRef) []byte) LogOption[T] {
+	return WithLogTypedValue(func(r T, ref LogFieldRef) TypedValue {
+		if b := f(r, ref); b != nil {
+			return TypedValueOfString(string(b))
+		}
+		return TypedValue{}
+	})
+}
+
 // newRecordingSpanOptions returns trace options for *SimpleSpanRecord that
 // forward Set calls to onSet so tests can observe the sampling-threshold write.
 func newRecordingSpanOptions(onSet func(*SimpleSpanRecord, TraceFieldRef, string)) []TraceOption[*SimpleSpanRecord] {
 	return []TraceOption[*SimpleSpanRecord]{
-		WithTraceValue(SimpleSpanGetValue),
+		WithTraceTypedValue(SimpleSpanGetTypedValue),
 		WithTraceExists(SimpleSpanHasValue),
 		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
 			SimpleSpanSetValue(r, ref, value)
@@ -97,7 +108,7 @@ func TestEvaluateLogDropDebugLogs(t *testing.T) {
 	}
 
 	result := EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:
@@ -158,7 +169,7 @@ func TestEvaluateLogKeepAll(t *testing.T) {
 	}
 
 	result := EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:
@@ -218,7 +229,7 @@ func TestEvaluateLogNoMatch(t *testing.T) {
 	}
 
 	result := EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:
@@ -2451,7 +2462,7 @@ func TestEvaluateLogTransformWithNoOpConsumer(t *testing.T) {
 	// with no-ops. The engine still returns ResultKeepWithTransform — the
 	// transforms ran, they just had no effect.
 	result := EvaluateLog(engine, record,
-		WithLogValue(SimpleLogGetValue),
+		WithLogTypedValue(SimpleLogGetTypedValue),
 		WithLogExists(SimpleLogHasValue),
 		WithLogSet(func(*SimpleLogRecord, LogFieldRef, string) {}),
 		WithLogDelete(func(*SimpleLogRecord, LogFieldRef) bool { return false }),

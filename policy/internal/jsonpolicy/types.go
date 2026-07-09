@@ -89,7 +89,10 @@ type MetricMatcher struct {
 	AggregationTemporality string         `json:"aggregation_temporality,omitempty"`
 
 	// Match conditions
-	Regex      string               `json:"regex,omitempty"`
+	Regex string `json:"regex,omitempty"`
+	// Deprecated: use equals with a string ("equals": "foo") instead. exact is
+	// the legacy untyped string-equality matcher; equals.string_value is its
+	// typed successor. Still parsed for backward compatibility.
 	Exact      string               `json:"exact,omitempty"`
 	Exists     *bool                `json:"exists,omitempty"`
 	StartsWith string               `json:"starts_with,omitempty"`
@@ -135,7 +138,10 @@ type TraceMatcher struct {
 	LinkTraceID       string         `json:"link_trace_id,omitempty"`
 
 	// Match conditions
-	Regex      string               `json:"regex,omitempty"`
+	Regex string `json:"regex,omitempty"`
+	// Deprecated: use equals with a string ("equals": "foo") instead. exact is
+	// the legacy untyped string-equality matcher; equals.string_value is its
+	// typed successor. Still parsed for backward compatibility.
 	Exact      string               `json:"exact,omitempty"`
 	Exists     *bool                `json:"exists,omitempty"`
 	StartsWith string               `json:"starts_with,omitempty"`
@@ -198,7 +204,10 @@ type LogMatcher struct {
 	ScopeAttribute    *AttributePath `json:"scope_attribute,omitempty"`
 
 	// Match conditions
-	Regex      string               `json:"regex,omitempty"`
+	Regex string `json:"regex,omitempty"`
+	// Deprecated: use equals with a string ("equals": "foo") instead. exact is
+	// the legacy untyped string-equality matcher; equals.string_value is its
+	// typed successor. Still parsed for backward compatibility.
 	Exact      string               `json:"exact,omitempty"`
 	Exists     *bool                `json:"exists,omitempty"`
 	StartsWith string               `json:"starts_with,omitempty"`
@@ -272,6 +281,7 @@ type MatcherValueKind uint8
 
 const (
 	MatcherValueUnset MatcherValueKind = iota
+	MatcherValueString
 	MatcherValueBool
 	MatcherValueInt
 	MatcherValueDouble
@@ -279,12 +289,14 @@ const (
 	MatcherValueHex
 )
 
-// MatcherValue is the parsed `equals` literal. Accepts both shorthand (true,
-// 200, 0.5) and canonical proto form ({bool_value, int_value, double_value,
-// bytes_value, hex_value}). A bare string literal is rejected per the spec —
-// use `exact` for strings. Only one field is populated based on Kind.
+// MatcherValue is the parsed `equals` literal. Accepts both shorthand ("foo",
+// true, 200, 0.5) and canonical proto form ({string_value, bool_value,
+// int_value, double_value, bytes_value, hex_value}). As of policy v1.6.0 a
+// bare string maps to string_value (the deprecated `exact` matcher no longer
+// owns string equality). Only one field is populated based on Kind.
 type MatcherValue struct {
 	Kind   MatcherValueKind
+	Str    string
 	Bool   bool
 	Int    int64
 	Double float64
@@ -292,10 +304,10 @@ type MatcherValue struct {
 	Hex    string
 }
 
-// UnmarshalJSON implements polymorphic unmarshaling. Shorthand: true/false →
-// bool, integer literal → int, fractional literal → double. Canonical: an
-// object with exactly one of {bool_value, int_value, double_value,
-// bytes_value, hex_value}. A string literal is rejected.
+// UnmarshalJSON implements polymorphic unmarshaling. Shorthand: string literal
+// → string, true/false → bool, integer literal → int, fractional literal →
+// double. Canonical: an object with exactly one of {string_value, bool_value,
+// int_value, double_value, bytes_value, hex_value}.
 func (v *MatcherValue) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 {
 		return NewParseError("equals", "empty value")
@@ -308,7 +320,11 @@ func (v *MatcherValue) UnmarshalJSON(data []byte) error {
 			return nil
 		}
 	case '"':
-		return NewParseError("equals", "string literal not allowed — use exact for strings")
+		var s string
+		if err := json.Unmarshal(data, &s); err == nil {
+			v.Kind, v.Str = MatcherValueString, s
+			return nil
+		}
 	case '{':
 		return v.unmarshalCanonical(data)
 	}
@@ -330,6 +346,7 @@ func (v *MatcherValue) UnmarshalJSON(data []byte) error {
 
 func (v *MatcherValue) unmarshalCanonical(data []byte) error {
 	var raw struct {
+		StringValue *string  `json:"string_value,omitempty"`
 		BoolValue   *bool    `json:"bool_value,omitempty"`
 		IntValue    *int64   `json:"int_value,omitempty"`
 		DoubleValue *float64 `json:"double_value,omitempty"`
@@ -340,6 +357,9 @@ func (v *MatcherValue) unmarshalCanonical(data []byte) error {
 		return NewParseError("equals", "invalid canonical Value: "+err.Error())
 	}
 	count := 0
+	if raw.StringValue != nil {
+		count++
+	}
 	if raw.BoolValue != nil {
 		count++
 	}
@@ -362,6 +382,8 @@ func (v *MatcherValue) unmarshalCanonical(data []byte) error {
 		return NewParseError("equals", "canonical Value must set exactly one variant")
 	}
 	switch {
+	case raw.StringValue != nil:
+		v.Kind, v.Str = MatcherValueString, *raw.StringValue
 	case raw.BoolValue != nil:
 		v.Kind, v.Bool = MatcherValueBool, *raw.BoolValue
 	case raw.IntValue != nil:

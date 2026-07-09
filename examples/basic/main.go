@@ -124,7 +124,12 @@ func main() {
 
 	// Reuse the option slice across evaluations.
 	logOpts := []policy.LogOption[*ExampleLogRecord]{
-		policy.WithLogValue(exampleGetValue),
+		policy.WithLogTypedValue(func(r *ExampleLogRecord, ref policy.LogFieldRef) policy.TypedValue {
+			if b := exampleGetValue(r, ref); b != nil {
+				return policy.TypedValueOfString(string(b))
+			}
+			return policy.TypedValue{}
+		}),
 		policy.WithLogExists(exampleHasValue),
 	}
 

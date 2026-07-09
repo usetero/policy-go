@@ -724,6 +724,8 @@ func (p *Parser) convertTraceMatcher(m TraceMatcher) (*policyv1.TraceMatcher, er
 // than waiting for the engine compile pass.
 func convertMatcherValue(v *MatcherValue) (*policyv1.Value, error) {
 	switch v.Kind {
+	case MatcherValueString:
+		return &policyv1.Value{Value: &policyv1.Value_StringValue{StringValue: v.Str}}, nil
 	case MatcherValueBool:
 		return &policyv1.Value{Value: &policyv1.Value_BoolValue{BoolValue: v.Bool}}, nil
 	case MatcherValueInt:

@@ -32,18 +32,15 @@ type TransformOp struct {
 // evaluate log policies. Callers don't construct it directly — they pass
 // LogOption values to EvaluateLog, which assembles a LogAccessor internally.
 type LogAccessor[T any] struct {
-	// Value returns the field's string value as bytes for pattern matching.
-	// Return nil when the field is absent OR when its underlying value is not a string.
-	Value func(rec T, ref LogFieldRef) []byte
-
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref LogFieldRef) bool
 
-	// TypedValue returns the field's typed value for the equals/gt/gte/lt/lte
-	// matchers. Return a TypedValue with Kind==TypedValueAbsent if the field is
-	// missing. Override to expose non-string field values (bool, int, double,
-	// bytes). When nil, the engine wraps the Value accessor as
-	// TypedValue.String, so string-targeted typed matchers still work.
+	// TypedValue is the single field-read accessor. It returns the field's
+	// typed value for both the typed matchers (equals/gt/gte/lt/lte) and the
+	// string pattern matchers (regex/exact/starts_with/ends_with/contains and
+	// equals.string_value): string fields are pattern-matched via their String
+	// bytes, identifier fields via their Bytes. Return a TypedValue with
+	// Kind==TypedValueAbsent if the field is missing.
 	TypedValue func(rec T, ref LogFieldRef) TypedValue
 
 	// Set writes a string value at ref, creating the field if necessary.
@@ -59,32 +56,37 @@ type LogAccessor[T any] struct {
 // MetricAccessor bundles the per-record accessor functions the engine needs to
 // evaluate metric policies.
 type MetricAccessor[T any] struct {
-	// Value returns the field's string value as bytes for pattern matching.
-	Value func(rec T, ref MetricFieldRef) []byte
-
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref MetricFieldRef) bool
 
-	// TypedValue returns the field's typed value for equals/gt/gte/lt/lte
-	// matchers. See LogAccessor.TypedValue for the default-fallback semantics.
+	// TypedValue is the single field-read accessor. See LogAccessor.TypedValue.
 	TypedValue func(rec T, ref MetricFieldRef) TypedValue
 }
 
 // TraceAccessor bundles the per-record accessor functions the engine needs to
 // evaluate trace policies.
 type TraceAccessor[T any] struct {
-	// Value returns the field's string value as bytes for pattern matching.
-	Value func(rec T, ref TraceFieldRef) []byte
-
 	// Exists returns true if the field is present regardless of value type.
 	Exists func(rec T, ref TraceFieldRef) bool
 
-	// TypedValue returns the field's typed value for equals/gt/gte/lt/lte
-	// matchers. See LogAccessor.TypedValue for the default-fallback semantics.
+	// TypedValue is the single field-read accessor. See LogAccessor.TypedValue.
 	TypedValue func(rec T, ref TraceFieldRef) TypedValue
 
 	// Set writes a string value at ref, creating the field if necessary.
 	Set func(rec T, ref TraceFieldRef, value string)
+}
+
+// textValue returns the textual content of a typed value for regex redaction.
+// String and Bytes fields are textual; every other kind (and absent) is not.
+func textValue(v TypedValue) (string, bool) {
+	switch v.Kind {
+	case TypedValueString:
+		return v.Str, true
+	case TypedValueBytes:
+		return string(v.Bytes), true
+	default:
+		return "", false
+	}
 }
 
 // ApplyLogTransform applies a single TransformOp using the LogAccessor accessors.
@@ -102,15 +104,20 @@ func ApplyLogTransform[T any](rec T, op TransformOp, a *LogAccessor[T]) bool {
 		return a.Delete(rec, op.Ref)
 
 	case TransformRedact:
-		if a.Value == nil || a.Set == nil {
+		if a.Set == nil {
 			return false
 		}
 		if op.Regex != nil {
-			cur := a.Value(rec, op.Ref)
-			if cur == nil {
+			// Regex redact operates on textual values: String fields and Bytes
+			// fields (identifiers, []byte attributes) are treated as text.
+			// Numeric/bool/absent values are a no-op.
+			if a.TypedValue == nil {
 				return false
 			}
-			curStr := string(cur)
+			curStr, ok := textValue(a.TypedValue(rec, op.Ref))
+			if !ok {
+				return false
+			}
 			if !op.Regex.MatchString(curStr) {
 				return false
 			}

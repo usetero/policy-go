@@ -65,6 +65,61 @@ func TestCompileRegistersTypedChecks(t *testing.T) {
 	assert.Equal(t, []byte{0x8a, 0x3f, 0x0e, 0x12, 0x34, 0x56, 0x78, 0x90}, checks[2].Matcher.Equals.Bytes)
 }
 
+// TestCompileEqualsStringValue verifies the v1.6.0 equals.string_value variant
+// compiles to a String-kind typed check carrying the case_insensitive flag —
+// the successor to the deprecated `exact` matcher.
+func TestCompileEqualsStringValue(t *testing.T) {
+	compiler := NewCompiler()
+	stats := map[string]*PolicyStats{"p": {}}
+
+	policies := []*policyv1.Policy{
+		{
+			Id: "p",
+			Target: &policyv1.Policy_Log{
+				Log: &policyv1.LogTarget{
+					Match: []*policyv1.LogMatcher{
+						{
+							Field:           &policyv1.LogMatcher_LogAttribute{LogAttribute: &policyv1.AttributePath{Path: []string{"env"}}},
+							Match:           &policyv1.LogMatcher_Equals{Equals: &policyv1.Value{Value: &policyv1.Value_StringValue{StringValue: "PROD"}}},
+							CaseInsensitive: true,
+						},
+					},
+					Keep: "none",
+				},
+			},
+		},
+	}
+
+	result, err := compiler.Compile(policies, stats)
+	require.NoError(t, err)
+	defer result.Close()
+	require.Empty(t, result.Errors)
+
+	checks := result.Logs.TypedChecks()
+	require.Len(t, checks, 1)
+	assert.Equal(t, TypedOpEquals, checks[0].Matcher.Op)
+	assert.Equal(t, TypedValueString, checks[0].Matcher.Equals.Kind)
+	assert.Equal(t, "PROD", checks[0].Matcher.Equals.Str)
+	assert.True(t, checks[0].Matcher.CaseInsensitive)
+}
+
+// TestEvaluateEqualsStringValue covers the typed string-equality semantics:
+// exact match, case-insensitive fold, type mismatch, and absent field.
+func TestEvaluateEqualsStringValue(t *testing.T) {
+	sensitive := CompiledTypedMatcher{Op: TypedOpEquals, Equals: CompiledValue{Kind: TypedValueString, Str: "prod"}}
+	insensitive := CompiledTypedMatcher{Op: TypedOpEquals, Equals: CompiledValue{Kind: TypedValueString, Str: "prod"}, CaseInsensitive: true}
+	strField := func(s string) TypedValue { return TypedValue{Kind: TypedValueString, Str: s} }
+
+	assert.True(t, sensitive.Evaluate(strField("prod")))
+	assert.False(t, sensitive.Evaluate(strField("PROD")))
+	assert.True(t, insensitive.Evaluate(strField("PROD")))
+	assert.False(t, sensitive.Evaluate(strField("staging")))
+
+	// Type mismatch and absent are non-matches.
+	assert.False(t, sensitive.Evaluate(TypedValue{Kind: TypedValueInt, Int: 1}))
+	assert.False(t, sensitive.Evaluate(TypedValue{Kind: TypedValueAbsent}))
+}
+
 func TestCompileRegistersAllTypedOps(t *testing.T) {
 	compiler := NewCompiler()
 	stats := map[string]*PolicyStats{"p": {}}

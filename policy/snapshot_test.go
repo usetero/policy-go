@@ -74,7 +74,7 @@ func TestSnapshotGetStats(t *testing.T) {
 		Body: []byte("stats test message"),
 	}
 	EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:

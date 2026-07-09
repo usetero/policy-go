@@ -444,6 +444,10 @@ func extractMatchPattern(m *policyv1.LogMatcher) (string, bool, bool, error) {
 		}
 		return match.Regex, false, false, nil
 	case *policyv1.LogMatcher_Exact:
+		// Deprecated: `exact` is the legacy untyped string-equality path, kept
+		// for wire compatibility. New policies use equals.string_value, which
+		// compiles to a typed check (see extractTypedMatcher). Remove this case
+		// once the proto reserves field 10.
 		return escapeRegex(match.Exact), false, false, nil
 	case *policyv1.LogMatcher_StartsWith:
 		return "^" + escapeRegex(match.StartsWith), false, false, nil
@@ -525,6 +529,8 @@ func extractMetricMatchPattern(m *policyv1.MetricMatcher) (string, bool, bool, e
 		}
 		return match.Regex, false, false, nil
 	case *policyv1.MetricMatcher_Exact:
+		// Deprecated: legacy untyped string-equality path — superseded by
+		// equals.string_value (a typed check). See LogMatcher_Exact.
 		return escapeRegex(match.Exact), false, false, nil
 	case *policyv1.MetricMatcher_StartsWith:
 		return "^" + escapeRegex(match.StartsWith), false, false, nil
@@ -604,6 +610,8 @@ func extractTraceMatchPattern(m *policyv1.TraceMatcher) (string, bool, bool, err
 		}
 		return match.Regex, false, false, nil
 	case *policyv1.TraceMatcher_Exact:
+		// Deprecated: legacy untyped string-equality path — superseded by
+		// equals.string_value (a typed check). See LogMatcher_Exact.
 		return escapeRegex(match.Exact), false, false, nil
 	case *policyv1.TraceMatcher_StartsWith:
 		return "^" + escapeRegex(match.StartsWith), false, false, nil

@@ -202,7 +202,6 @@ func SimpleLogGetTypedValue(r *SimpleLogRecord, ref LogFieldRef) TypedValue {
 //	result := policy.EvaluateLog(eng, rec, policy.SimpleLogOptions()...)
 func SimpleLogOptions() []LogOption[*SimpleLogRecord] {
 	return []LogOption[*SimpleLogRecord]{
-		WithLogValue(SimpleLogGetValue),
 		WithLogExists(SimpleLogHasValue),
 		WithLogTypedValue(SimpleLogGetTypedValue),
 		WithLogSet(SimpleLogSetValue),
@@ -421,7 +420,6 @@ func SimpleMetricGetTypedValue(r *SimpleMetricRecord, ref MetricFieldRef) TypedV
 // *SimpleMetricRecord up to the SimpleMetric* accessor functions.
 func SimpleMetricOptions() []MetricOption[*SimpleMetricRecord] {
 	return []MetricOption[*SimpleMetricRecord]{
-		WithMetricValue(SimpleMetricGetValue),
 		WithMetricExists(SimpleMetricHasValue),
 		WithMetricTypedValue(SimpleMetricGetTypedValue),
 	}
@@ -649,7 +647,6 @@ func SimpleSpanGetTypedValue(r *SimpleSpanRecord, ref TraceFieldRef) TypedValue 
 // up to the SimpleSpan* accessor functions.
 func SimpleSpanOptions() []TraceOption[*SimpleSpanRecord] {
 	return []TraceOption[*SimpleSpanRecord]{
-		WithTraceValue(SimpleSpanGetValue),
 		WithTraceExists(SimpleSpanHasValue),
 		WithTraceTypedValue(SimpleSpanGetTypedValue),
 		WithTraceSet(SimpleSpanSetValue),

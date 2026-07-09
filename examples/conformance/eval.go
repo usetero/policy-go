@@ -128,55 +128,6 @@ func attrPath(ref policy.LogFieldRef) string {
 
 // ─── Log accessor primitives ─────────────────────────────────────────
 
-func logValue(ctx *LogContext, ref policy.LogFieldRef) []byte {
-	if ref.IsField() {
-		switch ref.Field {
-		case policy.LogFieldBody:
-			return valueBytes(ctx.Record.Body())
-		case policy.LogFieldSeverityText:
-			if ctx.Record.SeverityText() == "" {
-				return nil
-			}
-			return []byte(ctx.Record.SeverityText())
-		case policy.LogFieldTraceID:
-			id := ctx.Record.TraceID()
-			if id.IsEmpty() {
-				return nil
-			}
-			return []byte(hex.EncodeToString(id[:]))
-		case policy.LogFieldSpanID:
-			id := ctx.Record.SpanID()
-			if id.IsEmpty() {
-				return nil
-			}
-			return []byte(hex.EncodeToString(id[:]))
-		case policy.LogFieldEventName:
-			if ctx.Record.EventName() == "" {
-				return nil
-			}
-			return []byte(ctx.Record.EventName())
-		case policy.LogFieldResourceSchemaURL:
-			if ctx.ResourceSchemaURL == "" {
-				return nil
-			}
-			return []byte(ctx.ResourceSchemaURL)
-		case policy.LogFieldScopeSchemaURL:
-			if ctx.ScopeSchemaURL == "" {
-				return nil
-			}
-			return []byte(ctx.ScopeSchemaURL)
-		default:
-			return nil
-		}
-	}
-
-	attrs, ok := logAttrs(ctx, ref)
-	if !ok {
-		return nil
-	}
-	return findAttributePath(attrs, ref.AttrPath)
-}
-
 func logExists(ctx *LogContext, ref policy.LogFieldRef) bool {
 	if ref.IsField() {
 		switch ref.Field {
@@ -745,7 +696,6 @@ func statusCodeString(c ptrace.StatusCode) string {
 
 var (
 	LogOpts = []policy.LogOption[*LogContext]{
-		policy.WithLogValue(logValue),
 		policy.WithLogExists(logExists),
 		policy.WithLogTypedValue(logTypedValue),
 		policy.WithLogSet(logSet),
@@ -754,13 +704,11 @@ var (
 	}
 
 	MetricOpts = []policy.MetricOption[*MetricContext]{
-		policy.WithMetricValue(metricValue),
 		policy.WithMetricExists(metricExists),
 		policy.WithMetricTypedValue(metricTypedValue),
 	}
 
 	TraceOpts = []policy.TraceOption[*TraceContext]{
-		policy.WithTraceValue(traceValue),
 		policy.WithTraceExists(traceExists),
 		policy.WithTraceTypedValue(traceTypedValue),
 		policy.WithTraceSet(traceSet),
