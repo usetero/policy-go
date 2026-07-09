@@ -29,9 +29,9 @@ const (
 	// Span fields
 	TraceField_TRACE_FIELD_NAME TraceField = 1
 	// trace_id, span_id, and parent_span_id are bytes. They are authored as
-	// lowercase hex and matched as raw bytes (exact/equals), or as their hex
-	// rendering for string match types. See the Value message and the spec's
-	// "Bytes and Identifier Fields" section.
+	// lowercase hex and matched as raw bytes with equals.hex_value, or as their
+	// hex rendering for string pattern match types. See the Value message and the
+	// spec's "Bytes and Identifier Fields" section.
 	TraceField_TRACE_FIELD_TRACE_ID       TraceField = 2
 	TraceField_TRACE_FIELD_SPAN_ID        TraceField = 3
 	TraceField_TRACE_FIELD_PARENT_SPAN_ID TraceField = 4
@@ -367,9 +367,13 @@ type TraceMatcher struct {
 	// Match type. Exactly one must be set.
 	// Note: For span_kind and span_status fields, only exists is valid (equality is implicit).
 	//
-	// The string match types (exact, regex, starts_with, ends_with, contains)
-	// operate only on string field values. To match non-string values, use the
-	// typed equals matcher or the numeric comparison matchers (gt, gte, lt, lte).
+	// Use the typed equals matcher for equality. The exact field is deprecated and
+	// will move to reserved in a future version after wire-format users migrate to
+	// equals.string_value.
+	//
+	// The string pattern match types (regex, starts_with, ends_with, contains)
+	// operate only on string field values. Use the numeric comparison matchers
+	// (gt, gte, lt, lte) for ranges.
 	//
 	// Types that are valid to be assigned to Match:
 	//
@@ -387,7 +391,8 @@ type TraceMatcher struct {
 	Match isTraceMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
 	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
-	// If true, applies case-insensitive matching to all match types
+	// If true, applies case-insensitive matching to equals.string_value and the
+	// string pattern match types.
 	CaseInsensitive bool `protobuf:"varint,21,opt,name=case_insensitive,json=caseInsensitive,proto3" json:"case_insensitive,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -518,6 +523,7 @@ func (x *TraceMatcher) GetMatch() isTraceMatcher_Match {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in tero/policy/v1/trace.proto.
 func (x *TraceMatcher) GetExact() string {
 	if x != nil {
 		if x, ok := x.Match.(*TraceMatcher_Exact); ok {
@@ -705,7 +711,10 @@ type isTraceMatcher_Match interface {
 }
 
 type TraceMatcher_Exact struct {
-	// Exact string match (string field values only)
+	// Deprecated: use equals.string_value instead. This field will move to
+	// reserved in a future version.
+	//
+	// Deprecated: Marked as deprecated in tero/policy/v1/trace.proto.
 	Exact string `protobuf:"bytes,10,opt,name=exact,proto3,oneof"`
 }
 
@@ -735,7 +744,7 @@ type TraceMatcher_Contains struct {
 }
 
 type TraceMatcher_Equals struct {
-	// Typed equality for non-string field values (bool, int, double, bytes)
+	// Typed equality for string, bool, int, double, or bytes field values.
 	Equals *Value `protobuf:"bytes,22,opt,name=equals,proto3,oneof"`
 }
 
@@ -895,7 +904,7 @@ const file_tero_policy_v1_trace_proto_rawDesc = "" +
 	"\x1atero/policy/v1/trace.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"z\n" +
 	"\vTraceTarget\x122\n" +
 	"\x05match\x18\x01 \x03(\v2\x1c.tero.policy.v1.TraceMatcherR\x05match\x127\n" +
-	"\x04keep\x18\x02 \x01(\v2#.tero.policy.v1.TraceSamplingConfigR\x04keep\"\xb0\b\n" +
+	"\x04keep\x18\x02 \x01(\v2#.tero.policy.v1.TraceSamplingConfigR\x04keep\"\xb4\b\n" +
 	"\fTraceMatcher\x12=\n" +
 	"\vtrace_field\x18\x01 \x01(\x0e2\x1a.tero.policy.v1.TraceFieldH\x00R\n" +
 	"traceField\x12F\n" +
@@ -908,9 +917,9 @@ const file_tero_policy_v1_trace_proto_rawDesc = "" +
 	"\n" +
 	"event_name\x18\a \x01(\tH\x00R\teventName\x12H\n" +
 	"\x0fevent_attribute\x18\b \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0eeventAttribute\x12$\n" +
-	"\rlink_trace_id\x18\t \x01(\tH\x00R\vlinkTraceId\x12\x16\n" +
+	"\rlink_trace_id\x18\t \x01(\tH\x00R\vlinkTraceId\x12\x1a\n" +
 	"\x05exact\x18\n" +
-	" \x01(\tH\x01R\x05exact\x12\x16\n" +
+	" \x01(\tB\x02\x18\x01H\x01R\x05exact\x12\x16\n" +
 	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x12\x18\n" +
 	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12!\n" +
 	"\vstarts_with\x18\r \x01(\tH\x01R\n" +
