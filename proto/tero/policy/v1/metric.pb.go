@@ -282,9 +282,13 @@ type MetricMatcher struct {
 	// Match type. Exactly one must be set.
 	// Note: For metric_type field, only exists is valid (type equality is implicit).
 	//
-	// The string match types (exact, regex, starts_with, ends_with, contains)
-	// operate only on string field values. To match non-string values, use the
-	// typed equals matcher or the numeric comparison matchers (gt, gte, lt, lte).
+	// Use the typed equals matcher for equality. The exact field is deprecated and
+	// will move to reserved in a future version after wire-format users migrate to
+	// equals.string_value.
+	//
+	// The string pattern match types (regex, starts_with, ends_with, contains)
+	// operate only on string field values. Use the numeric comparison matchers
+	// (gt, gte, lt, lte) for ranges.
 	//
 	// Types that are valid to be assigned to Match:
 	//
@@ -302,7 +306,8 @@ type MetricMatcher struct {
 	Match isMetricMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
 	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
-	// If true, applies case-insensitive matching to all match types
+	// If true, applies case-insensitive matching to equals.string_value and the
+	// string pattern match types.
 	CaseInsensitive bool `protobuf:"varint,21,opt,name=case_insensitive,json=caseInsensitive,proto3" json:"case_insensitive,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -406,6 +411,7 @@ func (x *MetricMatcher) GetMatch() isMetricMatcher_Match {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in tero/policy/v1/metric.proto.
 func (x *MetricMatcher) GetExact() string {
 	if x != nil {
 		if x, ok := x.Match.(*MetricMatcher_Exact); ok {
@@ -570,7 +576,10 @@ type isMetricMatcher_Match interface {
 }
 
 type MetricMatcher_Exact struct {
-	// Exact string match (string field values only)
+	// Deprecated: use equals.string_value instead. This field will move to
+	// reserved in a future version.
+	//
+	// Deprecated: Marked as deprecated in tero/policy/v1/metric.proto.
 	Exact string `protobuf:"bytes,10,opt,name=exact,proto3,oneof"`
 }
 
@@ -600,7 +609,7 @@ type MetricMatcher_Contains struct {
 }
 
 type MetricMatcher_Equals struct {
-	// Typed equality for non-string field values (bool, int, double, bytes)
+	// Typed equality for string, bool, int, double, or bytes field values.
 	Equals *Value `protobuf:"bytes,22,opt,name=equals,proto3,oneof"`
 }
 
@@ -653,7 +662,7 @@ const file_tero_policy_v1_metric_proto_rawDesc = "" +
 	"\x1btero/policy/v1/metric.proto\x12\x0etero.policy.v1\x1a\x1btero/policy/v1/shared.proto\"W\n" +
 	"\fMetricTarget\x123\n" +
 	"\x05match\x18\x01 \x03(\v2\x1d.tero.policy.v1.MetricMatcherR\x05match\x12\x12\n" +
-	"\x04keep\x18\x02 \x01(\bR\x04keep\"\xd3\a\n" +
+	"\x04keep\x18\x02 \x01(\bR\x04keep\"\xd7\a\n" +
 	"\rMetricMatcher\x12@\n" +
 	"\fmetric_field\x18\x01 \x01(\x0e2\x1b.tero.policy.v1.MetricFieldH\x00R\vmetricField\x12P\n" +
 	"\x13datapoint_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x12datapointAttribute\x12N\n" +
@@ -661,9 +670,9 @@ const file_tero_policy_v1_metric_proto_rawDesc = "" +
 	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12=\n" +
 	"\vmetric_type\x18\x05 \x01(\x0e2\x1a.tero.policy.v1.MetricTypeH\x00R\n" +
 	"metricType\x12a\n" +
-	"\x17aggregation_temporality\x18\x06 \x01(\x0e2&.tero.policy.v1.AggregationTemporalityH\x00R\x16aggregationTemporality\x12\x16\n" +
+	"\x17aggregation_temporality\x18\x06 \x01(\x0e2&.tero.policy.v1.AggregationTemporalityH\x00R\x16aggregationTemporality\x12\x1a\n" +
 	"\x05exact\x18\n" +
-	" \x01(\tH\x01R\x05exact\x12\x16\n" +
+	" \x01(\tB\x02\x18\x01H\x01R\x05exact\x12\x16\n" +
 	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x12\x18\n" +
 	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12!\n" +
 	"\vstarts_with\x18\r \x01(\tH\x01R\n" +

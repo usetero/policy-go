@@ -155,7 +155,10 @@ type Policy struct {
 	//	*Policy_Log
 	//	*Policy_Metric
 	//	*Policy_Trace
-	Target        isPolicy_Target `protobuf_oneof:"target"`
+	Target isPolicy_Target `protobuf_oneof:"target"`
+	// Implementation-specific extensions attached to this policy. Each extension
+	// references a pre-configured ExtensionTarget by (kind, name).
+	Extensions    []*Extension `protobuf:"bytes,20,rep,name=extensions,proto3" json:"extensions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,6 +276,13 @@ func (x *Policy) GetTrace() *TraceTarget {
 	return nil
 }
 
+func (x *Policy) GetExtensions() []*Extension {
+	if x != nil {
+		return x.Extensions
+	}
+	return nil
+}
+
 type isPolicy_Target interface {
 	isPolicy_Target()
 }
@@ -309,8 +319,12 @@ type ClientMetadata struct {
 	// * service.namespace
 	// * service.version
 	ResourceAttributes []*v1.KeyValue `protobuf:"bytes,3,rep,name=resource_attributes,json=resourceAttributes,proto3" json:"resource_attributes,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Extension types this client supports, and the target kinds/names it can
+	// route each type to. Providers SHOULD only send policies whose extensions
+	// reference targets advertised here.
+	SupportedExtensions []*ExtensionCapability `protobuf:"bytes,4,rep,name=supported_extensions,json=supportedExtensions,proto3" json:"supported_extensions,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ClientMetadata) Reset() {
@@ -360,6 +374,13 @@ func (x *ClientMetadata) GetLabels() []*v1.KeyValue {
 func (x *ClientMetadata) GetResourceAttributes() []*v1.KeyValue {
 	if x != nil {
 		return x.ResourceAttributes
+	}
+	return nil
+}
+
+func (x *ClientMetadata) GetSupportedExtensions() []*ExtensionCapability {
+	if x != nil {
+		return x.SupportedExtensions
 	}
 	return nil
 }
@@ -622,9 +643,15 @@ type SyncResponse struct {
 	// Whether this is a full replacement or incremental update
 	SyncType SyncType `protobuf:"varint,5,opt,name=sync_type,json=syncType,proto3,enum=tero.policy.v1.SyncType" json:"sync_type,omitempty"`
 	// Error message if sync failed
-	ErrorMessage  string `protobuf:"bytes,6,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ErrorMessage string `protobuf:"bytes,6,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	// Opaque, type-defined extension configuration broadcast to the client, keyed
+	// by extension type. The policy engine does not interpret it; each extension
+	// handler parses its own entries. For tero's s3-dump this carries the
+	// available ExtensionTargets. A client merges these with any locally
+	// configured extension state.
+	ExtensionConfigs []*ExtensionConfig `protobuf:"bytes,7,rep,name=extension_configs,json=extensionConfigs,proto3" json:"extension_configs,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SyncResponse) Reset() {
@@ -699,11 +726,18 @@ func (x *SyncResponse) GetErrorMessage() string {
 	return ""
 }
 
+func (x *SyncResponse) GetExtensionConfigs() []*ExtensionConfig {
+	if x != nil {
+		return x.ExtensionConfigs
+	}
+	return nil
+}
+
 var File_tero_policy_v1_policy_proto protoreflect.FileDescriptor
 
 const file_tero_policy_v1_policy_proto_rawDesc = "" +
 	"\n" +
-	"\x1btero/policy/v1/policy.proto\x12\x0etero.policy.v1\x1a\x1cgoogle/api/annotations.proto\x1a*opentelemetry/proto/common/v1/common.proto\x1a\x18tero/policy/v1/log.proto\x1a\x1btero/policy/v1/metric.proto\x1a\x1atero/policy/v1/trace.proto\"\xb3\x03\n" +
+	"\x1btero/policy/v1/policy.proto\x12\x0etero.policy.v1\x1a\x1cgoogle/api/annotations.proto\x1a*opentelemetry/proto/common/v1/common.proto\x1a\x1etero/policy/v1/extension.proto\x1a\x18tero/policy/v1/log.proto\x1a\x1btero/policy/v1/metric.proto\x1a\x1atero/policy/v1/trace.proto\"\xee\x03\n" +
 	"\x06Policy\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -715,12 +749,16 @@ const file_tero_policy_v1_policy_proto_rawDesc = "" +
 	"\x03log\x18\n" +
 	" \x01(\v2\x19.tero.policy.v1.LogTargetH\x00R\x03log\x126\n" +
 	"\x06metric\x18\v \x01(\v2\x1c.tero.policy.v1.MetricTargetH\x00R\x06metric\x123\n" +
-	"\x05trace\x18\f \x01(\v2\x1b.tero.policy.v1.TraceTargetH\x00R\x05traceB\b\n" +
-	"\x06target\"\x80\x02\n" +
+	"\x05trace\x18\f \x01(\v2\x1b.tero.policy.v1.TraceTargetH\x00R\x05trace\x129\n" +
+	"\n" +
+	"extensions\x18\x14 \x03(\v2\x19.tero.policy.v1.ExtensionR\n" +
+	"extensionsB\b\n" +
+	"\x06target\"\xd8\x02\n" +
 	"\x0eClientMetadata\x12S\n" +
 	"\x17supported_policy_stages\x18\x01 \x03(\x0e2\x1b.tero.policy.v1.PolicyStageR\x15supportedPolicyStages\x12?\n" +
 	"\x06labels\x18\x02 \x03(\v2'.opentelemetry.proto.common.v1.KeyValueR\x06labels\x12X\n" +
-	"\x13resource_attributes\x18\x03 \x03(\v2'.opentelemetry.proto.common.v1.KeyValueR\x12resourceAttributes\"B\n" +
+	"\x13resource_attributes\x18\x03 \x03(\v2'.opentelemetry.proto.common.v1.KeyValueR\x12resourceAttributes\x12V\n" +
+	"\x14supported_extensions\x18\x04 \x03(\v2#.tero.policy.v1.ExtensionCapabilityR\x13supportedExtensions\"B\n" +
 	"\x14TransformStageStatus\x12\x12\n" +
 	"\x04hits\x18\x01 \x01(\x03R\x04hits\x12\x16\n" +
 	"\x06misses\x18\x02 \x01(\x03R\x06misses\"\xee\x02\n" +
@@ -740,14 +778,15 @@ const file_tero_policy_v1_policy_proto_rawDesc = "" +
 	"\tfull_sync\x18\x02 \x01(\bR\bfullSync\x12@\n" +
 	"\x1dlast_sync_timestamp_unix_nano\x18\x03 \x01(\x06R\x19lastSyncTimestampUnixNano\x120\n" +
 	"\x14last_successful_hash\x18\x04 \x01(\tR\x12lastSuccessfulHash\x12I\n" +
-	"\x0fpolicy_statuses\x18\x05 \x03(\v2 .tero.policy.v1.PolicySyncStatusR\x0epolicyStatuses\"\xb6\x02\n" +
+	"\x0fpolicy_statuses\x18\x05 \x03(\v2 .tero.policy.v1.PolicySyncStatusR\x0epolicyStatuses\"\x84\x03\n" +
 	"\fSyncResponse\x122\n" +
 	"\bpolicies\x18\x01 \x03(\v2\x16.tero.policy.v1.PolicyR\bpolicies\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x127\n" +
 	"\x18sync_timestamp_unix_nano\x18\x03 \x01(\x06R\x15syncTimestampUnixNano\x12I\n" +
 	"!recommended_sync_interval_seconds\x18\x04 \x01(\rR\x1erecommendedSyncIntervalSeconds\x125\n" +
 	"\tsync_type\x18\x05 \x01(\x0e2\x18.tero.policy.v1.SyncTypeR\bsyncType\x12#\n" +
-	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage*\xa9\x01\n" +
+	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage\x12L\n" +
+	"\x11extension_configs\x18\a \x03(\v2\x1f.tero.policy.v1.ExtensionConfigR\x10extensionConfigs*\xa9\x01\n" +
 	"\vPolicyStage\x12\x1c\n" +
 	"\x18POLICY_STAGE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17POLICY_STAGE_LOG_FILTER\x10\x01\x12\x1e\n" +
@@ -787,30 +826,36 @@ var file_tero_policy_v1_policy_proto_goTypes = []any{
 	(*LogTarget)(nil),            // 9: tero.policy.v1.LogTarget
 	(*MetricTarget)(nil),         // 10: tero.policy.v1.MetricTarget
 	(*TraceTarget)(nil),          // 11: tero.policy.v1.TraceTarget
+	(*Extension)(nil),            // 12: tero.policy.v1.Extension
+	(*ExtensionCapability)(nil),  // 13: tero.policy.v1.ExtensionCapability
+	(*ExtensionConfig)(nil),      // 14: tero.policy.v1.ExtensionConfig
 }
 var file_tero_policy_v1_policy_proto_depIdxs = []int32{
 	8,  // 0: tero.policy.v1.Policy.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
 	9,  // 1: tero.policy.v1.Policy.log:type_name -> tero.policy.v1.LogTarget
 	10, // 2: tero.policy.v1.Policy.metric:type_name -> tero.policy.v1.MetricTarget
 	11, // 3: tero.policy.v1.Policy.trace:type_name -> tero.policy.v1.TraceTarget
-	0,  // 4: tero.policy.v1.ClientMetadata.supported_policy_stages:type_name -> tero.policy.v1.PolicyStage
-	8,  // 5: tero.policy.v1.ClientMetadata.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
-	8,  // 6: tero.policy.v1.ClientMetadata.resource_attributes:type_name -> opentelemetry.proto.common.v1.KeyValue
-	4,  // 7: tero.policy.v1.PolicySyncStatus.remove:type_name -> tero.policy.v1.TransformStageStatus
-	4,  // 8: tero.policy.v1.PolicySyncStatus.redact:type_name -> tero.policy.v1.TransformStageStatus
-	4,  // 9: tero.policy.v1.PolicySyncStatus.rename:type_name -> tero.policy.v1.TransformStageStatus
-	4,  // 10: tero.policy.v1.PolicySyncStatus.add:type_name -> tero.policy.v1.TransformStageStatus
-	3,  // 11: tero.policy.v1.SyncRequest.client_metadata:type_name -> tero.policy.v1.ClientMetadata
-	5,  // 12: tero.policy.v1.SyncRequest.policy_statuses:type_name -> tero.policy.v1.PolicySyncStatus
-	2,  // 13: tero.policy.v1.SyncResponse.policies:type_name -> tero.policy.v1.Policy
-	1,  // 14: tero.policy.v1.SyncResponse.sync_type:type_name -> tero.policy.v1.SyncType
-	6,  // 15: tero.policy.v1.PolicyService.Sync:input_type -> tero.policy.v1.SyncRequest
-	7,  // 16: tero.policy.v1.PolicyService.Sync:output_type -> tero.policy.v1.SyncResponse
-	16, // [16:17] is the sub-list for method output_type
-	15, // [15:16] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	12, // 4: tero.policy.v1.Policy.extensions:type_name -> tero.policy.v1.Extension
+	0,  // 5: tero.policy.v1.ClientMetadata.supported_policy_stages:type_name -> tero.policy.v1.PolicyStage
+	8,  // 6: tero.policy.v1.ClientMetadata.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
+	8,  // 7: tero.policy.v1.ClientMetadata.resource_attributes:type_name -> opentelemetry.proto.common.v1.KeyValue
+	13, // 8: tero.policy.v1.ClientMetadata.supported_extensions:type_name -> tero.policy.v1.ExtensionCapability
+	4,  // 9: tero.policy.v1.PolicySyncStatus.remove:type_name -> tero.policy.v1.TransformStageStatus
+	4,  // 10: tero.policy.v1.PolicySyncStatus.redact:type_name -> tero.policy.v1.TransformStageStatus
+	4,  // 11: tero.policy.v1.PolicySyncStatus.rename:type_name -> tero.policy.v1.TransformStageStatus
+	4,  // 12: tero.policy.v1.PolicySyncStatus.add:type_name -> tero.policy.v1.TransformStageStatus
+	3,  // 13: tero.policy.v1.SyncRequest.client_metadata:type_name -> tero.policy.v1.ClientMetadata
+	5,  // 14: tero.policy.v1.SyncRequest.policy_statuses:type_name -> tero.policy.v1.PolicySyncStatus
+	2,  // 15: tero.policy.v1.SyncResponse.policies:type_name -> tero.policy.v1.Policy
+	1,  // 16: tero.policy.v1.SyncResponse.sync_type:type_name -> tero.policy.v1.SyncType
+	14, // 17: tero.policy.v1.SyncResponse.extension_configs:type_name -> tero.policy.v1.ExtensionConfig
+	6,  // 18: tero.policy.v1.PolicyService.Sync:input_type -> tero.policy.v1.SyncRequest
+	7,  // 19: tero.policy.v1.PolicyService.Sync:output_type -> tero.policy.v1.SyncResponse
+	19, // [19:20] is the sub-list for method output_type
+	18, // [18:19] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_policy_proto_init() }
@@ -818,6 +863,7 @@ func file_tero_policy_v1_policy_proto_init() {
 	if File_tero_policy_v1_policy_proto != nil {
 		return
 	}
+	file_tero_policy_v1_extension_proto_init()
 	file_tero_policy_v1_log_proto_init()
 	file_tero_policy_v1_metric_proto_init()
 	file_tero_policy_v1_trace_proto_init()
