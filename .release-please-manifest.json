@@ -1,5 +1,5 @@
 {
-  "proto": "1.9.1",
+  "proto": "1.10.0",
   "policy": "1.10.1",
   "backend/teroscan": "1.10.1",
   "backend/hyperscan": "1.10.1"
