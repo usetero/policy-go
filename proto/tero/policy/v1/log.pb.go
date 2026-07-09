@@ -30,8 +30,8 @@ const (
 	LogField_LOG_FIELD_BODY          LogField = 1
 	LogField_LOG_FIELD_SEVERITY_TEXT LogField = 2
 	// trace_id and span_id are bytes. They are authored as lowercase hex and
-	// matched as raw bytes (exact/equals), or as their hex rendering for string
-	// match types. See the Value message and the spec's
+	// matched as raw bytes with equals.hex_value, or as their hex rendering for
+	// string pattern match types. See the Value message and the spec's
 	// "Bytes and Identifier Fields" section.
 	LogField_LOG_FIELD_TRACE_ID   LogField = 3
 	LogField_LOG_FIELD_SPAN_ID    LogField = 4
@@ -106,7 +106,7 @@ type LogTarget struct {
 	//
 	//	"all"  - Keep everything (default, can be omitted)
 	//	"none" - Drop everything
-	//	"N%"   - Keep N percent (0-100), e.g. "50%"
+	//	"N%"   - Keep approximately N percent (0-100), e.g. "50%"
 	//	"N/s"  - Keep at most N per second (shorthand for "N/1s"), e.g. "100/s"
 	//	"N/m"  - Keep at most N per minute (shorthand for "N/1m"), e.g. "1000/m"
 	//	"N/Ds" - Keep at most N per D-second window, e.g. "1/5s"
@@ -121,6 +121,11 @@ type LogTarget struct {
 	// When set, all logs with the same value for this field get the same
 	// keep/drop decision. Use for lifecycle events (request_id, trace_id, job_id)
 	// to avoid sampling individual log lines independently.
+	//
+	// For percentage sampling (N%), omitting sample_key means each matching log is
+	// sampled independently using a random value generated at evaluation time.
+	// That default gives the expected approximate distribution, but is not
+	// idempotent across repeated evaluation of the same log sequence.
 	//
 	// Only applies when keep is a sampling value (N%, N/s, N/m, N/Ds, N/Dm).
 	// Example: sample_key = log_attribute["request_id"] with keep = "10%" means
@@ -335,9 +340,13 @@ type LogMatcher struct {
 	Field isLogMatcher_Field `protobuf_oneof:"field"`
 	// Match type. Exactly one must be set.
 	//
-	// The string match types (exact, regex, starts_with, ends_with, contains)
-	// operate only on string field values. To match non-string values, use the
-	// typed equals matcher or the numeric comparison matchers (gt, gte, lt, lte).
+	// Use the typed equals matcher for equality. The exact field is deprecated and
+	// will move to reserved in a future version after wire-format users migrate to
+	// equals.string_value.
+	//
+	// The string pattern match types (regex, starts_with, ends_with, contains)
+	// operate only on string field values. Use the numeric comparison matchers
+	// (gt, gte, lt, lte) for ranges.
 	//
 	// Types that are valid to be assigned to Match:
 	//
@@ -355,7 +364,8 @@ type LogMatcher struct {
 	Match isLogMatcher_Match `protobuf_oneof:"match"`
 	// If true, inverts the match result
 	Negate bool `protobuf:"varint,20,opt,name=negate,proto3" json:"negate,omitempty"`
-	// If true, applies case-insensitive matching to all match types
+	// If true, applies case-insensitive matching to equals.string_value and the
+	// string pattern match types.
 	CaseInsensitive bool `protobuf:"varint,21,opt,name=case_insensitive,json=caseInsensitive,proto3" json:"case_insensitive,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -441,6 +451,7 @@ func (x *LogMatcher) GetMatch() isLogMatcher_Match {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in tero/policy/v1/log.proto.
 func (x *LogMatcher) GetExact() string {
 	if x != nil {
 		if x, ok := x.Match.(*LogMatcher_Exact); ok {
@@ -591,7 +602,10 @@ type isLogMatcher_Match interface {
 }
 
 type LogMatcher_Exact struct {
-	// Exact string match (string field values only)
+	// Deprecated: use equals.string_value instead. This field will move to
+	// reserved in a future version.
+	//
+	// Deprecated: Marked as deprecated in tero/policy/v1/log.proto.
 	Exact string `protobuf:"bytes,10,opt,name=exact,proto3,oneof"`
 }
 
@@ -621,7 +635,7 @@ type LogMatcher_Contains struct {
 }
 
 type LogMatcher_Equals struct {
-	// Typed equality for non-string field values (bool, int, double, bytes)
+	// Typed equality for string, bool, int, double, or bytes field values.
 	Equals *Value `protobuf:"bytes,22,opt,name=equals,proto3,oneof"`
 }
 
@@ -1304,15 +1318,15 @@ const file_tero_policy_v1_log_proto_rawDesc = "" +
 	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
 	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
 	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttributeB\a\n" +
-	"\x05field\"\x99\x06\n" +
+	"\x05field\"\x9d\x06\n" +
 	"\n" +
 	"LogMatcher\x127\n" +
 	"\tlog_field\x18\x01 \x01(\x0e2\x18.tero.policy.v1.LogFieldH\x00R\blogField\x12D\n" +
 	"\rlog_attribute\x18\x02 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\flogAttribute\x12N\n" +
 	"\x12resource_attribute\x18\x03 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x11resourceAttribute\x12H\n" +
-	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12\x16\n" +
+	"\x0fscope_attribute\x18\x04 \x01(\v2\x1d.tero.policy.v1.AttributePathH\x00R\x0escopeAttribute\x12\x1a\n" +
 	"\x05exact\x18\n" +
-	" \x01(\tH\x01R\x05exact\x12\x16\n" +
+	" \x01(\tB\x02\x18\x01H\x01R\x05exact\x12\x16\n" +
 	"\x05regex\x18\v \x01(\tH\x01R\x05regex\x12\x18\n" +
 	"\x06exists\x18\f \x01(\bH\x01R\x06exists\x12!\n" +
 	"\vstarts_with\x18\r \x01(\tH\x01R\n" +

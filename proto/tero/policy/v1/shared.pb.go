@@ -104,9 +104,7 @@ func (x *AttributePath) GetPath() []string {
 	return nil
 }
 
-// Value carries a typed, non-string scalar for the `equals` matcher. String
-// equality is expressed with the `exact` match type, so this message
-// intentionally has no string variant.
+// Value carries a typed scalar for the `equals` matcher.
 //
 // `equals` matches when the field value has the same type and value as the set
 // variant. Integer and floating-point values are compared in a single numeric
@@ -121,19 +119,16 @@ func (x *AttributePath) GetPath() []string {
 //	equals: true   ->  bool_value
 //	equals: 200    ->  int_value
 //	equals: 0.5    ->  double_value
+//	equals: "foo"  ->  string_value
 //
 // Bytes are authored either as proto-native base64 (`bytes_value`) or, more
 // readably, as a lowercase-hex string (`hex_value`). The two are equivalent —
 // hex_value is decoded to bytes at policy-compile time and yields the same bytes
 // as the corresponding bytes_value — but hex_value keeps identifiers
 // (trace/span ids) readable in the canonical proto/JSON form instead of base64.
-// A bare string literal (e.g. `equals: "foo"`) MUST be rejected — use `exact`
-// for strings.
 //
-// Future direction: the `exact` match type is expected to be deprecated. Once a
-// string variant is added to this message, all equality (string and non-string)
-// will be expressed through `equals`, with `exact` kept only for backward
-// compatibility.
+// String equality SHOULD be authored with string_value. The older matcher-level
+// `exact` field is deprecated and will move to reserved in a future version.
 type Value struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Exactly one must be set.
@@ -145,6 +140,7 @@ type Value struct {
 	//	*Value_DoubleValue
 	//	*Value_BytesValue
 	//	*Value_HexValue
+	//	*Value_StringValue
 	Value         isValue_Value `protobuf_oneof:"value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -232,6 +228,15 @@ func (x *Value) GetHexValue() string {
 	return ""
 }
 
+func (x *Value) GetStringValue() string {
+	if x != nil {
+		if x, ok := x.Value.(*Value_StringValue); ok {
+			return x.StringValue
+		}
+	}
+	return ""
+}
+
 type isValue_Value interface {
 	isValue_Value()
 }
@@ -260,6 +265,10 @@ type Value_HexValue struct {
 	HexValue string `protobuf:"bytes,5,opt,name=hex_value,json=hexValue,proto3,oneof"`
 }
 
+type Value_StringValue struct {
+	StringValue string `protobuf:"bytes,6,opt,name=string_value,json=stringValue,proto3,oneof"`
+}
+
 func (*Value_BoolValue) isValue_Value() {}
 
 func (*Value_IntValue) isValue_Value() {}
@@ -269,6 +278,8 @@ func (*Value_DoubleValue) isValue_Value() {}
 func (*Value_BytesValue) isValue_Value() {}
 
 func (*Value_HexValue) isValue_Value() {}
+
+func (*Value_StringValue) isValue_Value() {}
 
 // NumericValue carries a typed number for the comparison matchers (`gt`, `gte`,
 // `lt`, `lte`). It deliberately admits only int and double so that non-numeric
@@ -372,7 +383,7 @@ const file_tero_policy_v1_shared_proto_rawDesc = "" +
 	"\n" +
 	"\x1btero/policy/v1/shared.proto\x12\x0etero.policy.v1\"#\n" +
 	"\rAttributePath\x12\x12\n" +
-	"\x04path\x18\x01 \x03(\tR\x04path\"\xb7\x01\n" +
+	"\x04path\x18\x01 \x03(\tR\x04path\"\xdc\x01\n" +
 	"\x05Value\x12\x1f\n" +
 	"\n" +
 	"bool_value\x18\x01 \x01(\bH\x00R\tboolValue\x12\x1d\n" +
@@ -380,7 +391,8 @@ const file_tero_policy_v1_shared_proto_rawDesc = "" +
 	"\fdouble_value\x18\x03 \x01(\x01H\x00R\vdoubleValue\x12!\n" +
 	"\vbytes_value\x18\x04 \x01(\fH\x00R\n" +
 	"bytesValue\x12\x1d\n" +
-	"\thex_value\x18\x05 \x01(\tH\x00R\bhexValueB\a\n" +
+	"\thex_value\x18\x05 \x01(\tH\x00R\bhexValue\x12#\n" +
+	"\fstring_value\x18\x06 \x01(\tH\x00R\vstringValueB\a\n" +
 	"\x05value\"[\n" +
 	"\fNumericValue\x12\x1d\n" +
 	"\tint_value\x18\x01 \x01(\x03H\x00R\bintValue\x12#\n" +
@@ -424,6 +436,7 @@ func file_tero_policy_v1_shared_proto_init() {
 		(*Value_DoubleValue)(nil),
 		(*Value_BytesValue)(nil),
 		(*Value_HexValue)(nil),
+		(*Value_StringValue)(nil),
 	}
 	file_tero_policy_v1_shared_proto_msgTypes[2].OneofWrappers = []any{
 		(*NumericValue_IntValue)(nil),
