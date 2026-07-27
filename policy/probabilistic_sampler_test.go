@@ -59,6 +59,27 @@ func TestExtractRandomnessFromTraceID_Empty(t *testing.T) {
 	assert.Zero(t, r)
 }
 
+func TestSampleBytesTrace_HexStringTraceID(t *testing.T) {
+	// An accessor exposing trace_id as a hex string must yield the same raw
+	// bytes (and thus the same sampling decision) as one returning raw bytes.
+	raw := mustHexDecode("0123456789abcdef0123456789abcdef")
+
+	asString := &engine.TraceAccessor[struct{}]{
+		TypedValue: func(struct{}, engine.TraceFieldRef) engine.TypedValue {
+			return engine.TypedValue{Kind: engine.TypedValueString, Str: hex.EncodeToString(raw)}
+		},
+	}
+	asBytes := &engine.TraceAccessor[struct{}]{
+		TypedValue: func(struct{}, engine.TraceFieldRef) engine.TypedValue {
+			return engine.TypedValue{Kind: engine.TypedValueBytes, Bytes: raw}
+		},
+	}
+
+	ref := engine.SpanTraceID()
+	assert.Equal(t, raw, sampleBytesTrace(asString, struct{}{}, ref))
+	assert.Equal(t, raw, sampleBytesTrace(asBytes, struct{}{}, ref))
+}
+
 func TestCalculateRejectionThreshold(t *testing.T) {
 	tests := []struct {
 		pct      float64

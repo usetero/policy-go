@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -44,6 +45,20 @@ func typedValueToBytes(v engine.TypedValue) []byte {
 	return nil
 }
 
+// hexIDToBytes recovers raw identifier bytes when an accessor exposes a
+// hex-ID field (trace_id, span_id, ...) as a hex string instead of raw bytes.
+// Sampling randomness must come from the raw trace-ID bytes, not the UTF-8
+// bytes of its hex rendering, or keep/drop decisions silently change. Strings
+// that aren't valid hex pass through as their UTF-8 bytes.
+func hexIDToBytes(v engine.TypedValue) []byte {
+	if v.Kind == engine.TypedValueString {
+		if decoded, err := hex.DecodeString(v.Str); err == nil {
+			return decoded
+		}
+	}
+	return typedValueToBytes(v)
+}
+
 // sampleBytesLog reads a log field as raw bytes for sampling via the TypedValue
 // accessor, so bytes-typed fields (trace_id, span_id) yield raw bytes rather
 // than their hex rendering.
@@ -51,7 +66,11 @@ func sampleBytesLog[T any](c *engine.LogAccessor[T], rec T, ref engine.LogFieldR
 	if c.TypedValue == nil {
 		return nil
 	}
-	return typedValueToBytes(c.TypedValue(rec, ref))
+	v := c.TypedValue(rec, ref)
+	if engine.LogRefIsHexID(ref) {
+		return hexIDToBytes(v)
+	}
+	return typedValueToBytes(v)
 }
 
 // sampleBytesTrace reads a span field as raw bytes for sampling. See
@@ -60,7 +79,11 @@ func sampleBytesTrace[T any](c *engine.TraceAccessor[T], span T, ref engine.Trac
 	if c.TypedValue == nil {
 		return nil
 	}
-	return typedValueToBytes(c.TypedValue(span, ref))
+	v := c.TypedValue(span, ref)
+	if engine.TraceRefIsHexID(ref) {
+		return hexIDToBytes(v)
+	}
+	return typedValueToBytes(v)
 }
 
 // probabilisticSample determines if a record should be kept using OTel consistent
