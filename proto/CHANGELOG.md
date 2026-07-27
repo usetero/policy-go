@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/usetero/policy-go/compare/proto/v1.10.0...proto/v1.10.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **deps:** consolidated dependency updates ([#100](https://github.com/usetero/policy-go/issues/100)) ([a148d59](https://github.com/usetero/policy-go/commit/a148d59b59abd0e0b61456da56ce5e1f845286c9))
+
 ## [1.10.0](https://github.com/usetero/policy-go/compare/proto/v1.9.1...proto/v1.10.0) (2026-07-09)
 
 
