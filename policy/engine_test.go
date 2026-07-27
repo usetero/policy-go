@@ -10,11 +10,22 @@ import (
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
 
+// withLogStringValue adapts a []byte field accessor to the TypedValue accessor
+// (as a String) for tests written against the removed WithLogValue primitive.
+func withLogStringValue[T any](f func(T, LogFieldRef) []byte) LogOption[T] {
+	return WithLogTypedValue(func(r T, ref LogFieldRef) TypedValue {
+		if b := f(r, ref); b != nil {
+			return TypedValueOfString(string(b))
+		}
+		return TypedValue{}
+	})
+}
+
 // newRecordingSpanOptions returns trace options for *SimpleSpanRecord that
 // forward Set calls to onSet so tests can observe the sampling-threshold write.
 func newRecordingSpanOptions(onSet func(*SimpleSpanRecord, TraceFieldRef, string)) []TraceOption[*SimpleSpanRecord] {
 	return []TraceOption[*SimpleSpanRecord]{
-		WithTraceValue(SimpleSpanGetValue),
+		WithTraceTypedValue(SimpleSpanGetTypedValue),
 		WithTraceExists(SimpleSpanHasValue),
 		WithTraceSet(func(r *SimpleSpanRecord, ref TraceFieldRef, value string) {
 			SimpleSpanSetValue(r, ref, value)
@@ -97,7 +108,7 @@ func TestEvaluateLogDropDebugLogs(t *testing.T) {
 	}
 
 	result := EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:
@@ -158,7 +169,7 @@ func TestEvaluateLogKeepAll(t *testing.T) {
 	}
 
 	result := EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:
@@ -218,7 +229,7 @@ func TestEvaluateLogNoMatch(t *testing.T) {
 	}
 
 	result := EvaluateLog(engine, record,
-		WithLogValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *SimpleLogRecord, ref LogFieldRef) []byte {
 			if ref.IsField() {
 				switch ref.Field {
 				case LogFieldBody:
@@ -1157,17 +1168,21 @@ func TestEvaluateTraceWithEventAttribute(t *testing.T) {
 }
 
 func TestEvaluateTraceWithLinkTraceID(t *testing.T) {
+	// link_trace_id is a raw 16-byte identifier authored in lowercase hex, so a
+	// policy matches it against the field's hex rendering — not the raw bytes.
+	linkID := []byte{0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb}
+
 	registry := NewPolicyRegistry()
 	provider := newStaticProvider([]*policyv1.Policy{
 		{
 			Id:   "drop-linked-to-test",
-			Name: "Drop Spans Linked to Test Traces",
+			Name: "Drop Spans Linked to a Specific Trace",
 			Target: &policyv1.Policy_Trace{
 				Trace: &policyv1.TraceTarget{
 					Match: []*policyv1.TraceMatcher{
 						{
-							Field: &policyv1.TraceMatcher_LinkTraceId{LinkTraceId: "test-"},
-							Match: &policyv1.TraceMatcher_StartsWith{StartsWith: "test-"},
+							Field: &policyv1.TraceMatcher_LinkTraceId{LinkTraceId: "deadbeef00112233445566778899aabb"},
+							Match: &policyv1.TraceMatcher_Exact{Exact: "deadbeef00112233445566778899aabb"},
 						},
 					},
 					Keep: &policyv1.TraceSamplingConfig{Percentage: 0},
@@ -1183,11 +1198,11 @@ func TestEvaluateTraceWithLinkTraceID(t *testing.T) {
 
 	span := &SimpleSpanRecord{
 		Name:         []byte("process request"),
-		LinkTraceIDs: [][]byte{[]byte("test-trace-123")},
+		LinkTraceIDs: [][]byte{linkID},
 	}
 
 	result := EvaluateTrace(engine, span, SimpleSpanOptions()...)
-	assert.Equal(t, ResultDrop, result)
+	assert.Equal(t, ResultDrop, result, "hex-authored link_trace_id should match the raw 16-byte link id")
 }
 
 func TestEvaluateTraceMultipleMatchers(t *testing.T) {
@@ -2451,7 +2466,7 @@ func TestEvaluateLogTransformWithNoOpConsumer(t *testing.T) {
 	// with no-ops. The engine still returns ResultKeepWithTransform — the
 	// transforms ran, they just had no effect.
 	result := EvaluateLog(engine, record,
-		WithLogValue(SimpleLogGetValue),
+		WithLogTypedValue(SimpleLogGetTypedValue),
 		WithLogExists(SimpleLogHasValue),
 		WithLogSet(func(*SimpleLogRecord, LogFieldRef, string) {}),
 		WithLogDelete(func(*SimpleLogRecord, LogFieldRef) bool { return false }),

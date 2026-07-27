@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/hex"
 	"slices"
 	"sync"
 
@@ -185,7 +186,7 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 		key := entry.Key
 		db := entry.Database
 
-		value := c.Value(record, key.Ref)
+		value := scanBytes(logTypedValue(c, record, key.Ref), engine.LogRefIsHexID(key.Ref))
 		if len(value) == 0 {
 			// No value to match - policies requiring this field are disqualified
 			// unless this is a negated match (which would succeed on absence)
@@ -455,7 +456,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 		key := entry.Key
 		db := entry.Database
 
-		value := c.Value(metric, key.Ref)
+		value := scanBytes(metricTypedValue(c, metric, key.Ref), false)
 		if len(value) == 0 {
 			if !key.Negated {
 				for _, patternRef := range db.PatternIndex() {
@@ -677,7 +678,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 		key := entry.Key
 		db := entry.Database
 
-		value := c.Value(span, key.Ref)
+		value := scanBytes(traceTypedValue(c, span, key.Ref), engine.TraceRefIsHexID(key.Ref))
 		if len(value) == 0 {
 			if !key.Negated {
 				for _, patternRef := range db.PatternIndex() {
@@ -807,52 +808,47 @@ func applyKeepActionTrace[T any](policy *engine.CompiledPolicy[engine.TraceField
 	return ResultKeep
 }
 
-// logTypedValue returns the field's typed value for ref. If the consumer
-// supplied a TypedValue accessor, defer to it. Otherwise fall back to the
-// string Value accessor and wrap a present result as TypedValue.String — this
-// matches the Rust SDK's default trait impl and means string-targeted typed
-// matchers (equals against an exact string... wait no, equals has no string
-// variant per spec) still get the right answer without forcing every consumer
-// to implement TypedValue. Consumers who want bool/int/double/bytes matching
-// must implement TypedValue.
+// logTypedValue returns the field's typed value for ref via the consumer's
+// single TypedValue accessor (absent when unset). This is the sole field-read
+// primitive — string pattern matching pulls scannable bytes out of it via
+// scanBytes.
 func logTypedValue[T any](c *engine.LogAccessor[T], rec T, ref engine.LogFieldRef) engine.TypedValue {
-	if c.TypedValue != nil {
-		return c.TypedValue(rec, ref)
-	}
-	if c.Value == nil {
+	if c.TypedValue == nil {
 		return engine.TypedValue{}
 	}
-	v := c.Value(rec, ref)
-	if v == nil {
-		return engine.TypedValue{}
-	}
-	return engine.TypedValue{Kind: engine.TypedValueString, Str: string(v)}
+	return c.TypedValue(rec, ref)
 }
 
 func metricTypedValue[T any](c *engine.MetricAccessor[T], rec T, ref engine.MetricFieldRef) engine.TypedValue {
-	if c.TypedValue != nil {
-		return c.TypedValue(rec, ref)
-	}
-	if c.Value == nil {
+	if c.TypedValue == nil {
 		return engine.TypedValue{}
 	}
-	v := c.Value(rec, ref)
-	if v == nil {
-		return engine.TypedValue{}
-	}
-	return engine.TypedValue{Kind: engine.TypedValueString, Str: string(v)}
+	return c.TypedValue(rec, ref)
 }
 
 func traceTypedValue[T any](c *engine.TraceAccessor[T], rec T, ref engine.TraceFieldRef) engine.TypedValue {
-	if c.TypedValue != nil {
-		return c.TypedValue(rec, ref)
-	}
-	if c.Value == nil {
+	if c.TypedValue == nil {
 		return engine.TypedValue{}
 	}
-	v := c.Value(rec, ref)
-	if v == nil {
-		return engine.TypedValue{}
+	return c.TypedValue(rec, ref)
+}
+
+// scanBytes extracts the bytes a string pattern matcher scans from a typed
+// value. String fields match on their String bytes. Bytes fields match on
+// their raw Bytes, except identifier fields (trace_id/span_id/parent_span_id),
+// which policies author as lowercase hex — hexID renders those to hex first, so
+// a single Bytes-returning accessor serves both equals.hex_value (raw) and
+// string pattern matching (hex). Any other kind (or absent) yields nil.
+func scanBytes(v engine.TypedValue, hexID bool) []byte {
+	switch v.Kind {
+	case engine.TypedValueString:
+		return []byte(v.Str)
+	case engine.TypedValueBytes:
+		if hexID {
+			return []byte(hex.EncodeToString(v.Bytes))
+		}
+		return v.Bytes
+	default:
+		return nil
 	}
-	return engine.TypedValue{Kind: engine.TypedValueString, Str: string(v)}
 }

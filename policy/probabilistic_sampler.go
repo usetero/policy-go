@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -44,30 +45,45 @@ func typedValueToBytes(v engine.TypedValue) []byte {
 	return nil
 }
 
-// sampleBytesLog reads a log field as raw bytes for sampling. Uses the
-// TypedValue accessor when available so bytes-typed fields (trace_id, span_id)
-// yield raw bytes rather than their hex rendering; falls back to the string
-// Value accessor for consumers that haven't adopted TypedValue.
-func sampleBytesLog[T any](c *engine.LogAccessor[T], rec T, ref engine.LogFieldRef) []byte {
-	if c.TypedValue != nil {
-		return typedValueToBytes(c.TypedValue(rec, ref))
+// hexIDToBytes recovers raw identifier bytes when an accessor exposes a
+// hex-ID field (trace_id, span_id, ...) as a hex string instead of raw bytes.
+// Sampling randomness must come from the raw trace-ID bytes, not the UTF-8
+// bytes of its hex rendering, or keep/drop decisions silently change. Strings
+// that aren't valid hex pass through as their UTF-8 bytes.
+func hexIDToBytes(v engine.TypedValue) []byte {
+	if v.Kind == engine.TypedValueString {
+		if decoded, err := hex.DecodeString(v.Str); err == nil {
+			return decoded
+		}
 	}
-	if c.Value == nil {
+	return typedValueToBytes(v)
+}
+
+// sampleBytesLog reads a log field as raw bytes for sampling via the TypedValue
+// accessor, so bytes-typed fields (trace_id, span_id) yield raw bytes rather
+// than their hex rendering.
+func sampleBytesLog[T any](c *engine.LogAccessor[T], rec T, ref engine.LogFieldRef) []byte {
+	if c.TypedValue == nil {
 		return nil
 	}
-	return c.Value(rec, ref)
+	v := c.TypedValue(rec, ref)
+	if engine.LogRefIsHexID(ref) {
+		return hexIDToBytes(v)
+	}
+	return typedValueToBytes(v)
 }
 
 // sampleBytesTrace reads a span field as raw bytes for sampling. See
-// sampleBytesLog for fallback semantics.
+// sampleBytesLog.
 func sampleBytesTrace[T any](c *engine.TraceAccessor[T], span T, ref engine.TraceFieldRef) []byte {
-	if c.TypedValue != nil {
-		return typedValueToBytes(c.TypedValue(span, ref))
-	}
-	if c.Value == nil {
+	if c.TypedValue == nil {
 		return nil
 	}
-	return c.Value(span, ref)
+	v := c.TypedValue(span, ref)
+	if engine.TraceRefIsHexID(ref) {
+		return hexIDToBytes(v)
+	}
+	return typedValueToBytes(v)
 }
 
 // probabilisticSample determines if a record should be kept using OTel consistent
@@ -122,7 +138,7 @@ func shouldSampleTrace[T any](policy *engine.CompiledPolicy[engine.TraceField], 
 	// a simple test, and they should erase the threshold when it is apparently
 	// inconsistent."
 	traceStateRef := engine.SpanTraceState()
-	traceState := c.Value(span, traceStateRef)
+	traceState := scanBytes(traceTypedValue(c, span, traceStateRef), false)
 	if len(traceState) > 0 {
 		rv, rvOK := parseTracestateRandomness(traceState)
 		th, thOK := parseTracestateThreshold(traceState)
@@ -176,7 +192,7 @@ func shouldSampleTraceProportional[T any](percentage float64, failOpen bool, spa
 	}
 
 	// Get incoming threshold from tracestate
-	traceState := c.Value(span, engine.SpanTraceState())
+	traceState := scanBytes(traceTypedValue(c, span, engine.SpanTraceState()), false)
 	incomingThreshold := uint64(0) // T_s=0 means probability 1.0 (no prior sampling)
 	if len(traceState) > 0 {
 		if th, thOK := parseTracestateThreshold(traceState); thOK {
@@ -215,7 +231,7 @@ func shouldSampleTraceEqualizing[T any](percentage float64, failOpen bool, span 
 	}
 
 	// Get incoming threshold from tracestate
-	traceState := c.Value(span, engine.SpanTraceState())
+	traceState := scanBytes(traceTypedValue(c, span, engine.SpanTraceState()), false)
 	incomingThreshold := uint64(0) // T_s=0 means probability 1.0
 	if len(traceState) > 0 {
 		if th, thOK := parseTracestateThreshold(traceState); thOK {
@@ -286,7 +302,7 @@ func hashProbabilisticSample(input []byte, percentage float64) bool {
 func getTraceRandomness[T any](span T, c *engine.TraceAccessor[T]) (uint64, bool) {
 	// Try to get explicit randomness from tracestate first
 	traceStateRef := engine.SpanTraceState()
-	traceState := c.Value(span, traceStateRef)
+	traceState := scanBytes(traceTypedValue(c, span, traceStateRef), false)
 	if len(traceState) > 0 {
 		if rv, ok := parseTracestateRandomness(traceState); ok {
 			return rv, true

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	policyv1 "github.com/usetero/policy-go/proto/tero/policy/v1"
 )
@@ -44,10 +45,12 @@ func (v TypedValue) IsAbsent() bool { return v.Kind == TypedValueAbsent }
 
 // CompiledValue is the target of an `equals` matcher, normalized at compile
 // time. hex_value is decoded to Bytes once; the runtime path only sees raw
-// bytes. There is no String variant — string equality goes through `exact`
-// per the spec.
+// bytes. As of policy v1.6.0 equals.string_value carries string equality and
+// compiles to the String variant here — a typed check, the successor to the
+// deprecated `exact` matcher.
 type CompiledValue struct {
-	Kind   TypedValueKind // Bool, Int, Double, or Bytes
+	Kind   TypedValueKind // String, Bool, Int, Double, or Bytes
+	Str    string
 	Bool   bool
 	Int    int64
 	Double float64
@@ -81,6 +84,10 @@ type CompiledTypedMatcher struct {
 	Op      TypedOp
 	Equals  CompiledValue        // populated when Op == TypedOpEquals
 	Numeric CompiledNumericValue // populated otherwise
+
+	// CaseInsensitive folds case when comparing equals.string_value. Ignored
+	// for non-string equals and for numeric comparisons.
+	CaseInsensitive bool
 }
 
 // Evaluate returns true when the typed-comparison matcher fires against the
@@ -92,16 +99,28 @@ func (m CompiledTypedMatcher) Evaluate(field TypedValue) bool {
 		return false
 	}
 	if m.Op == TypedOpEquals {
-		return equalsMatch(field, m.Equals)
+		return equalsMatch(field, m.Equals, m.CaseInsensitive)
 	}
 	return numericCmp(field, m.Op, m.Numeric)
 }
 
 // equalsMatch implements the equals semantics: same type and same value, with
 // int/double cross-domain promotion (so int 5 equals double 5.0). All other
-// type pairings are non-matches.
-func equalsMatch(field TypedValue, target CompiledValue) bool {
+// type pairings are non-matches. caseInsensitive folds case for string
+// comparisons only. equals.string_value is string-typed equality: it matches
+// String fields only. Byte fields (identifiers) are compared via
+// equals.hex_value, and their hex rendering is only ever produced for the
+// string *pattern* matchers, never here.
+func equalsMatch(field TypedValue, target CompiledValue, caseInsensitive bool) bool {
 	switch target.Kind {
+	case TypedValueString:
+		if field.Kind != TypedValueString {
+			return false
+		}
+		if caseInsensitive {
+			return strings.EqualFold(field.Str, target.Str)
+		}
+		return field.Str == target.Str
 	case TypedValueBool:
 		return field.Kind == TypedValueBool && field.Bool == target.Bool
 	case TypedValueInt:
@@ -187,6 +206,7 @@ type typedMatcher interface {
 	GetGte() *policyv1.NumericValue
 	GetLt() *policyv1.NumericValue
 	GetLte() *policyv1.NumericValue
+	GetCaseInsensitive() bool
 }
 
 // extractTypedMatcher returns (matcher, true, nil) for a well-formed typed
@@ -194,8 +214,11 @@ type typedMatcher interface {
 // when m is not a typed matcher (the string/exists path handles it).
 func extractTypedMatcher(m typedMatcher) (CompiledTypedMatcher, bool, error) {
 	if v := m.GetEquals(); v != nil {
+		// All equals variants — including equals.string_value (v1.6.0) — are
+		// typed checks. string_value is the successor to the deprecated `exact`
+		// matcher and carries case_insensitive for case-folded comparison.
 		cv, err := compileValue(v)
-		return CompiledTypedMatcher{Op: TypedOpEquals, Equals: cv}, true, err
+		return CompiledTypedMatcher{Op: TypedOpEquals, Equals: cv, CaseInsensitive: m.GetCaseInsensitive()}, true, err
 	}
 	if v := m.GetGt(); v != nil {
 		cn, err := compileNumeric(v)
@@ -220,6 +243,8 @@ func extractTypedMatcher(m typedMatcher) (CompiledTypedMatcher, bool, error) {
 // to bytes at compile time so the runtime path never sees hex.
 func compileValue(v *policyv1.Value) (CompiledValue, error) {
 	switch x := v.GetValue().(type) {
+	case *policyv1.Value_StringValue:
+		return CompiledValue{Kind: TypedValueString, Str: x.StringValue}, nil
 	case *policyv1.Value_BoolValue:
 		return CompiledValue{Kind: TypedValueBool, Bool: x.BoolValue}, nil
 	case *policyv1.Value_IntValue:

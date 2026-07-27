@@ -51,17 +51,6 @@ func typedAttrOpts() []LogOption[*typedAttrLog] {
 		return "", false
 	}
 	return []LogOption[*typedAttrLog]{
-		WithLogValue(func(r *typedAttrLog, ref LogFieldRef) []byte {
-			key, ok := attrPath(ref)
-			if !ok {
-				return nil
-			}
-			v, ok := r.attrs[key]
-			if !ok || v.Kind != TypedValueString {
-				return nil
-			}
-			return []byte(v.Str)
-		}),
 		WithLogExists(func(r *typedAttrLog, ref LogFieldRef) bool {
 			key, ok := attrPath(ref)
 			if !ok {
@@ -282,7 +271,7 @@ func TestTypedFallbackToStringValueAccessor(t *testing.T) {
 
 	rec := &stringOnlyLog{body: "200"}
 	result := EvaluateLog(engine, rec,
-		WithLogValue(func(r *stringOnlyLog, ref LogFieldRef) []byte {
+		withLogStringValue(func(r *stringOnlyLog, ref LogFieldRef) []byte {
 			if ref.AttrScope == AttrScopeRecord && len(ref.AttrPath) > 0 && ref.AttrPath[0] == "status" {
 				return []byte(r.body)
 			}
