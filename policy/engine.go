@@ -86,6 +86,9 @@ func EvaluateLog[T any](e *PolicyEngine, record T, opts ...LogOption[T]) Evaluat
 	var a engine.LogAccessor[T]
 	applyLogOpts(&a, opts)
 	c := &a
+	// Volume is counted before the early returns: the spec counts every record
+	// entering evaluation, including ones with no policies loaded.
+	e.registry.volume.RecordLog()
 	snapshot := e.registry.LogSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -357,6 +360,7 @@ func EvaluateMetric[T any](e *PolicyEngine, metric T, opts ...MetricOption[T]) E
 	var a engine.MetricAccessor[T]
 	applyMetricOpts(&a, opts)
 	c := &a
+	e.registry.volume.RecordMetric()
 	snapshot := e.registry.MetricSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch
@@ -579,6 +583,7 @@ func EvaluateTrace[T any](e *PolicyEngine, span T, opts ...TraceOption[T]) Evalu
 	var a engine.TraceAccessor[T]
 	applyTraceOpts(&a, opts)
 	c := &a
+	e.registry.volume.RecordSpan()
 	snapshot := e.registry.TraceSnapshot()
 	if snapshot == nil || snapshot.matchers == nil {
 		return ResultNoMatch

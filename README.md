@@ -660,6 +660,22 @@ for _, s := range stats {
 }
 ```
 
+### Volume
+
+Per-policy stats only count records a policy matched. Total observed volume —
+the denominator — is counted separately, for every record entering evaluation,
+before any keep or transform stage. Record counts are automatic; byte counts are
+opt-in and must be the uncompressed OTLP protobuf size as received:
+
+```go
+registry.AddLogBytes(int64(logs.Size()))  // optional
+policy.EvaluateLog(engine, record, opts...)
+```
+
+The HTTP and gRPC providers report volume in their sync requests automatically,
+resetting the counters once a sync succeeds and carrying them forward when one
+fails. To read it directly, use `registry.CollectVolume()`.
+
 ## TODO
 
 ### Zero-Allocation Optimizations

@@ -209,7 +209,7 @@ type AnyValue_StringValueStrindex struct {
 	// Profiling signal and process the data as if this value were absent or
 	// empty, ignoring its semantic content for the non-Profiling signal.
 	//
-	// Status: [Development]
+	// Status: [Alpha]
 	StringValueStrindex int32 `protobuf:"varint,8,opt,name=string_value_strindex,json=stringValueStrindex,proto3,oneof"`
 }
 
@@ -336,7 +336,7 @@ func (x *KeyValueList) GetValues() []*KeyValue {
 type KeyValue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The key name of the pair.
-	// key_ref MUST NOT be set if key is used.
+	// key_strindex MUST NOT be set if key is used.
 	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	// The value of the pair.
 	Value *AnyValue `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
@@ -350,7 +350,7 @@ type KeyValue struct {
 	// Profiling signal and process the data as if this value were absent or
 	// empty, ignoring its semantic content for the non-Profiling signal.
 	//
-	// Status: [Development]
+	// Status: [Alpha]
 	KeyStrindex   int32 `protobuf:"varint,3,opt,name=key_strindex,json=keyStrindex,proto3" json:"key_strindex,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
