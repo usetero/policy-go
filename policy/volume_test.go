@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,17 +55,12 @@ func TestVolume_BytesAreOptIn(t *testing.T) {
 // volume without the consumer doing anything.
 func TestVolume_HttpProviderReportsAndResetsOnSuccess(t *testing.T) {
 	var requests []*policyv1.VolumeStats
-	fail := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req policyv1.SyncRequest
 		require.NoError(t, proto.Unmarshal(body, &req))
 		requests = append(requests, req.GetVolume())
 
-		if fail {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
 		out, _ := proto.Marshal(&policyv1.SyncResponse{Hash: "test"})
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(out)
@@ -86,28 +82,91 @@ func TestVolume_HttpProviderReportsAndResetsOnSuccess(t *testing.T) {
 	EvaluateLog(e, &SimpleLogRecord{Body: []byte("hi")}, SimpleLogOptions()...)
 	registry.AddLogBytes(64)
 
-	// This sync fails — counters must be retained, not dropped.
-	fail = true
 	_, err = p.Load()
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Len(t, requests, 2)
 	assert.Equal(t, int64(1), requests[1].GetLogRecords())
 	assert.Equal(t, int64(64), requests[1].GetLogBytes())
 
-	// Next attempt succeeds and includes the retained counters plus new ones.
-	EvaluateLog(e, &SimpleLogRecord{Body: []byte("again")}, SimpleLogOptions()...)
-	fail = false
-	_, err = p.Load()
-	require.NoError(t, err)
-	require.Len(t, requests, 3)
-	assert.Equal(t, int64(2), requests[2].GetLogRecords())
-	assert.Equal(t, int64(64), requests[2].GetLogBytes())
-
 	// The successful sync cleared the counters.
 	_, err = p.Load()
 	require.NoError(t, err)
-	require.Len(t, requests, 4)
-	assert.Nil(t, requests[3])
+	require.Len(t, requests, 3)
+	assert.Nil(t, requests[2])
+}
+
+// Every way a sync can fail must hand the drained volume back, including a 200
+// response that is undecodable or carries an error_message — those paths return
+// after the request is already on the wire.
+func TestVolume_HttpProviderRetainsVolumeOnFailure(t *testing.T) {
+	writeOK := func(w http.ResponseWriter) {
+		out, _ := proto.Marshal(&policyv1.SyncResponse{Hash: "test"})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.Write(out)
+	}
+
+	failures := map[string]func(w http.ResponseWriter){
+		"transport error": func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+		"undecodable 200": func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			w.Write([]byte{0xff, 0xff, 0xff, 0xff})
+		},
+		"200 with error_message": func(w http.ResponseWriter) {
+			out, _ := proto.Marshal(&policyv1.SyncResponse{ErrorMessage: "boom"})
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			w.Write(out)
+		},
+	}
+
+	for name, writeFailure := range failures {
+		t.Run(name, func(t *testing.T) {
+			var requests []*policyv1.VolumeStats
+			fail := false
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var req policyv1.SyncRequest
+				require.NoError(t, proto.Unmarshal(body, &req))
+				requests = append(requests, req.GetVolume())
+
+				if fail {
+					writeFailure(w)
+					return
+				}
+				writeOK(w)
+			}))
+			defer server.Close()
+
+			registry := NewPolicyRegistry()
+			p := NewHttpProvider(server.URL, WithContentType(ContentTypeProtobuf))
+			handle, err := registry.Register(p)
+			require.NoError(t, err)
+			defer handle.Unregister()
+			require.Len(t, requests, 1)
+
+			e := NewPolicyEngine(registry)
+			EvaluateLog(e, &SimpleLogRecord{Body: []byte("hi")}, SimpleLogOptions()...)
+			registry.AddLogBytes(64)
+
+			// The failing sync reports the volume but must not consume it.
+			fail = true
+			_, err = p.Load()
+			require.Error(t, err)
+			require.Len(t, requests, 2)
+			assert.Equal(t, int64(1), requests[1].GetLogRecords())
+			assert.Equal(t, int64(64), requests[1].GetLogBytes())
+
+			// Next attempt reports the retained counters plus anything new.
+			EvaluateLog(e, &SimpleLogRecord{Body: []byte("again")}, SimpleLogOptions()...)
+			fail = false
+			_, err = p.Load()
+			require.NoError(t, err)
+			require.Len(t, requests, 3)
+			assert.Equal(t, int64(2), requests[2].GetLogRecords())
+			assert.Equal(t, int64(64), requests[2].GetLogBytes())
+		})
+	}
 }
 
 func TestVolume_GrpcProviderReportsVolume(t *testing.T) {
@@ -135,6 +194,59 @@ func TestVolume_GrpcProviderReportsVolume(t *testing.T) {
 	vol := server.getLastRequest().GetVolume()
 	assert.Equal(t, int64(1), vol.GetSpans())
 	assert.Equal(t, int64(11), vol.GetSpanBytes())
+}
+
+func TestVolume_GrpcProviderRetainsVolumeOnFailure(t *testing.T) {
+	failures := map[string]func() (*policyv1.SyncResponse, error){
+		"rpc error": func() (*policyv1.SyncResponse, error) {
+			return nil, errors.New("unavailable")
+		},
+		"error_message": func() (*policyv1.SyncResponse, error) {
+			return &policyv1.SyncResponse{ErrorMessage: "boom"}, nil
+		},
+	}
+
+	for name, failure := range failures {
+		t.Run(name, func(t *testing.T) {
+			fail := false
+			server := &mockPolicyServer{}
+			server.setHandler(func(ctx context.Context, req *policyv1.SyncRequest) (*policyv1.SyncResponse, error) {
+				if fail {
+					return failure()
+				}
+				return &policyv1.SyncResponse{Hash: "test"}, nil
+			})
+			addr, cleanup := startTestServer(t, server)
+			defer cleanup()
+
+			registry := NewPolicyRegistry()
+			p := NewGrpcProvider(addr, WithGrpcInsecure(), WithGrpcPollInterval(0))
+			handle, err := registry.Register(p)
+			require.NoError(t, err)
+			defer handle.Unregister()
+			defer p.Stop()
+
+			e := NewPolicyEngine(registry)
+			EvaluateTrace(e, &SimpleSpanRecord{Name: []byte("s")}, SimpleSpanOptions()...)
+			registry.AddSpanBytes(11)
+
+			fail = true
+			_, err = p.Load()
+			require.Error(t, err)
+			vol := server.getLastRequest().GetVolume()
+			assert.Equal(t, int64(1), vol.GetSpans())
+			assert.Equal(t, int64(11), vol.GetSpanBytes())
+
+			// Next attempt reports the retained counters plus anything new.
+			EvaluateTrace(e, &SimpleSpanRecord{Name: []byte("s2")}, SimpleSpanOptions()...)
+			fail = false
+			_, err = p.Load()
+			require.NoError(t, err)
+			vol = server.getLastRequest().GetVolume()
+			assert.Equal(t, int64(2), vol.GetSpans())
+			assert.Equal(t, int64(11), vol.GetSpanBytes())
+		})
+	}
 }
 
 // Overlapping syncs each drain a disjoint delta, so the total reported across
