@@ -41,20 +41,9 @@ func (v *VolumeStats) AddLogBytes(n int64)    { v.logBytes.Add(n) }
 func (v *VolumeStats) AddMetricBytes(n int64) { v.metricBytes.Add(n) }
 func (v *VolumeStats) AddSpanBytes(n int64)   { v.spanBytes.Add(n) }
 
-// Add folds a snapshot back into the counters. Used to return a delta taken by
-// Snapshot after a failed sync: the spec requires the counters to be retained
-// and resent, not dropped.
-func (v *VolumeStats) Add(s VolumeSnapshot) {
-	v.logRecords.Add(s.LogRecords)
-	v.logBytes.Add(s.LogBytes)
-	v.metricDataPoints.Add(s.MetricDataPoints)
-	v.metricBytes.Add(s.MetricBytes)
-	v.spans.Add(s.Spans)
-	v.spanBytes.Add(s.SpanBytes)
-}
-
 // Snapshot atomically reads and resets all counters, returning the delta since
-// the last call.
+// the last call. Reset-on-read is the spec's rule: a delta read into a sync that
+// then fails is lost rather than replayed, so reported volume is a lower bound.
 func (v *VolumeStats) Snapshot() VolumeSnapshot {
 	return VolumeSnapshot{
 		LogRecords:       v.logRecords.Swap(0),

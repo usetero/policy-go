@@ -672,9 +672,12 @@ registry.AddLogBytes(int64(logs.Size()))  // optional
 policy.EvaluateLog(engine, record, opts...)
 ```
 
-The HTTP and gRPC providers report volume in their sync requests automatically,
-resetting the counters once a sync succeeds and carrying them forward when one
-fails. To read it directly, use `registry.CollectVolume()`.
+The HTTP and gRPC providers report volume in their sync requests automatically.
+Counters reset when they are read into a request, whether or not that sync then
+succeeds — the same rule `match_hits` follows, so match rates stay meaningful.
+A failed sync's interval is dropped rather than replayed, which makes reported
+volume a lower bound rather than an exact total. To read it directly, use
+`registry.CollectVolume()`.
 
 ## TODO
 

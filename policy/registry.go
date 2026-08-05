@@ -73,7 +73,7 @@ func (r *PolicyRegistry) Register(provider PolicyProvider) (ProviderHandle, erro
 	// Wire up stats collection
 	provider.SetStatsCollector(r.CollectStats)
 	if vp, ok := provider.(volumeProvider); ok {
-		vp.SetVolumeReporter(r)
+		vp.SetVolumeCollector(r.CollectVolume)
 	}
 
 	// Subscribe to policy updates

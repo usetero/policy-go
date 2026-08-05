@@ -8,22 +8,16 @@ import (
 // VolumeSnapshot is an immutable copy of total observed telemetry volume.
 type VolumeSnapshot = engine.VolumeSnapshot
 
-// VolumeReporter is the seam between the registry's counters and a provider's
-// sync requests: the provider drains the counters into each request and returns
-// them if the sync fails. *PolicyRegistry implements it.
-type VolumeReporter interface {
-	// CollectVolume returns the volume observed since the last call, resetting
-	// the counters.
-	CollectVolume() VolumeSnapshot
-	// AddVolume folds a snapshot back into the counters.
-	AddVolume(VolumeSnapshot)
-}
+// VolumeCollector returns the total telemetry volume observed since the last
+// call, resetting the counters. Registered with providers so they can include it
+// in sync requests.
+type VolumeCollector func() VolumeSnapshot
 
 // volumeProvider is implemented by providers that report observed volume in
 // their sync requests. Optional interface rather than a PolicyProvider method
 // so external provider implementations don't break.
 type volumeProvider interface {
-	SetVolumeReporter(reporter VolumeReporter)
+	SetVolumeCollector(collector VolumeCollector)
 }
 
 // AddLogBytes adds to the reported log byte volume. Records are counted
@@ -39,17 +33,23 @@ func (r *PolicyRegistry) AddMetricBytes(n int64) { r.volume.AddMetricBytes(n) }
 func (r *PolicyRegistry) AddSpanBytes(n int64) { r.volume.AddSpanBytes(n) }
 
 // CollectVolume atomically reads and resets the volume counters, returning the
-// delta since the last call.
+// delta since the last call. This is the VolumeCollector implementation
+// registered with providers.
 func (r *PolicyRegistry) CollectVolume() VolumeSnapshot { return r.volume.Snapshot() }
 
-// AddVolume folds a snapshot back into the volume counters, so a delta taken by
-// CollectVolume for a sync that then failed is reported by the next one.
-func (r *PolicyRegistry) AddVolume(s VolumeSnapshot) { r.volume.Add(s) }
-
-// volumeToProto converts a snapshot for the sync request. An all-zero snapshot
-// returns nil: the spec says implementations that don't track volume should
-// omit the message rather than send a zero-valued one.
-func volumeToProto(s VolumeSnapshot) *policyv1.VolumeStats {
+// collectVolume drains the collector into a proto message for the sync request.
+// The counters reset on read whether or not the sync succeeds, matching
+// collectPolicyStatuses: a failed sync drops its interval from the numerator and
+// the denominator alike, and replaying it would double count.
+//
+// A nil collector or an all-zero snapshot returns nil, since the spec says an
+// implementation that doesn't track volume should omit the message rather than
+// send a zero-valued one.
+func collectVolume(collector VolumeCollector) *policyv1.VolumeStats {
+	if collector == nil {
+		return nil
+	}
+	s := collector()
 	if s.IsZero() {
 		return nil
 	}

@@ -95,10 +95,11 @@ func TestVolume_HttpProviderReportsAndResetsOnSuccess(t *testing.T) {
 	assert.Nil(t, requests[2])
 }
 
-// Every way a sync can fail must hand the drained volume back, including a 200
-// response that is undecodable or carries an error_message — those paths return
-// after the request is already on the wire.
-func TestVolume_HttpProviderRetainsVolumeOnFailure(t *testing.T) {
+// Counters reset when read into a request, whether or not the sync succeeds, so
+// a failed sync's interval is dropped rather than replayed. Replaying would
+// double count (a client can't tell a lost response from an unprocessed sync) and
+// would skew match rates, whose numerator resets on read too.
+func TestVolume_HttpProviderDoesNotReplayFailedSync(t *testing.T) {
 	writeOK := func(w http.ResponseWriter) {
 		out, _ := proto.Marshal(&policyv1.SyncResponse{Hash: "test"})
 		w.Header().Set("Content-Type", "application/x-protobuf")
@@ -149,7 +150,7 @@ func TestVolume_HttpProviderRetainsVolumeOnFailure(t *testing.T) {
 			EvaluateLog(e, &SimpleLogRecord{Body: []byte("hi")}, SimpleLogOptions()...)
 			registry.AddLogBytes(64)
 
-			// The failing sync reports the volume but must not consume it.
+			// The failing sync reports the volume and consumes it.
 			fail = true
 			_, err = p.Load()
 			require.Error(t, err)
@@ -157,14 +158,14 @@ func TestVolume_HttpProviderRetainsVolumeOnFailure(t *testing.T) {
 			assert.Equal(t, int64(1), requests[1].GetLogRecords())
 			assert.Equal(t, int64(64), requests[1].GetLogBytes())
 
-			// Next attempt reports the retained counters plus anything new.
+			// Next attempt reports only what was observed since — no replay.
 			EvaluateLog(e, &SimpleLogRecord{Body: []byte("again")}, SimpleLogOptions()...)
 			fail = false
 			_, err = p.Load()
 			require.NoError(t, err)
 			require.Len(t, requests, 3)
-			assert.Equal(t, int64(2), requests[2].GetLogRecords())
-			assert.Equal(t, int64(64), requests[2].GetLogBytes())
+			assert.Equal(t, int64(1), requests[2].GetLogRecords())
+			assert.Zero(t, requests[2].GetLogBytes(), "the failed sync's bytes must not come back")
 		})
 	}
 }
@@ -196,7 +197,7 @@ func TestVolume_GrpcProviderReportsVolume(t *testing.T) {
 	assert.Equal(t, int64(11), vol.GetSpanBytes())
 }
 
-func TestVolume_GrpcProviderRetainsVolumeOnFailure(t *testing.T) {
+func TestVolume_GrpcProviderDoesNotReplayFailedSync(t *testing.T) {
 	failures := map[string]func() (*policyv1.SyncResponse, error){
 		"rpc error": func() (*policyv1.SyncResponse, error) {
 			return nil, errors.New("unavailable")
@@ -237,14 +238,14 @@ func TestVolume_GrpcProviderRetainsVolumeOnFailure(t *testing.T) {
 			assert.Equal(t, int64(1), vol.GetSpans())
 			assert.Equal(t, int64(11), vol.GetSpanBytes())
 
-			// Next attempt reports the retained counters plus anything new.
+			// Next attempt reports only what was observed since — no replay.
 			EvaluateTrace(e, &SimpleSpanRecord{Name: []byte("s2")}, SimpleSpanOptions()...)
 			fail = false
 			_, err = p.Load()
 			require.NoError(t, err)
 			vol = server.getLastRequest().GetVolume()
-			assert.Equal(t, int64(2), vol.GetSpans())
-			assert.Equal(t, int64(11), vol.GetSpanBytes())
+			assert.Equal(t, int64(1), vol.GetSpans())
+			assert.Zero(t, vol.GetSpanBytes(), "the failed sync's bytes must not come back")
 		})
 	}
 }
@@ -298,7 +299,7 @@ func TestVolume_ConcurrentSyncsDoNotDoubleCount(t *testing.T) {
 	assert.Equal(t, int64(records), reported+registry.CollectVolume().LogRecords)
 }
 
-// A provider that doesn't implement SetVolumeReporter still registers fine.
+// A provider that doesn't implement SetVolumeCollector still registers fine.
 func TestVolume_ProviderWithoutVolumeSupport(t *testing.T) {
 	registry := NewPolicyRegistry()
 	handle, err := registry.Register(newStaticProvider(nil))

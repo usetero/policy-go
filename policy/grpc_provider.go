@@ -103,11 +103,11 @@ func WithGrpcOnSync(fn func()) GrpcProviderOption {
 type GrpcProvider struct {
 	config GrpcProviderConfig
 
-	mu             sync.RWMutex
-	callback       PolicyCallback
-	statsCollector StatsCollector
-	volumeReporter VolumeReporter
-	conn           *grpc.ClientConn
+	mu              sync.RWMutex
+	callback        PolicyCallback
+	statsCollector  StatsCollector
+	volumeCollector VolumeCollector
+	conn            *grpc.ClientConn
 
 	// Sync state
 	lastHash          string
@@ -171,11 +171,11 @@ func (p *GrpcProvider) SetStatsCollector(collector StatsCollector) {
 	p.statsCollector = collector
 }
 
-// SetVolumeReporter registers a volume reporter for sync requests.
-func (p *GrpcProvider) SetVolumeReporter(reporter VolumeReporter) {
+// SetVolumeCollector registers a volume collector for sync requests.
+func (p *GrpcProvider) SetVolumeCollector(collector VolumeCollector) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.volumeReporter = reporter
+	p.volumeCollector = collector
 }
 
 // Stop stops the polling loop and closes the connection.
@@ -292,16 +292,7 @@ func (p *GrpcProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 
 	client := policyv1.NewPolicyServiceClient(conn)
 
-	req, volume := p.buildSyncRequest(fullSync)
-
-	// Unless the sync succeeds, the volume it drained goes back to the registry
-	// for the next attempt to report. Covers every error path below.
-	synced := false
-	defer func() {
-		if !synced {
-			p.returnVolume(volume)
-		}
-	}()
+	req := p.buildSyncRequest(fullSync)
 
 	// Add metadata headers
 	if len(p.config.Headers) > 0 {
@@ -329,32 +320,22 @@ func (p *GrpcProvider) sync(ctx context.Context, fullSync bool) ([]*policyv1.Pol
 	}
 	p.mu.Unlock()
 
-	synced = true
 	return resp.GetPolicies(), nil
 }
 
-// buildSyncRequest returns the request and the volume delta drained into it, so
-// the caller can hand the delta back if the sync fails.
-func (p *GrpcProvider) buildSyncRequest(fullSync bool) (req *policyv1.SyncRequest, volume VolumeSnapshot) {
+func (p *GrpcProvider) buildSyncRequest(fullSync bool) *policyv1.SyncRequest {
 	p.mu.RLock()
 	lastHash := p.lastHash
 	lastTimestamp := p.lastSyncTimestamp
 	statsCollector := p.statsCollector
-	volumeReporter := p.volumeReporter
+	volumeCollector := p.volumeCollector
 	p.mu.RUnlock()
 
-	// The drained volume is returned to the caller, not stored: it lives on the
-	// sync goroutine's stack until the sync succeeds or hands it back, so
-	// concurrent syncs each get a disjoint delta with no lock.
-	if volumeReporter != nil {
-		volume = volumeReporter.CollectVolume()
-	}
-
-	req = &policyv1.SyncRequest{
+	req := &policyv1.SyncRequest{
 		FullSync:                  fullSync,
 		LastSuccessfulHash:        lastHash,
 		LastSyncTimestampUnixNano: lastTimestamp,
-		Volume:                    volumeToProto(volume),
+		Volume:                    collectVolume(volumeCollector),
 	}
 
 	if p.config.ServiceMetadata != nil {
@@ -365,16 +346,5 @@ func (p *GrpcProvider) buildSyncRequest(fullSync bool) (req *policyv1.SyncReques
 		req.PolicyStatuses = collectPolicyStatuses(statsCollector)
 	}
 
-	return req, volume
-}
-
-// returnVolume hands a drained volume delta back to the registry after a failed
-// sync, so the next request reports it.
-func (p *GrpcProvider) returnVolume(volume VolumeSnapshot) {
-	p.mu.RLock()
-	reporter := p.volumeReporter
-	p.mu.RUnlock()
-	if reporter != nil {
-		reporter.AddVolume(volume)
-	}
+	return req
 }
