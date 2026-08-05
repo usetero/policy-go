@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/usetero/policy-go/compare/policy/v1.11.0...policy/v1.12.0) (2026-08-05)
+
+
+### Features
+
+* update to policy spec v1.7.1 ([#104](https://github.com/usetero/policy-go/issues/104)) ([21249e2](https://github.com/usetero/policy-go/commit/21249e27384ec8ab651766a8d1344969f1f6573c))
+
 ## [1.11.0](https://github.com/usetero/policy-go/compare/policy/v1.10.1...policy/v1.11.0) (2026-07-27)
 
 
