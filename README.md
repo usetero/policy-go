@@ -660,6 +660,25 @@ for _, s := range stats {
 }
 ```
 
+### Volume
+
+Per-policy stats only count records a policy matched. Total observed volume —
+the denominator — is counted separately, for every record entering evaluation,
+before any keep or transform stage. Record counts are automatic; byte counts are
+opt-in and must be the uncompressed OTLP protobuf size as received:
+
+```go
+registry.AddLogBytes(int64(logs.Size()))  // optional
+policy.EvaluateLog(engine, record, opts...)
+```
+
+The HTTP and gRPC providers report volume in their sync requests automatically.
+Counters reset when they are read into a request, whether or not that sync then
+succeeds — the same rule `match_hits` follows, so match rates stay meaningful.
+A failed sync's interval is dropped rather than replayed, which makes reported
+volume a lower bound rather than an exact total. To read it directly, use
+`registry.CollectVolume()`.
+
 ## TODO
 
 ### Zero-Allocation Optimizations

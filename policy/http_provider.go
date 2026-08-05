@@ -130,9 +130,10 @@ type HttpProvider struct {
 	config HttpProviderConfig
 	client *http.Client
 
-	mu             sync.RWMutex
-	callback       PolicyCallback
-	statsCollector StatsCollector
+	mu              sync.RWMutex
+	callback        PolicyCallback
+	statsCollector  StatsCollector
+	volumeCollector VolumeCollector
 
 	// Sync state
 	lastHash          string
@@ -200,6 +201,13 @@ func (p *HttpProvider) SetStatsCollector(collector StatsCollector) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.statsCollector = collector
+}
+
+// SetVolumeCollector registers a volume collector for sync requests.
+func (p *HttpProvider) SetVolumeCollector(collector VolumeCollector) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.volumeCollector = collector
 }
 
 // Stop stops the polling loop.
@@ -394,12 +402,14 @@ func (p *HttpProvider) buildSyncRequest(fullSync bool) *policyv1.SyncRequest {
 	lastHash := p.lastHash
 	lastTimestamp := p.lastSyncTimestamp
 	statsCollector := p.statsCollector
+	volumeCollector := p.volumeCollector
 	p.mu.RUnlock()
 
 	req := &policyv1.SyncRequest{
 		FullSync:                  fullSync,
 		LastSuccessfulHash:        lastHash,
 		LastSyncTimestampUnixNano: lastTimestamp,
+		Volume:                    collectVolume(volumeCollector),
 	}
 
 	if p.config.ServiceMetadata != nil {

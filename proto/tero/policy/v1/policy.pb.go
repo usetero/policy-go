@@ -547,6 +547,113 @@ func (x *PolicySyncStatus) GetAdd() *TransformStageStatus {
 	return nil
 }
 
+// VolumeStats reports the total telemetry a client observed since the last
+// sync, regardless of whether any policy matched it. Counts are of records
+// entering policy evaluation, before any keep or transform stage runs.
+//
+// Counters are reset when they are read into a sync request, whether or not
+// that sync then succeeds — the same rule PolicySyncStatus.match_hits and
+// match_misses follow. A failed sync loses its interval from the numerator and
+// the denominator alike, so match rates stay meaningful; counters from a failed
+// sync must never be replayed, since the server cannot tell a replay from new
+// telemetry. Reported volume is a lower bound, not an exact total.
+//
+// Reporting volume is optional, and every field is individually optional: an
+// implementation may report record counts without byte counts, or a subset of
+// signals. Any field left at 0 means "not tracked" as much as it means "none
+// seen", so consumers must not read 0 as an observation.
+//
+// Byte counts, when reported, are the uncompressed OTLP protobuf serialized
+// size of the records as received, and are an estimate; implementations that
+// cannot measure this cheaply may approximate it. A size in any other encoding
+// must not be reported here — leave the field at 0 instead.
+type VolumeStats struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Log records seen, and their total size in bytes.
+	LogRecords int64 `protobuf:"varint,1,opt,name=log_records,json=logRecords,proto3" json:"log_records,omitempty"`
+	LogBytes   int64 `protobuf:"varint,2,opt,name=log_bytes,json=logBytes,proto3" json:"log_bytes,omitempty"`
+	// Metric data points seen, and their total size in bytes.
+	MetricDataPoints int64 `protobuf:"varint,3,opt,name=metric_data_points,json=metricDataPoints,proto3" json:"metric_data_points,omitempty"`
+	MetricBytes      int64 `protobuf:"varint,4,opt,name=metric_bytes,json=metricBytes,proto3" json:"metric_bytes,omitempty"`
+	// Spans seen, and their total size in bytes.
+	Spans         int64 `protobuf:"varint,5,opt,name=spans,proto3" json:"spans,omitempty"`
+	SpanBytes     int64 `protobuf:"varint,6,opt,name=span_bytes,json=spanBytes,proto3" json:"span_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VolumeStats) Reset() {
+	*x = VolumeStats{}
+	mi := &file_tero_policy_v1_policy_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VolumeStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VolumeStats) ProtoMessage() {}
+
+func (x *VolumeStats) ProtoReflect() protoreflect.Message {
+	mi := &file_tero_policy_v1_policy_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VolumeStats.ProtoReflect.Descriptor instead.
+func (*VolumeStats) Descriptor() ([]byte, []int) {
+	return file_tero_policy_v1_policy_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *VolumeStats) GetLogRecords() int64 {
+	if x != nil {
+		return x.LogRecords
+	}
+	return 0
+}
+
+func (x *VolumeStats) GetLogBytes() int64 {
+	if x != nil {
+		return x.LogBytes
+	}
+	return 0
+}
+
+func (x *VolumeStats) GetMetricDataPoints() int64 {
+	if x != nil {
+		return x.MetricDataPoints
+	}
+	return 0
+}
+
+func (x *VolumeStats) GetMetricBytes() int64 {
+	if x != nil {
+		return x.MetricBytes
+	}
+	return 0
+}
+
+func (x *VolumeStats) GetSpans() int64 {
+	if x != nil {
+		return x.Spans
+	}
+	return 0
+}
+
+func (x *VolumeStats) GetSpanBytes() int64 {
+	if x != nil {
+		return x.SpanBytes
+	}
+	return 0
+}
+
 // SyncRequest is sent by clients to request policy updates.
 type SyncRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -560,13 +667,16 @@ type SyncRequest struct {
 	LastSuccessfulHash string `protobuf:"bytes,4,opt,name=last_successful_hash,json=lastSuccessfulHash,proto3" json:"last_successful_hash,omitempty"`
 	// Status of individual policies within this set.
 	PolicyStatuses []*PolicySyncStatus `protobuf:"bytes,5,rep,name=policy_statuses,json=policyStatuses,proto3" json:"policy_statuses,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Optional. Total telemetry observed since the last sync, regardless of
+	// policy match. Clients that do not track volume omit this.
+	Volume        *VolumeStats `protobuf:"bytes,6,opt,name=volume,proto3" json:"volume,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_tero_policy_v1_policy_proto_msgTypes[4]
+	mi := &file_tero_policy_v1_policy_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +688,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_policy_proto_msgTypes[4]
+	mi := &file_tero_policy_v1_policy_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +701,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_policy_proto_rawDescGZIP(), []int{4}
+	return file_tero_policy_v1_policy_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SyncRequest) GetClientMetadata() *ClientMetadata {
@@ -629,6 +739,13 @@ func (x *SyncRequest) GetPolicyStatuses() []*PolicySyncStatus {
 	return nil
 }
 
+func (x *SyncRequest) GetVolume() *VolumeStats {
+	if x != nil {
+		return x.Volume
+	}
+	return nil
+}
+
 // SyncResponse contains policy updates for the client.
 type SyncResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -656,7 +773,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_tero_policy_v1_policy_proto_msgTypes[5]
+	mi := &file_tero_policy_v1_policy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +785,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tero_policy_v1_policy_proto_msgTypes[5]
+	mi := &file_tero_policy_v1_policy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +798,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_tero_policy_v1_policy_proto_rawDescGZIP(), []int{5}
+	return file_tero_policy_v1_policy_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SyncResponse) GetPolicies() []*Policy {
@@ -772,13 +889,23 @@ const file_tero_policy_v1_policy_proto_rawDesc = "" +
 	" \x01(\v2$.tero.policy.v1.TransformStageStatusR\x06remove\x12<\n" +
 	"\x06redact\x18\v \x01(\v2$.tero.policy.v1.TransformStageStatusR\x06redact\x12<\n" +
 	"\x06rename\x18\f \x01(\v2$.tero.policy.v1.TransformStageStatusR\x06rename\x126\n" +
-	"\x03add\x18\r \x01(\v2$.tero.policy.v1.TransformStageStatusR\x03add\"\xb2\x02\n" +
+	"\x03add\x18\r \x01(\v2$.tero.policy.v1.TransformStageStatusR\x03add\"\xd1\x01\n" +
+	"\vVolumeStats\x12\x1f\n" +
+	"\vlog_records\x18\x01 \x01(\x03R\n" +
+	"logRecords\x12\x1b\n" +
+	"\tlog_bytes\x18\x02 \x01(\x03R\blogBytes\x12,\n" +
+	"\x12metric_data_points\x18\x03 \x01(\x03R\x10metricDataPoints\x12!\n" +
+	"\fmetric_bytes\x18\x04 \x01(\x03R\vmetricBytes\x12\x14\n" +
+	"\x05spans\x18\x05 \x01(\x03R\x05spans\x12\x1d\n" +
+	"\n" +
+	"span_bytes\x18\x06 \x01(\x03R\tspanBytes\"\xe7\x02\n" +
 	"\vSyncRequest\x12G\n" +
 	"\x0fclient_metadata\x18\x01 \x01(\v2\x1e.tero.policy.v1.ClientMetadataR\x0eclientMetadata\x12\x1b\n" +
 	"\tfull_sync\x18\x02 \x01(\bR\bfullSync\x12@\n" +
 	"\x1dlast_sync_timestamp_unix_nano\x18\x03 \x01(\x06R\x19lastSyncTimestampUnixNano\x120\n" +
 	"\x14last_successful_hash\x18\x04 \x01(\tR\x12lastSuccessfulHash\x12I\n" +
-	"\x0fpolicy_statuses\x18\x05 \x03(\v2 .tero.policy.v1.PolicySyncStatusR\x0epolicyStatuses\"\x84\x03\n" +
+	"\x0fpolicy_statuses\x18\x05 \x03(\v2 .tero.policy.v1.PolicySyncStatusR\x0epolicyStatuses\x123\n" +
+	"\x06volume\x18\x06 \x01(\v2\x1b.tero.policy.v1.VolumeStatsR\x06volume\"\x84\x03\n" +
 	"\fSyncResponse\x122\n" +
 	"\bpolicies\x18\x01 \x03(\v2\x16.tero.policy.v1.PolicyR\bpolicies\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x127\n" +
@@ -812,7 +939,7 @@ func file_tero_policy_v1_policy_proto_rawDescGZIP() []byte {
 }
 
 var file_tero_policy_v1_policy_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_tero_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_tero_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_tero_policy_v1_policy_proto_goTypes = []any{
 	(PolicyStage)(0),             // 0: tero.policy.v1.PolicyStage
 	(SyncType)(0),                // 1: tero.policy.v1.SyncType
@@ -820,42 +947,44 @@ var file_tero_policy_v1_policy_proto_goTypes = []any{
 	(*ClientMetadata)(nil),       // 3: tero.policy.v1.ClientMetadata
 	(*TransformStageStatus)(nil), // 4: tero.policy.v1.TransformStageStatus
 	(*PolicySyncStatus)(nil),     // 5: tero.policy.v1.PolicySyncStatus
-	(*SyncRequest)(nil),          // 6: tero.policy.v1.SyncRequest
-	(*SyncResponse)(nil),         // 7: tero.policy.v1.SyncResponse
-	(*v1.KeyValue)(nil),          // 8: opentelemetry.proto.common.v1.KeyValue
-	(*LogTarget)(nil),            // 9: tero.policy.v1.LogTarget
-	(*MetricTarget)(nil),         // 10: tero.policy.v1.MetricTarget
-	(*TraceTarget)(nil),          // 11: tero.policy.v1.TraceTarget
-	(*Extension)(nil),            // 12: tero.policy.v1.Extension
-	(*ExtensionCapability)(nil),  // 13: tero.policy.v1.ExtensionCapability
-	(*ExtensionConfig)(nil),      // 14: tero.policy.v1.ExtensionConfig
+	(*VolumeStats)(nil),          // 6: tero.policy.v1.VolumeStats
+	(*SyncRequest)(nil),          // 7: tero.policy.v1.SyncRequest
+	(*SyncResponse)(nil),         // 8: tero.policy.v1.SyncResponse
+	(*v1.KeyValue)(nil),          // 9: opentelemetry.proto.common.v1.KeyValue
+	(*LogTarget)(nil),            // 10: tero.policy.v1.LogTarget
+	(*MetricTarget)(nil),         // 11: tero.policy.v1.MetricTarget
+	(*TraceTarget)(nil),          // 12: tero.policy.v1.TraceTarget
+	(*Extension)(nil),            // 13: tero.policy.v1.Extension
+	(*ExtensionCapability)(nil),  // 14: tero.policy.v1.ExtensionCapability
+	(*ExtensionConfig)(nil),      // 15: tero.policy.v1.ExtensionConfig
 }
 var file_tero_policy_v1_policy_proto_depIdxs = []int32{
-	8,  // 0: tero.policy.v1.Policy.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
-	9,  // 1: tero.policy.v1.Policy.log:type_name -> tero.policy.v1.LogTarget
-	10, // 2: tero.policy.v1.Policy.metric:type_name -> tero.policy.v1.MetricTarget
-	11, // 3: tero.policy.v1.Policy.trace:type_name -> tero.policy.v1.TraceTarget
-	12, // 4: tero.policy.v1.Policy.extensions:type_name -> tero.policy.v1.Extension
+	9,  // 0: tero.policy.v1.Policy.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
+	10, // 1: tero.policy.v1.Policy.log:type_name -> tero.policy.v1.LogTarget
+	11, // 2: tero.policy.v1.Policy.metric:type_name -> tero.policy.v1.MetricTarget
+	12, // 3: tero.policy.v1.Policy.trace:type_name -> tero.policy.v1.TraceTarget
+	13, // 4: tero.policy.v1.Policy.extensions:type_name -> tero.policy.v1.Extension
 	0,  // 5: tero.policy.v1.ClientMetadata.supported_policy_stages:type_name -> tero.policy.v1.PolicyStage
-	8,  // 6: tero.policy.v1.ClientMetadata.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
-	8,  // 7: tero.policy.v1.ClientMetadata.resource_attributes:type_name -> opentelemetry.proto.common.v1.KeyValue
-	13, // 8: tero.policy.v1.ClientMetadata.supported_extensions:type_name -> tero.policy.v1.ExtensionCapability
+	9,  // 6: tero.policy.v1.ClientMetadata.labels:type_name -> opentelemetry.proto.common.v1.KeyValue
+	9,  // 7: tero.policy.v1.ClientMetadata.resource_attributes:type_name -> opentelemetry.proto.common.v1.KeyValue
+	14, // 8: tero.policy.v1.ClientMetadata.supported_extensions:type_name -> tero.policy.v1.ExtensionCapability
 	4,  // 9: tero.policy.v1.PolicySyncStatus.remove:type_name -> tero.policy.v1.TransformStageStatus
 	4,  // 10: tero.policy.v1.PolicySyncStatus.redact:type_name -> tero.policy.v1.TransformStageStatus
 	4,  // 11: tero.policy.v1.PolicySyncStatus.rename:type_name -> tero.policy.v1.TransformStageStatus
 	4,  // 12: tero.policy.v1.PolicySyncStatus.add:type_name -> tero.policy.v1.TransformStageStatus
 	3,  // 13: tero.policy.v1.SyncRequest.client_metadata:type_name -> tero.policy.v1.ClientMetadata
 	5,  // 14: tero.policy.v1.SyncRequest.policy_statuses:type_name -> tero.policy.v1.PolicySyncStatus
-	2,  // 15: tero.policy.v1.SyncResponse.policies:type_name -> tero.policy.v1.Policy
-	1,  // 16: tero.policy.v1.SyncResponse.sync_type:type_name -> tero.policy.v1.SyncType
-	14, // 17: tero.policy.v1.SyncResponse.extension_configs:type_name -> tero.policy.v1.ExtensionConfig
-	6,  // 18: tero.policy.v1.PolicyService.Sync:input_type -> tero.policy.v1.SyncRequest
-	7,  // 19: tero.policy.v1.PolicyService.Sync:output_type -> tero.policy.v1.SyncResponse
-	19, // [19:20] is the sub-list for method output_type
-	18, // [18:19] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	6,  // 15: tero.policy.v1.SyncRequest.volume:type_name -> tero.policy.v1.VolumeStats
+	2,  // 16: tero.policy.v1.SyncResponse.policies:type_name -> tero.policy.v1.Policy
+	1,  // 17: tero.policy.v1.SyncResponse.sync_type:type_name -> tero.policy.v1.SyncType
+	15, // 18: tero.policy.v1.SyncResponse.extension_configs:type_name -> tero.policy.v1.ExtensionConfig
+	7,  // 19: tero.policy.v1.PolicyService.Sync:input_type -> tero.policy.v1.SyncRequest
+	8,  // 20: tero.policy.v1.PolicyService.Sync:output_type -> tero.policy.v1.SyncResponse
+	20, // [20:21] is the sub-list for method output_type
+	19, // [19:20] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_tero_policy_v1_policy_proto_init() }
@@ -878,7 +1007,7 @@ func file_tero_policy_v1_policy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tero_policy_v1_policy_proto_rawDesc), len(file_tero_policy_v1_policy_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

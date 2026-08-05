@@ -38,6 +38,7 @@ type PolicyRegistry struct {
 	nextId         atomic.Uint64
 	providers      map[ProviderId]*providerEntry
 	stats          map[string]*engine.PolicyStats
+	volume         engine.VolumeStats
 	compileErrors  map[string][]string
 	logSnapshot    *LogSnapshot
 	metricSnapshot *MetricSnapshot
@@ -71,6 +72,9 @@ func (r *PolicyRegistry) Register(provider PolicyProvider) (ProviderHandle, erro
 
 	// Wire up stats collection
 	provider.SetStatsCollector(r.CollectStats)
+	if vp, ok := provider.(volumeProvider); ok {
+		vp.SetVolumeCollector(r.CollectVolume)
+	}
 
 	// Subscribe to policy updates
 	err := provider.Subscribe(func(policies []*policyv1.Policy) {

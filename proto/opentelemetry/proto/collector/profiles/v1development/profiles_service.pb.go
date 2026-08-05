@@ -36,6 +36,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Status: [Alpha]
 type ExportProfilesServiceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// An array of ResourceProfiles.
@@ -94,6 +95,7 @@ func (x *ExportProfilesServiceRequest) GetDictionary() *v1development.ProfilesDi
 	return nil
 }
 
+// Status: [Alpha]
 type ExportProfilesServiceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The details of a partially successful export request.
@@ -153,6 +155,7 @@ func (x *ExportProfilesServiceResponse) GetPartialSuccess() *ExportProfilesParti
 	return nil
 }
 
+// Status: [Alpha]
 type ExportProfilesPartialSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The number of rejected profiles.
