@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0](https://github.com/usetero/policy-go/compare/policy/v1.10.1...policy/v1.11.0) (2026-07-27)
+
+
+### Features
+
+* deprecate old methods and use typed everywhere ([#95](https://github.com/usetero/policy-go/issues/95)) ([13d2eda](https://github.com/usetero/policy-go/commit/13d2eda95ea13da6dea8209fa9834cee21afcbea))
+
+
+### Bug Fixes
+
+* **deps:** consolidated dependency updates ([#100](https://github.com/usetero/policy-go/issues/100)) ([a148d59](https://github.com/usetero/policy-go/commit/a148d59b59abd0e0b61456da56ce5e1f845286c9))
+
 ## [1.10.1](https://github.com/usetero/policy-go/compare/policy/v1.10.0...policy/v1.10.1) (2026-07-01)
 
 
