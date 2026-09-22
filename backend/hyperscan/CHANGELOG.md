@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.3](https://github.com/usetero/policy-go/compare/backend/hyperscan/v1.10.2...backend/hyperscan/v1.10.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* **deps:** update grpc to v1.83.2 and consolidate dependency updates ([#108](https://github.com/usetero/policy-go/issues/108)) ([f5d3f6e](https://github.com/usetero/policy-go/commit/f5d3f6e637ed6f6724ecf3359780c8ca2cb0559e))
+
 ## [1.10.2](https://github.com/usetero/policy-go/compare/backend/hyperscan/v1.10.1...backend/hyperscan/v1.10.2) (2026-07-27)
 
 
